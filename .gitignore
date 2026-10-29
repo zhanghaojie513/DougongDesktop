@@ -1,0 +1,26 @@
+# 构建产物
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+
+# 设计稿的临时产物（保留 .html/.png 源文件，忽略生成中间物）
+design-demos/__pycache__/
+*.pyc
+
+# 原型验证的临时输出
+prototype/__pycache__/
+prototype/.cache/
+
+# IDE
+.vs/
+.idea/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log

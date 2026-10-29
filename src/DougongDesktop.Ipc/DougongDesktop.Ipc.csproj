@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 纯契约层：IPC 消息类型。不引用 Dougong.*，也不引用任何 UI 技术栈。
+       UI 层与框架层都只依赖这里，因此两者之间没有编译期耦合。 -->
+  <PropertyGroup>
+    <Description>Dougong Desktop 的进程间契约：会话、回合、条目、审批与终端消息</Description>
+  </PropertyGroup>
+
+</Project>

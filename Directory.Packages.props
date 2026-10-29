@@ -1,0 +1,25 @@
+<Project>
+
+  <!-- 集中包版本管理。Avalonia 必须精确 12.1.4：TKCode.Arc 用
+       <dependency version="[12.1.4]" /> 精确锁定，引任何其它版本都会
+       报 NU1605（错误，不是警告），见 docs/arc-integration.md。 -->
+  <ItemGroup>
+    <PackageVersion Include="Avalonia" Version="12.1.4" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.4" />
+    <PackageVersion Include="Avalonia.Diagnostics" Version="12.1.4" />
+
+    <PackageVersion Include="TKCode.Arc" Version="0.3.2-preview.1" />
+    <PackageVersion Include="TKCode.Arc.Fonts" Version="0.3.2-preview.1" />
+
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+
+    <!-- Dougong SDK：来自 nuget.org。版本写死，与 SDK 仓库的发布节奏解耦——
+         升级时只改这里一行，而不是跟着 SDK 的 main 分支漂。 -->
+    <PackageVersion Include="Dougong.Agent" Version="0.1.0-alpha.2" />
+    <PackageVersion Include="Dougong.Ai" Version="0.1.0-alpha.2" />
+    <PackageVersion Include="Dougong.Hosting" Version="0.1.0-alpha.2" />
+  </ItemGroup>
+
+</Project>

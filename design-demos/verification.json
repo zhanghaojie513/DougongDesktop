@@ -1,0 +1,801 @@
+{
+  "date": "2026-10-30",
+  "scope": "HTML交互演示；不验证真实引擎",
+  "directions": [
+    {
+      "file": "dir-1.html",
+      "viewports": [
+        {
+          "width": 1440,
+          "height": 900,
+          "horizontal_overflow": false
+        },
+        {
+          "width": 1280,
+          "height": 800,
+          "horizontal_overflow": false
+        },
+        {
+          "width": 375,
+          "height": 812,
+          "horizontal_overflow": false
+        }
+      ],
+      "console_errors": [],
+      "buttons": [
+        {
+          "text": "新建会话Ctrl N",
+          "id": "new-session",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "搜索与命令Ctrl K",
+          "id": "command-open",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "插件",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "view": "plugins"
+          }
+        },
+        {
+          "text": "＋",
+          "id": "workspace-info",
+          "title": "工作区说明",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "Dougong Desktop",
+          "id": "workspace-toggle",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "梳理项目结构 现在",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "view": "conversation"
+          }
+        },
+        {
+          "text": "检查 IPC 消息契约",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "session": "review"
+          }
+        },
+        {
+          "text": "从这里开始",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "session": "startup"
+          }
+        },
+        {
+          "text": "Dougong SDK",
+          "id": "secondary-workspace",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "等待审批12.4 秒",
+          "id": "status-capsule",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "设置",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "view": "settings"
+          }
+        },
+        {
+          "text": "",
+          "id": "collapse-sidebar",
+          "title": "折叠侧栏",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "",
+          "id": "reset-demo",
+          "title": "重置演示",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "允许一次",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "approval": "once"
+          }
+        },
+        {
+          "text": "本会话允许",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "approval": "session"
+          }
+        },
+        {
+          "text": "拒绝",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "approval": "deny"
+          }
+        },
+        {
+          "text": "拒绝并停止",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "approval": "stop"
+          }
+        },
+        {
+          "text": "自定义提供商 / 示例模型",
+          "id": "model-button",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "",
+          "id": "send-message",
+          "title": "发送消息",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "",
+          "id": "close-inspector",
+          "title": "收起右栏",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "查看示例预览",
+          "id": "preview-file",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "",
+          "id": "",
+          "title": "文件",
+          "aria": null,
+          "data": {
+            "dock": "files"
+          }
+        },
+        {
+          "text": "",
+          "id": "",
+          "title": "改动",
+          "aria": null,
+          "data": {
+            "dock": "changes"
+          }
+        },
+        {
+          "text": "",
+          "id": "",
+          "title": "计划",
+          "aria": null,
+          "data": {
+            "dock": "plan"
+          }
+        },
+        {
+          "text": "",
+          "id": "",
+          "title": "上下文",
+          "aria": null,
+          "data": {
+            "dock": "context"
+          }
+        },
+        {
+          "text": "",
+          "id": "",
+          "title": "终端",
+          "aria": null,
+          "data": {
+            "dock": "terminal"
+          }
+        },
+        {
+          "text": "",
+          "id": "prototype-info",
+          "title": "关于原型",
+          "aria": null,
+          "data": {}
+        }
+      ],
+      "commands_visible": true,
+      "initial_input_locked": true,
+      "approval_branches": [
+        {
+          "decision": "once",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "session",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "deny",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "stop",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        }
+      ],
+      "dock_tabs": [
+        "files",
+        "changes",
+        "plan",
+        "context",
+        "terminal"
+      ],
+      "terminal_placeholder": true,
+      "plugins_page": true,
+      "simulated_connection": true,
+      "pet_toggle_clicked": true,
+      "status_expands": true,
+      "sidebar_collapsed": true
+    },
+    {
+      "file": "dir-2.html",
+      "viewports": [
+        {
+          "width": 1440,
+          "height": 900,
+          "horizontal_overflow": false
+        },
+        {
+          "width": 1280,
+          "height": 800,
+          "horizontal_overflow": false
+        },
+        {
+          "width": 375,
+          "height": 812,
+          "horizontal_overflow": false
+        }
+      ],
+      "console_errors": [],
+      "buttons": [
+        {
+          "text": "",
+          "id": "collapse",
+          "title": "折叠侧栏",
+          "aria": "折叠侧栏",
+          "data": {}
+        },
+        {
+          "text": "搜索与命令⌃ K",
+          "id": "search",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "Dougong Desktop⌄",
+          "id": "projectToggle",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "梳理项目结构",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "session": "梳理项目结构"
+          }
+        },
+        {
+          "text": "检查 IPC 消息契约",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "session": "检查 IPC 消息契约"
+          }
+        },
+        {
+          "text": "准备 UI 骨架",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "session": "准备 UI 骨架"
+          }
+        },
+        {
+          "text": "Dougong SDK›",
+          "id": "sdkProject",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "新建会话",
+          "id": "newSession",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "等待审批12.4 秒",
+          "id": "runCapsule",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "插件管理",
+          "id": "pluginsNav",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "设置",
+          "id": "settingsNav",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "",
+          "id": "toggleDock",
+          "title": "",
+          "aria": "切换右栏",
+          "data": {}
+        },
+        {
+          "text": "",
+          "id": "more",
+          "title": "",
+          "aria": "会话命令",
+          "data": {}
+        },
+        {
+          "text": "允许一次",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "decision": "once"
+          }
+        },
+        {
+          "text": "本会话允许",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "decision": "session"
+          }
+        },
+        {
+          "text": "拒绝",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "decision": "deny"
+          }
+        },
+        {
+          "text": "拒绝并停止",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "decision": "stop"
+          }
+        },
+        {
+          "text": "● 自定义模型 ⌄",
+          "id": "modelButton",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "",
+          "id": "send",
+          "title": "",
+          "aria": "发送消息",
+          "data": {}
+        },
+        {
+          "text": "文件",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "tab": "files"
+          }
+        },
+        {
+          "text": "改动",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "tab": "changes"
+          }
+        },
+        {
+          "text": "计划",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "tab": "plan"
+          }
+        },
+        {
+          "text": "上下文",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "tab": "context"
+          }
+        },
+        {
+          "text": "终端",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "tab": "terminal"
+          }
+        },
+        {
+          "text": "C# Protocol.cs当前",
+          "id": "protocolFile",
+          "title": "",
+          "aria": null,
+          "data": {}
+        }
+      ],
+      "commands_visible": true,
+      "initial_input_locked": true,
+      "approval_branches": [
+        {
+          "decision": "once",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "session",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "deny",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "stop",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        }
+      ],
+      "dock_tabs": [
+        "files",
+        "changes",
+        "plan",
+        "context",
+        "terminal"
+      ],
+      "terminal_placeholder": true,
+      "plugins_page": true,
+      "simulated_connection": true,
+      "pet_toggle_clicked": true,
+      "status_expands": true,
+      "sidebar_collapsed": true
+    },
+    {
+      "file": "dir-3.html",
+      "viewports": [
+        {
+          "width": 1440,
+          "height": 900,
+          "horizontal_overflow": false
+        },
+        {
+          "width": 1280,
+          "height": 800,
+          "horizontal_overflow": false
+        },
+        {
+          "width": 375,
+          "height": 812,
+          "horizontal_overflow": false
+        }
+      ],
+      "console_errors": [],
+      "buttons": [
+        {
+          "text": "新建会话",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "action": "new"
+          }
+        },
+        {
+          "text": "搜索与命令Ctrl K",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "action": "commands"
+          }
+        },
+        {
+          "text": "梳理项目结构现在",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "view": "conversation"
+          }
+        },
+        {
+          "text": "了解会话恢复流程",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "action": "history"
+          }
+        },
+        {
+          "text": "阅读插件接入方案",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "action": "history"
+          }
+        },
+        {
+          "text": "dougong-sdk⌄",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "action": "workspace"
+          }
+        },
+        {
+          "text": "等待审批12.4 秒 · 已暂停计时",
+          "id": "capsule",
+          "title": "",
+          "aria": null,
+          "data": {}
+        },
+        {
+          "text": "插件管理",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "view": "plugins"
+          }
+        },
+        {
+          "text": "设置",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "view": "settings"
+          }
+        },
+        {
+          "text": "收起侧栏",
+          "id": "collapse",
+          "title": "折叠侧栏",
+          "aria": "折叠侧栏",
+          "data": {}
+        },
+        {
+          "text": "",
+          "id": "",
+          "title": "新建会话",
+          "aria": "新建会话",
+          "data": {
+            "action": "new"
+          }
+        },
+        {
+          "text": "",
+          "id": "toggleDock",
+          "title": "切换右栏",
+          "aria": "切换右栏",
+          "data": {}
+        },
+        {
+          "text": "允许一次",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "decision": "once"
+          }
+        },
+        {
+          "text": "本会话允许",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "decision": "session"
+          }
+        },
+        {
+          "text": "拒绝",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "decision": "deny"
+          }
+        },
+        {
+          "text": "拒绝并停止",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "decision": "stop"
+          }
+        },
+        {
+          "text": "",
+          "id": "send",
+          "title": "",
+          "aria": "发送消息",
+          "data": {}
+        },
+        {
+          "text": "文件",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "dock": "files"
+          }
+        },
+        {
+          "text": "改动",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "dock": "changes"
+          }
+        },
+        {
+          "text": "计划",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "dock": "plan"
+          }
+        },
+        {
+          "text": "上下文",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "dock": "context"
+          }
+        },
+        {
+          "text": "终端",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "dock": "terminal"
+          }
+        },
+        {
+          "text": "隐藏榫灵",
+          "id": "",
+          "title": "",
+          "aria": null,
+          "data": {
+            "action": "hidepet"
+          }
+        }
+      ],
+      "commands_visible": true,
+      "initial_input_locked": true,
+      "approval_branches": [
+        {
+          "decision": "once",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "session",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "deny",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        },
+        {
+          "decision": "stop",
+          "input_unlocked": true,
+          "remaining_actionable_approvals": 0
+        }
+      ],
+      "dock_tabs": [
+        "files",
+        "changes",
+        "plan",
+        "context",
+        "terminal"
+      ],
+      "terminal_placeholder": true,
+      "plugins_page": true,
+      "simulated_connection": true,
+      "pet_toggle_clicked": true,
+      "status_expands": true,
+      "sidebar_collapsed": true
+    }
+  ]
+}

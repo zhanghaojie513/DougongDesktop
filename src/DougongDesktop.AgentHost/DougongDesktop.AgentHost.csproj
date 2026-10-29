@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- AgentHost：独立进程宿主。承载框架层 + IPC 服务端。
+       必须 JIT：SDK 用 AssemblyLoadContext 做动态插件加载，SDK 本身也没有
+       IsAotCompatible 声明，开 AOT 会在运行期炸在插件加载上。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Description>Dougong Desktop 引擎宿主：内嵌 SDK，对桌面端提供本地 IPC</Description>
+    <!-- 显式关闭 AOT/裁剪：不是因为不需要性能，而是 SDK 依赖动态加载。 -->
+    <PublishAot>false</PublishAot>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DougongDesktop.Ipc\DougongDesktop.Ipc.csproj" />
+    <ProjectReference Include="..\DougongDesktop.Framework\DougongDesktop.Framework.csproj" />
+  </ItemGroup>
+
+</Project>

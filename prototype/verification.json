@@ -1,0 +1,227 @@
+{
+  "date": "2026-10-30",
+  "checks": [
+    {
+      "check": "approval locks input",
+      "pass": true
+    },
+    {
+      "check": "four approval actions visible",
+      "pass": true
+    },
+    {
+      "check": "decision once",
+      "pass": true
+    },
+    {
+      "check": "decision session",
+      "pass": true
+    },
+    {
+      "check": "decision deny",
+      "pass": true
+    },
+    {
+      "check": "decision stop",
+      "pass": true
+    },
+    {
+      "check": "messages survive page navigation",
+      "pass": true
+    },
+    {
+      "check": "dock files",
+      "pass": true
+    },
+    {
+      "check": "dock changes",
+      "pass": true
+    },
+    {
+      "check": "dock plan",
+      "pass": true
+    },
+    {
+      "check": "dock terminal",
+      "pass": true
+    },
+    {
+      "check": "terminal honest placeholder",
+      "pass": true
+    },
+    {
+      "check": "plan rows aligned vertically",
+      "pass": true
+    },
+    {
+      "check": "no standalone context dock",
+      "pass": true
+    },
+    {
+      "check": "context opens beside model",
+      "pass": true
+    },
+    {
+      "check": "context closes with Escape",
+      "pass": true
+    },
+    {
+      "check": "scenario expired",
+      "pass": true
+    },
+    {
+      "check": "no stale approval expired",
+      "pass": true
+    },
+    {
+      "check": "scenario unknown",
+      "pass": true
+    },
+    {
+      "check": "no stale approval unknown",
+      "pass": true
+    },
+    {
+      "check": "scenario failed",
+      "pass": true
+    },
+    {
+      "check": "no stale approval failed",
+      "pass": true
+    },
+    {
+      "check": "scenario disconnected",
+      "pass": true
+    },
+    {
+      "check": "no stale approval disconnected",
+      "pass": true
+    },
+    {
+      "check": "reconnection preserves unknown result",
+      "pass": true
+    },
+    {
+      "check": "lossy compaction notice",
+      "pass": true
+    },
+    {
+      "check": "failed compaction does not claim applied",
+      "pass": true
+    },
+    {
+      "check": "UI plugin failure retains workspace",
+      "pass": true
+    },
+    {
+      "check": "untrusted plugin cannot load",
+      "pass": true
+    },
+    {
+      "check": "local plugin simulation loaded",
+      "pass": true
+    },
+    {
+      "check": "plugin toggles",
+      "pass": true
+    },
+    {
+      "check": "plugin unloaded",
+      "pass": true
+    },
+    {
+      "check": "capacity validation",
+      "pass": true
+    },
+    {
+      "check": "simulated connection marked",
+      "pass": true
+    },
+    {
+      "check": "provider added",
+      "pass": true
+    },
+    {
+      "check": "unused provider deleted",
+      "pass": true
+    },
+    {
+      "check": "pet may be hidden",
+      "pass": true
+    },
+    {
+      "check": "layout preferences persist",
+      "pass": true
+    },
+    {
+      "check": "command search filters",
+      "pass": true
+    },
+    {
+      "check": "keyboard opens command palette",
+      "pass": true
+    },
+    {
+      "check": "onboarding completes",
+      "pass": true
+    },
+    {
+      "check": "restored unknown tools are not replayed",
+      "pass": true
+    },
+    {
+      "check": "new session starts idle",
+      "pass": true
+    },
+    {
+      "check": "new task produces approval",
+      "pass": true
+    },
+    {
+      "check": "sessions switch independently",
+      "pass": true
+    },
+    {
+      "check": "viewport 1440 no horizontal overflow",
+      "pass": true
+    },
+    {
+      "check": "viewport 1440 approval usable",
+      "pass": true
+    },
+    {
+      "check": "viewport 1280 no horizontal overflow",
+      "pass": true
+    },
+    {
+      "check": "viewport 1280 approval usable",
+      "pass": true
+    },
+    {
+      "check": "viewport 1024 no horizontal overflow",
+      "pass": true
+    },
+    {
+      "check": "viewport 1024 approval usable",
+      "pass": true
+    },
+    {
+      "check": "viewport 375 no horizontal overflow",
+      "pass": true
+    },
+    {
+      "check": "viewport 375 approval usable",
+      "pass": true
+    },
+    {
+      "check": "splitter drag persisted",
+      "pass": true
+    },
+    {
+      "check": "zero page errors",
+      "pass": true
+    }
+  ],
+  "page_errors": [],
+  "scope": "HTML原型模拟；未连接真实模型、插件、凭据或文件系统"
+}

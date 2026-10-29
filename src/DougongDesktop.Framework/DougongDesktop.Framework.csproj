@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 框架层：内嵌 Dougong SDK 的 agent 引擎，负责把 SDK 的事件投影成 IPC 契约。
+       这里不允许出现任何 UI 技术栈引用（Avalonia / TKCode / Arc 一律禁止）——
+       由 tests/ 下的架构守卫断言，而不是靠约定。 -->
+  <PropertyGroup>
+    <Description>Dougong Desktop 框架层：会话运行时、审批桥接与 SDK 组装</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DougongDesktop.Ipc\DougongDesktop.Ipc.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Dougong SDK：全部来自 nuget.org，不使用 ProjectReference 指向 SDK 仓库。
+         跨仓 ProjectReference 会破坏 docs/architecture.md §2.1 的边界，
+         也会把本项目拉进 SDK 的构建图。 -->
+    <PackageReference Include="Dougong.Agent" />
+    <PackageReference Include="Dougong.Ai" />
+    <PackageReference Include="Dougong.Hosting" />
+  </ItemGroup>
+
+</Project>
