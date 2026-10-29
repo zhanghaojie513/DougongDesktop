@@ -28,9 +28,12 @@ public sealed class IpcServer : IAsyncDisposable
 
     private IpcConnection? _client;
 
-    public IpcServer(SessionComposer composer, string workspace)
+    private readonly EngineOptions _options;
+
+    public IpcServer(SessionComposer composer, EngineOptions options, string workspace)
     {
         _composer = composer;
+        _options = options;
         _workspace = workspace;
     }
 
@@ -207,6 +210,8 @@ public sealed class IpcServer : IAsyncDisposable
             CreateApprover(connection),
             evt => connection.SendAsync(evt, cancellationToken),
             NextStatusSequence,
+            _options.ContextWindowTokens,
+            _options.MaxOutputTokens,
             cancellationToken).ConfigureAwait(false);
 
         _sessions[sessionId] = runtime;

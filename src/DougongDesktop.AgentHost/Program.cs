@@ -53,19 +53,44 @@ if (options is null)
           DOUGONG_PROVIDER_MODEL     模型名
           DOUGONG_PROVIDER_KEY       密钥
 
+        可选（启用上下文压缩）：
+          DOUGONG_CONTEXT_WINDOW     模型窗口 token 数；不设则按模型名推断
+          DOUGONG_MAX_OUTPUT         单次输出上限，默认 4096
+
         引擎会在没有配置的情况下启动，但任何对话都会失败。
         这样 UI 仍然能启动并显示"未配置"状态，而不是整个崩掉。
         """);
 }
 
-using var composer = new SessionComposer(options ?? new EngineOptions
+// 未配置时不构造真实连接器——SessionComposer 会在缺密钥时抛错，
+// 那会让 Host 直接退出，UI 连不上。用占位配置让引擎活着，
+// 代价是任何会话都会在创建时失败并回报明确原因。
+options ??= new EngineOptions
 {
     BaseUrl = "https://invalid.invalid",
     Model = "(未配置)",
+    ApiKey = null,
+    ContextWindowTokens = 0,
     Workspace = workspace,
-});
+};
 
-await using var server = new IpcServer(composer, workspace);
+// 容量配置自洽性校验：SDK 的预算计算在负数时直接抛
+// ArgumentOutOfRangeException，而那发生在每轮调模型之前——
+// 用户看到的是"第一次对话就崩"，完全看不出是配置问题。
+// 所以在这里提前拦下，给出能看懂的话。
+try
+{
+    options.Validate();
+}
+catch (InvalidOperationException ex)
+{
+    Console.Error.WriteLine($"[host] 配置错误：{ex.Message}");
+    return 2;
+}
+
+using var composer = new SessionComposer(options);
+
+await using var server = new IpcServer(composer, options, workspace);
 
 using var shutdown = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
