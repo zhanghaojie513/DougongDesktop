@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- UI 进程。**JIT，不是 AOT**：要能加载 UI 插件（IDesktopUiExtension），
+       而 AssemblyLoadContext 与 NativeAOT 不兼容。代价见实施方案 §3.4。
+
+       禁止引用 Dougong.*：App 只依赖 Ipc 契约，由架构守卫断言。 -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <Description>Dougong Desktop 桌面端</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- 明确关闭 AOT：不是忘记开，是为了支持 UI 插件 -->
+    <PublishAot>false</PublishAot>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DougongDesktop.Ipc\DougongDesktop.Ipc.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+
+    <PackageReference Include="TKCode.Arc" />
+    <PackageReference Include="TKCode.Arc.Fonts" />
+    <PackageReference Include="TKCode.Arc.Special" />
+    <PackageReference Include="TKCode.Arc.Blocks" />
+  </ItemGroup>
+
+</Project>

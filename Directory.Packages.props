@@ -8,10 +8,13 @@
     <PackageVersion Include="Avalonia.Desktop" Version="12.1.4" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.4" />
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.4" />
-    <PackageVersion Include="Avalonia.Diagnostics" Version="12.1.4" />
 
     <PackageVersion Include="TKCode.Arc" Version="0.3.2-preview.1" />
     <PackageVersion Include="TKCode.Arc.Fonts" Version="0.3.2-preview.1" />
+    <!-- agent 组件不在主包：ToolCall/AgentStatus/AgentPlan/ContextWindow 在 Special，
+         Sidebar/CommandPalette/ModelPicker 在 Blocks。见 docs/arc-integration.md -->
+    <PackageVersion Include="TKCode.Arc.Special" Version="0.3.2-preview.1" />
+    <PackageVersion Include="TKCode.Arc.Blocks" Version="0.3.2-preview.1" />
 
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
 

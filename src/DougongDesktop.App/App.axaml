@@ -1,0 +1,9 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="DougongDesktop.App.App"
+             RequestedThemeVariant="Default">
+  <!-- 主题由 Arc 自己管（ArcTheme.Apply），这里不挂 FluentTheme——
+       两者同时存在会互相覆盖 token。 -->
+  <Application.Styles>
+  </Application.Styles>
+</Application>

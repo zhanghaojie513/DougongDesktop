@@ -1,0 +1,69 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:arc="https://github.com/AIDotNet/TKCode.Arc"
+        x:Class="DougongDesktop.App.Views.ArcProbeWindow"
+        Title="Arc 最小验证"
+        Width="720" Height="640" WindowStartupLocation="CenterScreen">
+
+  <!--
+    P2 的目标是"确认 Arc 真能用"，不是做界面。
+    每一项都是一条判据：样式生效 / 流式能跑 / 组件存在。
+    任何一项失败，都在这里暴露，而不是等堆完界面才发现。
+  -->
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="20" Spacing="16" MaxWidth="660">
+
+      <TextBlock Text="P2 · Arc 最小验证"
+                 FontSize="20" FontWeight="SemiBold"/>
+
+      <!-- 1. 样式生效：如果 UseArcControls() 没生效，按钮会是裸 Avalonia 外观 -->
+      <arc:Card Title="1. 基础控件（验证样式生效）">
+        <StackPanel Spacing="12" Margin="0,12,0,0">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <arc:Button Content="主操作"/>
+            <arc:Button Content="次要" Variant="Secondary"/>
+            <arc:Button Content="禁用" IsEnabled="False"/>
+          </StackPanel>
+          <arc:Switch Content="开关（双向绑定）" IsChecked="True"/>
+          <arc:Input Label="输入框" Text="Hello Dougong"
+                     Description="Description 用于补充说明"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <arc:Badge Content="成功" Tone="Success"/>
+            <arc:Badge Content="警告" Tone="Warning"/>
+            <arc:Badge Content="危险" Tone="Danger"/>
+          </StackPanel>
+        </StackPanel>
+      </arc:Card>
+
+      <!-- 2. 流式 Markdown：Stream 属性 + Complete()，不是 Append -->
+      <arc:Card Title="2. Markdown 流式渲染">
+        <StackPanel Spacing="8" Margin="0,12,0,0">
+          <arc:Markdown x:Name="StreamingMarkdown" Height="180"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <arc:Button Content="开始流式" Click="OnStartStream"/>
+            <arc:Button Content="完成" Variant="Secondary" Click="OnCompleteStream"/>
+          </StackPanel>
+        </StackPanel>
+      </arc:Card>
+
+      <!-- 3. 表格：插件列表的原型（自定义单元格是关键） -->
+      <arc:Card Title="3. Table（插件列表原型）">
+        <StackPanel Spacing="8" Margin="0,12,0,0">
+          <TextBlock Text="验证自定义单元格：图标 + 文本 + 开关 + 徽章能放进一行"
+                     FontSize="12" Opacity="0.7"/>
+          <arc:Table x:Name="ProbeTable" IsSelectable="True"/>
+        </StackPanel>
+      </arc:Card>
+
+      <!-- 4. 主题切换 -->
+      <arc:Card Title="4. 主题">
+        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+          <arc:Button Content="浅色" Click="OnLightTheme"/>
+          <arc:Button Content="深色" Click="OnDarkTheme"/>
+          <arc:Button Content="跟随系统" Variant="Secondary" Click="OnSystemTheme"/>
+        </StackPanel>
+      </arc:Card>
+
+    </StackPanel>
+  </ScrollViewer>
+</Window>
