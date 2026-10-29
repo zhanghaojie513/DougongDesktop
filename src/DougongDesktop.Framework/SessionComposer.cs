@@ -15,6 +15,19 @@ public sealed record EngineOptions
     public required string Model { get; init; }
     public string? ApiKey { get; init; }
     public ChatProtocol Protocol { get; init; } = ChatProtocol.OpenAiChatCompletions;
+
+    /// <summary>
+    /// Anthropic 兼容层的端点路径覆盖。仅对 <see cref="ChatProtocol.AnthropicMessages"/> 有效。
+    /// </summary>
+    /// <remarks>
+    /// 留 null 时用 SDK 默认的 <c>/v1/messages</c>，多数端点如此。
+    /// <para>
+    /// 什么时候要设：base 地址与服务端实际路径拼不上时。例如
+    /// base = <c>https://api.minimaxi.com/anthropic</c>，服务端要 <c>/anthropic/v1/messages</c>
+    /// —— 拼出来正好对，所以**不用改**。只有服务端要求别的前缀时才设。
+    /// </para>
+    /// </remarks>
+    public string? MessagesPath { get; init; }
     public string SessionDirectory { get; init; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".dougong-desktop", "sessions");
@@ -99,6 +112,7 @@ public sealed record EngineOptions
             Model = model,
             ApiKey = key,
             Protocol = protocol,
+            MessagesPath = Environment.GetEnvironmentVariable("DOUGONG_ANTHROPIC_PATH"),
             ContextWindowTokens = ReadContextWindow(model),
             MaxOutputTokens = ReadMaxOutput(model),
             Workspace = Environment.GetEnvironmentVariable("DOUGONG_WORKSPACE") ?? Environment.CurrentDirectory,
@@ -195,6 +209,7 @@ public sealed class SessionComposer : IDisposable
             BaseUrl = options.BaseUrl,
             Model = options.Model,
             Protocol = options.Protocol,
+            MessagesPath = options.MessagesPath,
         };
 
         // 必须走"显式传密钥"的重载。
