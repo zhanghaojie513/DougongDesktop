@@ -73,6 +73,15 @@ public static class Columns
     /// <summary>侧边栏根容器的垂直内边距。</summary>
     public const double SidebarVerticalPadding = 6;
 
+    /// <summary>
+    /// 侧栏内容相对栏边缘的内缩。
+    /// </summary>
+    /// <remarks>
+    /// dsh 的 <c>--dsh-sidebar-paint-inset: 3px</c>。它的作用是让侧栏的
+    /// 填充色在内容之外还能露出 3px，行悬停背景因此不会贴到栏边缘。
+    /// </remarks>
+    public const double SidebarPaintInset = 3;
+
     /// <summary>收起轨道的顶部内边距（dsh: <c>padding: 18px 10px 6px</c>）。</summary>
     public const double SidebarRailPaddingTop = 18;
 

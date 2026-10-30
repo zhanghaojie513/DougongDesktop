@@ -65,7 +65,7 @@ public static class SidebarView
         // 品牌行：dsh 是 52px 高，带负 margin 抵消根 padding 让分隔线通栏。
         // 这里用固定高度 + 水平内边距对齐（Avalonia 没有"负 margin 抵消父 padding"
         // 这种用法，直接用 52 高的 Border 更直白）。
-        sidebar.Header = new Border
+        var brandRow = new Border
         {
             Height = Columns.SidebarBrandRowHeight,
             Padding = new Thickness(Columns.SidebarInlinePadding + 4, 0),
@@ -94,7 +94,7 @@ public static class SidebarView
                         VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                     },
                     // dsh 的品牌名是"deepseek + HARNESS"双色；我们的对应是
-                    // "Dougong + DESKTOP"，后段用小号字弱化
+                    // "DOUGONG + NET"，后段用小号字弱化
                     new Border
                     {
                         Background = DshTheme.Brush(DshTheme.LabelPrimary),
@@ -103,7 +103,7 @@ public static class SidebarView
                         VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                         Child = new TextBlock
                         {
-                            Text = "DESKTOP",
+                            Text = "NET",
                             FontSize = 9,
                             FontWeight = Avalonia.Media.FontWeight.SemiBold,
                             Foreground = DshTheme.Brush(DshTheme.SidebarFill),
@@ -111,6 +111,12 @@ public static class SidebarView
                     },
                 },
             },
+        };
+
+        // Header = 品牌行 + 新会话卡片（竖排）
+        sidebar.Header = new StackPanel
+        {
+            Children = { brandRow, BuildNewSessionCard(onSelect) },
         };
 
         // 底部：设置入口（dsh 也是把 Settings 固定在底部）
@@ -125,6 +131,9 @@ public static class SidebarView
             IsCollapsible = false,
         };
 
+        // 新会话卡片：dsh 是 38px 高、0.5px 描边、12px 圆角、
+        // button-elevated-fill 填充、内容居中的独立按钮——不是列表行。
+        // 它是这一栏唯一的主操作，做成卡片才看得出优先级。
         nav.Items.Add(MakeItem(PluginsKey, "插件",
             TKCode.Arc.Icons.Lucide.LucideIconKind.Blocks));
         nav.Items.Add(MakeItem(TasksKey, "自动化任务",
@@ -142,8 +151,6 @@ public static class SidebarView
         };
 
         // 新建会话永远是第一项
-        section.Items.Add(MakeItem(NewSessionKey, "新建会话",
-            TKCode.Arc.Icons.Lucide.LucideIconKind.CirclePlus));
 
         if (sessions is null)
         {
@@ -190,6 +197,71 @@ public static class SidebarView
         });
 
         return sidebar;
+    }
+
+    /// <summary>
+    /// 新会话卡片。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么是卡片不是列表行</b>：它是侧栏唯一的主操作。dsh 用
+    /// 38px 高 + 描边 + 12px 圆角 + 抬升填充把它做成按钮形态，
+    /// 与下面的导航项、会话行明显区分。
+    /// <para>
+    /// <b>用 Arc 的 Button 而不是自建 Border</b>：键盘可达性、悬停态、
+    /// 焦点环都是现成的；自建要重写一遍且容易漏焦点可见性。
+    /// </para>
+    /// </remarks>
+    private static Control BuildNewSessionCard(Action<string> onSelect)
+    {
+        var content = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Spacing = 6,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            Children =
+            {
+                new TKCode.Arc.Icons.Lucide.LucideIcon
+                {
+                    Kind = TKCode.Arc.Icons.Lucide.LucideIconKind.CirclePlus,
+                    Size = 15,
+                },
+                new TextBlock
+                {
+                    Text = "新会话",
+                    FontSize = 14,
+                    FontWeight = Avalonia.Media.FontWeight.Medium,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                },
+            },
+        };
+
+        // 用 Avalonia 原生 Button，不用 TKCode.Arc.Button：
+        // 后者为"标签文字 crossfade"设计，Content 期望是字符串；
+        // 传复合内容（图标 + 文字）时它不渲染。
+        var button = new Avalonia.Controls.Button
+        {
+            Content = content,
+            Height = 38,
+            Padding = new Thickness(12, 8),
+            Margin = new Thickness(Columns.SidebarPaintInset + 1, 0,
+                Columns.SidebarPaintInset + 1, 10),
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            Background = DshTheme.Brush(DshTheme.ButtonElevatedFill),
+            BorderBrush = DshTheme.Brush(DshTheme.BorderL3),
+            BorderThickness = new Thickness(0.5),
+            CornerRadius = new CornerRadius(Columns.RadiusMd),
+        };
+
+        // 悬停反馈：抬升填充稍微加深，与 dsh 的 hover 一致
+        button.PointerEntered += (_, _) =>
+            button.Background = DshTheme.Brush(DshTheme.Layer3);
+        button.PointerExited += (_, _) =>
+            button.Background = DshTheme.Brush(DshTheme.ButtonElevatedFill);
+
+        button.Click += (_, _) => onSelect(NewSessionKey);
+        return button;
     }
 
     /// <summary>

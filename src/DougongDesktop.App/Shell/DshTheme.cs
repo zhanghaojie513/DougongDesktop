@@ -62,6 +62,16 @@ public static class DshTheme
         ? DshTokens.Dark.DswSpecificSidebarFill
         : DshTokens.Light.DswSpecificSidebarFill;
 
+    /// <summary>抬升态按钮填充（新会话卡片用它）。</summary>
+    public static Color ButtonElevatedFill => IsDark
+        ? DshTokens.Dark.DswAliasButtonElevatedFill
+        : DshTokens.Light.DswAliasButtonElevatedFill;
+
+    /// <summary>次级文字（时间戳、副标题）。</summary>
+    public static Color LabelSecondary => IsDark
+        ? DshTokens.Dark.DswAliasLabelSecondary
+        : DshTokens.Light.DswAliasLabelSecondary;
+
     /// <summary>第三级描边（侧栏与主区的分隔线用它）。</summary>
     public static Color BorderL3 => IsDark
         ? DshTokens.Dark.DswAliasBorderL3
