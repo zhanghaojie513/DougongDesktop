@@ -43,6 +43,7 @@ checks="$checks caps-table-beats-guess max-output-never-eats-context budget-chec
 checks="$checks approval-duplicate-answer-denied approval-session-scope-is-narrow"
 checks="$checks approval-silence-is-denial approval-channel-failure-denies"
 checks="$checks approval-deny-and-stop-really-stops"
+checks="$checks fs-list-rejects-escape dock-unimplemented-tabs-are-labeled fs-list-roundtrips"
 checks="$checks sdk-files-stay-contained"
 
 for check in $checks; do

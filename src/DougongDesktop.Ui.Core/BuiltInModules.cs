@@ -42,12 +42,13 @@ public static class BuiltInModules
             BuiltInModuleKind.Placeholder,
             "设置", "提供商 · 外观 · 诊断"),
 
+        // 右栏 dock：P7 起有真实内容。放在 status 之前——
+        // 它是主区右侧的常驻面板，视觉上比底部状态条更靠前。
+        new("builtin.rightdock", ReservedSlots.RightBar, Key: null, BuiltInModuleKind.RightDock),
+
         // 状态胶囊常驻底部，不可关
         new("builtin.status", ReservedSlots.Bottom, Key: null, BuiltInModuleKind.StatusCapsule),
 
-        // 右栏**不注册内置占位**：它是可选面板，没有真实内容时应该保持折叠。
-        // 之前注册了占位框，导致"右栏永远有占位者→永远展开"，
-        // 空占位白占了 307px 宽度。右栏留给插件或 P7 的真实内容。
     ];
 
     /// <summary>
@@ -101,4 +102,7 @@ public enum BuiltInModuleKind
 
     /// <summary>状态胶囊。</summary>
     StatusCapsule,
+
+    /// <summary>右栏 dock（文件 / 改动 / 计划 / 上下文 / 终端）。</summary>
+    RightDock,
 }

@@ -159,6 +159,10 @@ public sealed class IpcServer : IAsyncDisposable
                     await OpenSessionAsync(open, connection, cancellationToken).ConfigureAwait(false);
                     break;
 
+                case ListDirectoryCommand list:
+                    await ListDirectoryAsync(list, connection, cancellationToken).ConfigureAwait(false);
+                    break;
+
                 case ResyncCommand resync:
                     // 重同步就是"再开一次会话"：回一份带当前序号的全量快照。
                     // 复用 OpenSessionAsync 而不是另写一份，避免两条路径的快照
@@ -216,6 +220,97 @@ public sealed class IpcServer : IAsyncDisposable
             await SendErrorAsync(
                 connection, $"{command.GetType().Name} 失败：{ex.Message}", cancellationToken)
                 .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 列工作区目录（右栏文件树）。
+    /// </summary>
+    /// <remarks>
+    /// <b>路径必须落在工作区内</b>：右栏是只读浏览，但"只读"不等于"可以读任意位置"。
+    /// 越界请求返回错误而不是静默截断——用户需要知道自己的路径被拒了。
+    /// <para>
+    /// <b>500 条上限</b>：与 <c>list_directory</c> 工具一致。列一万个文件会让
+    /// IPC 消息变成几兆、右栏卡住，而用户并不需要一次看到全部。
+    /// </para>
+    /// </remarks>
+    private async Task ListDirectoryAsync(
+        ListDirectoryCommand command, IpcConnection connection, CancellationToken cancellationToken)
+    {
+        const int maxEntries = 500;
+
+        var relative = command.Path ?? string.Empty;
+
+        try
+        {
+            var root = Path.GetFullPath(_workspace);
+            var target = string.IsNullOrWhiteSpace(relative)
+                ? root
+                : Path.GetFullPath(Path.Combine(root, relative));
+
+            // 用边界判断而不是 StartsWith("..")：符号链接、大小写、分隔符混用
+            // 都能绕过字符串检查
+            var rootWithSep = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var inside = target.Equals(root, StringComparison.OrdinalIgnoreCase)
+                         || target.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase);
+
+            if (!inside)
+            {
+                await connection.SendAsync(new DirectoryListedEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    Path = relative,
+                    Entries = [],
+                    Error = $"路径 '{relative}' 在工作区之外，已拒绝。",
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (!Directory.Exists(target))
+            {
+                await connection.SendAsync(new DirectoryListedEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    Path = relative,
+                    Entries = [],
+                    Error = $"目录不存在：{relative}",
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var all = new DirectoryInfo(target)
+                .EnumerateFileSystemInfos()
+                .OrderBy(e => e is DirectoryInfo ? 0 : 1)
+                .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var entries = all
+                .Take(maxEntries)
+                .Select(e => new DirectoryEntry(
+                    e.Name,
+                    e is DirectoryInfo,
+                    e is FileInfo f ? f.Length : 0))
+                .ToArray();
+
+            await connection.SendAsync(new DirectoryListedEvent
+            {
+                Sequence = NextStatusSequence(),
+                Path = relative,
+                Entries = entries,
+                Truncated = all.Length > maxEntries
+                    ? $"共 {all.Length} 项，只列出前 {maxEntries} 项。"
+                    : null,
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await connection.SendAsync(new DirectoryListedEvent
+            {
+                Sequence = NextStatusSequence(),
+                Path = relative,
+                Entries = [],
+                Error = $"{ex.GetType().Name}: {ex.Message}",
+            }, cancellationToken).ConfigureAwait(false);
         }
     }
 

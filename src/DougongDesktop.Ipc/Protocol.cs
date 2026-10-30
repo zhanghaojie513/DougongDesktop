@@ -201,6 +201,7 @@ public sealed record ApprovalResponse(string RequestId, ApprovalDecision Decisio
 [JsonDerivedType(typeof(CancelTurnCommand), "turn/cancel")]
 [JsonDerivedType(typeof(RespondApprovalCommand), "approval/respond")]
 [JsonDerivedType(typeof(ResyncCommand), "session/resync")]
+[JsonDerivedType(typeof(ListDirectoryCommand), "fs/list")]
 public abstract record ClientCommand
 {
     /// <summary>请求 ID。响应带同一个 ID 回来，用于配对。</summary>
@@ -235,6 +236,23 @@ public sealed record CancelTurnCommand : ClientCommand
 public sealed record RespondApprovalCommand : ClientCommand
 {
     public required ApprovalResponse Response { get; init; }
+}
+
+/// <summary>
+/// 列出工作区目录（右栏文件树用）。
+/// </summary>
+/// <remarks>
+/// <b>为什么单独一条命令，不复用工具的 <c>list_directory</c></b>：那条是给
+/// **模型**用的、会进模型上下文、受工具结果长度限制。右栏是给人看的浏览，
+/// 两者对深度的需求不同，混用会让"模型看到的"和"用户看到的"互相牵制。
+/// <para>
+/// <b>只读</b>：右栏浏览不提供写操作，写文件仍然只能经过模型 + 审批。
+/// </para>
+/// </remarks>
+public sealed record ListDirectoryCommand : ClientCommand
+{
+    /// <summary>相对工作区根的路径。空或 null 表示根目录。</summary>
+    public string? Path { get; init; }
 }
 
 /// <summary>
@@ -289,6 +307,7 @@ public sealed record ResyncCommand : ClientCommand
 [JsonDerivedType(typeof(TurnCompletedEvent), "turn/completed")]
 [JsonDerivedType(typeof(ApprovalRequestedEvent), "approval/requested")]
 [JsonDerivedType(typeof(EngineStatusEvent), "engine/status")]
+[JsonDerivedType(typeof(DirectoryListedEvent), "fs/listed")]
 public abstract record ServerEvent
 {
     public required long Sequence { get; init; }
@@ -339,6 +358,28 @@ public sealed record ApprovalRequestedEvent : ServerEvent
 }
 
 /// <summary>引擎健康状态。用于状态栏，不属于任何会话。</summary>
+/// <summary>目录内容（响应 <see cref="ListDirectoryCommand"/>）。</summary>
+public sealed record DirectoryListedEvent : ServerEvent
+{
+    /// <summary>请求的相对路径。根目录是空字符串。</summary>
+    public required string Path { get; init; }
+
+    /// <summary>条目。目录在前、按名称排序。</summary>
+    public required IReadOnlyList<DirectoryEntry> Entries { get; init; }
+
+    /// <summary>被截断时的说明；null 表示列全了。</summary>
+    public string? Truncated { get; init; }
+
+    /// <summary>列目录失败的原因；null 表示成功。</summary>
+    public string? Error { get; init; }
+}
+
+/// <summary>文件树里的一个条目。</summary>
+/// <param name="Name">文件名（不含路径）。</param>
+/// <param name="IsDirectory">是否目录。</param>
+/// <param name="Size">字节数；目录为 0。</param>
+public sealed record DirectoryEntry(string Name, bool IsDirectory, long Size);
+
 public sealed record EngineStatusEvent : ServerEvent
 {
     public required EngineState State { get; init; }

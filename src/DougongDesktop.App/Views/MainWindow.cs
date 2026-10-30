@@ -55,6 +55,19 @@ public sealed class MainWindow : Window
     private IReadOnlyList<SessionSummary>? _currentSessions;
     private readonly StatusCapsule _capsule = new();
     private readonly ConversationView _conversation = new();
+
+    /// <summary>右栏 dock（P7）。</summary>
+    private readonly RightDock _rightDock = new();
+
+    /// <summary>
+    /// 本回合的工具调用记录。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么自己记一份而不是从 <c>ConversationView</c> 里捞</b>：那个列表
+    /// 是界面投影、按渲染需要排序，而"改动" tab 要的是按调用顺序的原始记录。
+    /// 从渲染结果反推业务记录是多绕一层。
+    /// </remarks>
+    private readonly List<IpcToolCallItem> _turnTools = [];
     private readonly UiExtensionLoader _uiPlugins;
 
     public MainWindow()
@@ -216,6 +229,8 @@ public sealed class MainWindow : Window
 
         BuiltInModuleKind.StatusCapsule => _capsule,
 
+        BuiltInModuleKind.RightDock => _rightDock,
+
         BuiltInModuleKind.Placeholder => Placeholder(
             module.Title ?? module.Id, module.Subtitle ?? ""),
 
@@ -278,6 +293,9 @@ public sealed class MainWindow : Window
         }
 
         await _engine.SendAsync(new ListSessionsCommand { RequestId = Guid.NewGuid().ToString("N") });
+
+        // 右栏文件 tab 一打开就要有内容，不等用户手动切
+        await RequestDirectoryAsync(string.Empty);
     }
 
     private void OnEngineEvent(ServerEvent evt)
@@ -295,20 +313,52 @@ public sealed class MainWindow : Window
                 Shell.StatusBar.SetEngineState(status.State, status.ModelName, status.Detail);
                 break;
 
+            case DirectoryListedEvent listed:
+                Console.Error.WriteLine(
+                    $"[ui] 目录 '{listed.Path}'：{listed.Entries.Count} 项" +
+                    (listed.Error is { Length: > 0 } ? $"（错误：{listed.Error}）" : ""));
+                _rightDock.ApplyDirectory(listed);
+                break;
+
             case TurnStartedEvent:
                 _capsule.OnTurnStarted();
                 // 生成中：发送键变停止键（Arc 的 AiComposer 自带这个切换）
                 _conversation.Composer.SetGenerating(true);
+
+                // 新回合：工具记录归零。"改动" tab 的语义是"本回合"，
+                // 不清会把上一回合的写操作也算进来
+                _turnTools.Clear();
+                _rightDock.ApplyToolActivity(_turnTools);
                 break;
 
             case ItemAddedEvent added:
                 _conversation.Add(added.Item);
-                if (added.Item is IpcToolCallItem tool)
+
+                // 右栏的两个 tab 跟着消息流更新：
+                // 计划全量替换，工具记录累积（"改动" tab 靠它推路径）
+                if (added.Item is PlanItem plan)
+                {
+                    _rightDock.ApplyPlan(plan);
+                }
+                else if (added.Item is IpcToolCallItem tool)
+                {
+                    _turnTools.Add(tool);
                     _capsule.OnToolRunning(tool.ToolName);
+                }
+
                 break;
 
             case ItemUpdatedEvent updated:
                 _conversation.Update(updated.Item);
+
+                if (updated.Item is IpcToolCallItem updatedTool)
+                {
+                    var index = _turnTools.FindIndex(t => t.Id == updatedTool.Id);
+                    if (index >= 0) _turnTools[index] = updatedTool;
+                    else _turnTools.Add(updatedTool);
+
+                    _rightDock.ApplyToolActivity(_turnTools);
+                }
 
                 // 工具终态 → 回切到"思考中"。不回切的话胶囊会永远停在
                 // "执行 xxx"，看起来像卡住（P5 判据：Working/NeedsInput/Done 随事件变化）
@@ -549,6 +599,23 @@ public sealed class MainWindow : Window
         }
     }
 
+    /// <summary>请求某个目录的内容（右栏文件树）。</summary>
+    private async Task RequestDirectoryAsync(string path)
+    {
+        try
+        {
+            await _engine.SendAsync(new ListDirectoryCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                Path = path,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 列目录失败：{ex.Message}");
+        }
+    }
+
     /// <summary>补发新会话的首条消息。</summary>
     private async Task SendFirstTurnAsync(string sessionId, string text)
     {
@@ -747,6 +814,14 @@ public sealed class MainWindow : Window
         // 消息条目同理：条目数对但容器数为 0，说明模板没匹配上（P3a 踩过）。
         Console.Error.WriteLine(
             $"[shell] 消息容器 {_conversation.RenderedContainerCount} / 条目 {_conversation.Count}");
+
+        // 右栏 dock（P7）：面板展开不够，要看到 tab 数与内容真的建出来了。
+        // P3a 踩过"尺寸全对但里面是空的"，右栏同样可能重演。
+        var tabs = _rightDock.GetVisualDescendants().OfType<TKCode.Arc.TabItem>().ToArray();
+        Console.Error.WriteLine(
+            $"[shell] RightDock tab {tabs.Length} 个（期望 5），" +
+            $"可用 {tabs.Count(t => t.IsEnabled)}，当前={_rightDock.ActiveTab}，" +
+            $"内容={(tabs.FirstOrDefault(t => t.IsSelected)?.Content is null ? "**空**" : "有")}");
 
         // 审批卡片（P6）：卡片在、尺寸非零、按钮数量正确。
         // 审批坏了的表现是"回合静默卡住"，用户完全看不出是卡片没渲染。
