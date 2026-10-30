@@ -17,6 +17,20 @@ namespace DougongDesktop.Framework;
 /// 序号（<see cref="Sequence"/>）是单调递增的，客户端据此检测缺口。
 /// 它不是时间戳——重连时客户端拿快照的序号做基准，只能应用更大的。
 /// </para>
+/// <para>
+/// <b>⚠ 延后事项（P4 收尾必须处理）</b>：本类现在把两件事混在一起——
+/// <list type="number">
+/// <item><b>纯映射</b>：<see cref="AgentEvent"/> → <see cref="ConversationItem"/>（无状态，可测）</item>
+/// <item><b>状态容器</b>：序号递增、当前条目 ID、turn 列表（有状态）</item>
+/// </list>
+/// 换 agent 框架时只有第 1 件要重写。拆开后重写量从 466 行降到约 200 行
+/// （见实施方案 §3.6）。
+/// <para>
+/// <b>现在不拆的理由</b>：P4 还没定下消息流的投影形状，提前拆会返工。
+/// <b>触发条件</b>：P4 收尾时。
+/// <b>台账位置</b>：vault <c>projects/dougong/Dougong-Desktop-开发计划.md</c> §六之二 第 1 条。
+/// </para>
+/// </para>
 /// </remarks>
 public sealed class SessionRuntime : IAsyncDisposable
 {
