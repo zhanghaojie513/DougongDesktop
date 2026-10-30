@@ -26,7 +26,7 @@ namespace DougongDesktop.Ui.Core.Theme;
 /// </remarks>
 public static class DshTokens
 {
-    /// <summary>dsh 的 light 配色（108 个 token）。</summary>
+    /// <summary>dsh 的 light 配色（119 个 token）。</summary>
     public static class Light
     {
         public static readonly Color DswAliasBgBase = Color.Parse("#FFFFFFFF");
@@ -137,9 +137,20 @@ public static class DshTokens
         public static readonly Color DswAliasTooltipKeyBg = Color.Parse("#FF525254");
         public static readonly Color DswAliasTurnTriggerBg = Color.Parse("#FFF9FAFB");
         public static readonly Color DswAliasTurnTriggerBgHover = Color.Parse("#0F263148");
+        public static readonly Color DswMenuSurfaceFill = Color.Parse("#B2FCFDFE");
+        public static readonly Color DswSpecificBubble = Color.Parse("#FFEDF3FE");
+        public static readonly Color DswSpecificBubbleHighlight = Color.Parse("#FFD3E2FF");
+        public static readonly Color DswSpecificInputMajor = Color.Parse("#FFFFFFFF");
+        public static readonly Color DswSpecificLoginInput = Color.Parse("#FFF9FAFB");
+        public static readonly Color DswSpecificMenu = Color.Parse("#B2FCFDFE");
+        public static readonly Color DswSpecificSelector = Color.Parse("#FFF9FAFB");
+        public static readonly Color DswSpecificSidebarFill = Color.Parse("#FFF9FAFB");
+        public static readonly Color DswSpecificSidebarNavItemActive = Color.Parse("#FFEBEEF2");
+        public static readonly Color DswSpecificSidebarNavItemActiveAccent = Color.Parse("#FFE4EDFD");
+        public static readonly Color DswSpecificTip = Color.Parse("#FFF9FAFB");
     }
 
-    /// <summary>dsh 的 dark 配色（108 个 token）。</summary>
+    /// <summary>dsh 的 dark 配色（119 个 token）。</summary>
     public static class Dark
     {
         public static readonly Color DswAliasBgBase = Color.Parse("#FF151517");
@@ -250,6 +261,17 @@ public static class DshTokens
         public static readonly Color DswAliasTooltipKeyBg = Color.Parse("#FF65666B");
         public static readonly Color DswAliasTurnTriggerBg = Color.Parse("#14FFFFFF");
         public static readonly Color DswAliasTurnTriggerBgHover = Color.Parse("#24FFFFFF");
+        public static readonly Color DswMenuSurfaceFill = Color.Parse("#A3303136");
+        public static readonly Color DswSpecificBubble = Color.Parse("#FF2C2C2E");
+        public static readonly Color DswSpecificBubbleHighlight = Color.Parse("#FF43454A");
+        public static readonly Color DswSpecificInputMajor = Color.Parse("#FF2C2C2E");
+        public static readonly Color DswSpecificLoginInput = Color.Parse("#FF1B1B1C");
+        public static readonly Color DswSpecificMenu = Color.Parse("#F0303136");
+        public static readonly Color DswSpecificSelector = Color.Parse("#FF353638");
+        public static readonly Color DswSpecificSidebarFill = Color.Parse("#FF1B1B1C");
+        public static readonly Color DswSpecificSidebarNavItemActive = Color.Parse("#FF43454A");
+        public static readonly Color DswSpecificSidebarNavItemActiveAccent = Color.Parse("#FF353638");
+        public static readonly Color DswSpecificTip = Color.Parse("#FF353638");
     }
 
 }

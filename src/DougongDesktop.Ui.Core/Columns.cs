@@ -49,6 +49,61 @@ public static class Columns
     /// <summary>右栏首次打开时占框架的比例。</summary>
     public const double RightbarDefaultRatio = 0.45;
 
+    // ── 侧边栏行高与圆角（来自 dsh SidebarRoot.module.css）──
+
+    /// <summary>品牌行高度（展开态）。Windows 原生标题栏下是 40。</summary>
+    /// <remarks>
+    /// 出处：dsh <c>SidebarRoot.module.css</c> 的 <c>.brandRow { height: 52px }</c>。
+    /// 它带负 margin <c>-6px -8px 0</c> 抵消根 padding，让分隔线通栏。
+    /// </remarks>
+    public const double SidebarBrandRowHeight = 52;
+
+    /// <summary>新建会话按钮高度。</summary>
+    public const double SidebarNewSessionHeight = 36;
+
+    /// <summary>会话行高度。</summary>
+    public const double SidebarSessionRowHeight = 36;
+
+    /// <summary>普通控件行高度（筛选、折叠按钮等）。</summary>
+    public const double SidebarControlRowHeight = 28;
+
+    /// <summary>侧边栏根容器的水平内边距。</summary>
+    public const double SidebarInlinePadding = 8;
+
+    /// <summary>侧边栏根容器的垂直内边距。</summary>
+    public const double SidebarVerticalPadding = 6;
+
+    /// <summary>收起轨道的顶部内边距（dsh: <c>padding: 18px 10px 6px</c>）。</summary>
+    public const double SidebarRailPaddingTop = 18;
+
+    /// <summary>收起轨道的水平内边距。</summary>
+    public const double SidebarRailPaddingInline = 10;
+
+    /// <summary>收起轨道的控件盒尺寸（36×36 居中于 56px 轨道）。</summary>
+    public const double SidebarRailControlSize = 36;
+
+    // ── 圆角（来自 dsh base.css 的 --dsw-radius-*）──
+
+    /// <summary>小圆角：控件行、标签。</summary>
+    public const double RadiusSm = 8;
+
+    /// <summary>中圆角：会话行、新建会话按钮。</summary>
+    public const double RadiusMd = 12;
+
+    /// <summary>大圆角。</summary>
+    public const double RadiusLg = 16;
+
+    /// <summary>面板圆角（dsh 的 <c>--dsw-radius-panel</c> 是 28）。</summary>
+    public const double RadiusPanel = 28;
+
+    // ── 窗口标题栏（dsh 的 Windows caption row）──
+
+    /// <summary>标题栏高度。dsh 的 <c>--dsh-windows-titlebar-height</c> 实测 40px。</summary>
+    public const double TitlebarHeight = 40;
+
+    /// <summary>主区左上角的圆角（dsh 的 <c>--dsh-windows-content-radius: 16px</c>）。</summary>
+    public const double ContentCornerRadius = RadiusLg;
+
     /// <summary>把宽度夹到契约范围内（四舍五入到整数像素）。</summary>
     /// <remarks>
     /// <b>取整是刻意的</b>：dsh 的 <c>clampWidth</c> 也取整。小数宽度会让

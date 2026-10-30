@@ -99,7 +99,8 @@ def extract(css_text):
     """从 CSS 里切出 static / light alias / dark alias 三段。"""
     lines = css_text.split("\n")
 
-    def grab(lo, hi, prefix):
+    def grab(lo, hi, prefix=""):
+        """取区间内的 --dsw-* token。prefix 为空表示取全部。"""
         out = {}
         for line in lines[lo:hi]:
             m = re.match(r"\s*(--dsw-[a-z0-9-]+)\s*:\s*(.+?);\s*$", line)
@@ -135,8 +136,12 @@ def extract(css_text):
     # static 的暗色覆盖也要并进来（第 2 块），因为 dark alias 会引用它
     static.update(grab(blocks[0][0], alias_blocks[0][0], "--dsw-static-"))
 
-    alias_light = grab(alias_blocks[0][0], alias_blocks[0][1], "--dsw-alias-")
-    alias_dark = grab(alias_blocks[1][0], alias_blocks[1][1], "--dsw-alias-")
+    # 取该块里**所有** --dsw- 前缀的 token，不按 alias/specific/menu 细分。
+    # 踩过的坑：一开始只取 --dsw-alias- 与 --dsw-specific-，漏掉了
+    # --dsw-menu-surface-fill（它在 alias 块里但用 --dsw-menu- 前缀），
+    # 于是 --dsw-specific-menu 求值失败。
+    alias_light = grab(alias_blocks[0][0], alias_blocks[0][1], "--dsw-")
+    alias_dark = grab(alias_blocks[1][0], alias_blocks[1][1], "--dsw-")
 
     if not (alias_light and alias_dark):
         raise SystemExit(f"alias 抽取失败：light {len(alias_light)}，dark {len(alias_dark)}")

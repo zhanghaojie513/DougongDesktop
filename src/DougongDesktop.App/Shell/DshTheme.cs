@@ -49,6 +49,24 @@ public static class DshTheme
         ? DshTokens.Dark.DswAliasBgLayer3
         : DshTokens.Light.DswAliasBgLayer3;
 
+    /// <summary>
+    /// 侧边栏填充色（也是 Windows 标题栏的填充色）。
+    /// </summary>
+    /// <remarks>
+    /// <b>标题栏与侧边栏必须同色</b>——dsh 的 <c>AppFrame.module.css</c> 在
+    /// <c>[data-windows-titlebar]</c> 下把 <c>.frame::before</c>（标题栏）与
+    /// <c>.frame</c> 都设成 <c>var(--dsw-specific-sidebar-fill)</c>。
+    /// 两者不同色会在窗口顶部留一条突兀的分界。
+    /// </remarks>
+    public static Color SidebarFill => IsDark
+        ? DshTokens.Dark.DswSpecificSidebarFill
+        : DshTokens.Light.DswSpecificSidebarFill;
+
+    /// <summary>第三级描边（侧栏与主区的分隔线用它）。</summary>
+    public static Color BorderL3 => IsDark
+        ? DshTokens.Dark.DswAliasBorderL3
+        : DshTokens.Light.DswAliasBorderL3;
+
     /// <summary>最轻的描边。</summary>
     public static Color BorderL1 => IsDark
         ? DshTokens.Dark.DswAliasBorderL1

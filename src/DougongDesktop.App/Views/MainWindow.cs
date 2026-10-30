@@ -67,6 +67,17 @@ public sealed class MainWindow : Window
         Width = 1280;
         Height = 820;
 
+        // 扩展客户区：让原生标题栏消失，改由 AppShell 自绘 40px 那条。
+        //
+        // **为什么不用原生标题栏**：Windows 原生标题栏的颜色由 DWM 管，
+        // Avalonia 没有着色 API。dsh 是 Electron，能用 titleBarOverlay 把
+        // 标题栏设成与侧栏同色；我们不扩展客户区就只能留一条系统灰，
+        // 与侧栏的 #F9FAFB 明显不同——那正是"看起来不像"的第一眼来源。
+        //
+        // 代价：窗口按钮（最小化/最大化/关闭）要自己画。
+        ExtendClientAreaToDecorationsHint = true;
+        ExtendClientAreaTitleBarHeightHint = Ui.Core.Columns.TitlebarHeight;
+
         // 页面底色用 dsh 的 bg-base，不用 Arc 默认。
         // 这是"看起来像不像 dsh"最直接的一块：Arc 的默认底色与 dsh 差一档明度，
         // 而侧边栏/主区都是从它上面叠出来的。
@@ -781,6 +792,35 @@ public sealed class MainWindow : Window
 
         Report("AppShell", shell);
 
+        // 标题栏：40px 高、与侧栏同色（dsh 的 Windows caption row）
+        if (shell is AppShell barHost)
+        {
+            Report("Titlebar", barHost.Titlebar);
+            var btns = barHost.Titlebar.GetVisualDescendants()
+                .OfType<Avalonia.Controls.Button>().ToArray();
+            Console.Error.WriteLine(
+                $"[shell] 标题栏按钮 {btns.Length} 个：" +
+                string.Join(", ", btns.Select(b => $"{(b.Bounds.Width):0}x{(b.Bounds.Height):0}")));
+            Console.Error.WriteLine(
+                $"[shell] 标题栏子节点 {barHost.Titlebar.GetVisualChildren().Count()} 个");
+
+            // 侧栏实际底色（不是设了什么，是渲染成什么）
+            var sidebar = _conversation.GetVisualDescendants()
+                .OfType<TKCode.Arc.Sidebar>().FirstOrDefault();
+            if (sidebar is not null)
+            {
+                var sbBrush = sidebar.Background as Avalonia.Media.ISolidColorBrush;
+                Console.Error.WriteLine(
+                    $"[shell] 侧栏实际底色 {sbBrush?.Color.ToString() ?? "(无)"} " +
+                    $"期望 {DshTheme.SidebarFill}");
+            }
+            var tb = barHost.Titlebar.Background as Avalonia.Media.ISolidColorBrush;
+            var sb = DshTheme.SidebarFill;
+            Console.Error.WriteLine(
+                $"[shell] 标题栏色 {tb?.Color.ToString() ?? "(无)"} 侧栏色 {sb} " +
+                $"{(tb?.Color == sb ? "一致" : "不一致")}");
+        }
+
         // dsh 配色是否真的应用：读实际 Background，不看代码写了什么
         var bg = Background as Avalonia.Media.ISolidColorBrush;
         Console.Error.WriteLine(
@@ -822,6 +862,10 @@ public sealed class MainWindow : Window
         // 所以这里要报**内部渲染**，否则"实例在"会被当成"渲染出来了"。
         foreach (var sidebar in all.OfType<TKCode.Arc.Sidebar>())
         {
+            var sbg = sidebar.Background as Avalonia.Media.ISolidColorBrush;
+            Console.Error.WriteLine(
+                $"[shell] Sidebar.Background={sbg?.Color.ToString() ?? "(null)"} " +
+                $"期望={DshTheme.SidebarFill}");
             var kids = sidebar.GetVisualChildren().Count();
             Console.Error.WriteLine(
                 $"[shell] Sidebar 内部 {(kids > 0 ? "OK" : "空壳")} visualChildren={kids}");

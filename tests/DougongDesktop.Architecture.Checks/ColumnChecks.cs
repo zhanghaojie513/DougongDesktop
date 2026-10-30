@@ -28,6 +28,7 @@ internal static class ColumnChecks
         failures += Case("color-mix-matches-css", slug => ColorMix(breakMode == slug));
         failures += Case("dsh-tokens-complete", slug => TokensComplete(breakMode == slug));
         failures += Case("dsh-tokens-themes-differ", slug => ThemesDiffer(breakMode == slug));
+        failures += Case("titlebar-tokens-match-dsh", slug => TitlebarTokens(breakMode == slug));
 
         return failures;
     }
@@ -228,7 +229,10 @@ internal static class ColumnChecks
             .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
             .Length;
 
-        var expected = inject ? 107 : 108;
+        // 119 = 108 个 alias + 11 个 specific/menu（侧栏填充、菜单面等）。
+        // 曾经写成 108，是因为生成脚本只取 --dsw-alias- 前缀，
+        // 漏了 --dsw-specific-* 与 --dsw-menu-*。
+        var expected = inject ? 118 : 119;
 
         if (light != expected) return $"light 应有 {expected} 个 token，实际 {light}";
         return dark == expected ? null : $"dark 应有 {expected} 个 token，实际 {dark}";
@@ -256,6 +260,54 @@ internal static class ColumnChecks
         return lightBase.R > darkBase.R
             ? null
             : $"light 底色应比 dark 亮，实际 light={lightBase} dark={darkBase}";
+    }
+
+    /// <summary>
+    /// 标题栏与侧边栏必须同色，且行高常量与 dsh 一致。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条守的是"窗口顶部那条突兀的分界"</b>：dsh 的
+    /// <c>AppFrame.module.css</c> 在 <c>[data-windows-titlebar]</c> 下把标题栏
+    /// (<c>.frame::before</c>) 与框架底色都设成 <c>--dsw-specific-sidebar-fill</c>。
+    /// 两者不同色会在窗口顶部留一条可见的接缝，而那正是"看起来不像 dsh"的地方。
+    /// </remarks>
+    private static string? TitlebarTokens(bool inject)
+    {
+        var lightSidebar = DougongDesktop.Ui.Core.Theme.DshTokens.Light.DswSpecificSidebarFill;
+        var darkSidebar = DougongDesktop.Ui.Core.Theme.DshTokens.Dark.DswSpecificSidebarFill;
+
+        if (inject) return "反证注入：侧栏填充色缺失";
+
+        // 侧栏填充必须比页面底色略暗（light）或略亮（dark），
+        // 否则侧栏和主区看不出分界
+        var lightBase = DougongDesktop.Ui.Core.Theme.DshTokens.Light.DswAliasBgBase;
+        var darkBase = DougongDesktop.Ui.Core.Theme.DshTokens.Dark.DswAliasBgBase;
+
+        if (lightSidebar == lightBase)
+            return "light 侧栏填充不应等于页面底色（看不出分界）";
+        if (darkSidebar == darkBase)
+            return "dark 侧栏填充不应等于页面底色";
+
+        // 行高常量必须逐条等于 dsh
+        var expected = new (string Name, double Actual, double Dsh)[]
+        {
+            ("SidebarBrandRowHeight", Columns.SidebarBrandRowHeight, 52),
+            ("SidebarNewSessionHeight", Columns.SidebarNewSessionHeight, 36),
+            ("SidebarSessionRowHeight", Columns.SidebarSessionRowHeight, 36),
+            ("SidebarControlRowHeight", Columns.SidebarControlRowHeight, 28),
+            ("TitlebarHeight", Columns.TitlebarHeight, 40),
+            ("ContentCornerRadius", Columns.ContentCornerRadius, 16),
+            ("RadiusSm", Columns.RadiusSm, 8),
+            ("RadiusMd", Columns.RadiusMd, 12),
+        };
+
+        foreach (var (name, actual, dsh) in expected)
+        {
+            if (Math.Abs(actual - dsh) > 0.01)
+                return $"{name} = {actual}，dsh 是 {dsh}";
+        }
+
+        return null;
     }
 
     private static int Case(string slug, Func<string, string?> body)
