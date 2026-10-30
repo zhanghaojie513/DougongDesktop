@@ -51,6 +51,20 @@ public static class BuiltInModules
             "右栏", "文件 · 改动 · 计划 · 上下文"),
     ];
 
+    /// <summary>
+    /// 占位模块的优先级。
+    /// </summary>
+    /// <remarks>
+    /// <b>比插件(默认 500) 大</b>——占位是"没人提供时兜底"，第三方插件注册后应该顶掉它。
+    /// P3 复核时发现：内置占位用 100（内置层）会压住插件，
+    /// 表现为"插件加载成功但界面还是占位内容"。
+    /// <para>
+    /// 真正的内置功能（侧边栏、状态胶囊）仍用 100——它们不该被插件随手覆盖，
+    /// 插件想替换必须显式给更小的值。
+    /// </para>
+    /// </remarks>
+    public const int PlaceholderPriority = 900;
+
     /// <summary>按 Id 查；找不到返回 null。</summary>
     public static BuiltInModule? Find(string id) =>
         All.FirstOrDefault(m => m.Id == id);

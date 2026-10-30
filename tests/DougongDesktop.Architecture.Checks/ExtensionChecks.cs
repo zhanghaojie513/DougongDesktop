@@ -31,6 +31,8 @@ internal static class ExtensionChecks
             slug => ModulesListOrdered(breakMode == slug));
         failures += Case("modules-list-has-no-duplicate-slot",
             slug => NoDuplicateSlot(breakMode == slug));
+        failures += Case("placeholder-yields-to-plugin",
+            slug => PlaceholderYieldsToPlugin(breakMode == slug));
 
         return failures;
     }
@@ -236,6 +238,56 @@ internal static class ExtensionChecks
             ? null
             : "同一 slot 出现多条内置模块（会触发先注册者胜，后注册的永不生效）："
               + string.Join("、", dup);
+    }
+
+    /// <summary>
+    /// 占位模块必须让位给插件。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查来自 P3 复核时发现的实际问题</b>：内置占位若用内置层 priority(100)，
+    /// 会压住插件(500)，表现为"插件加载成功但界面还是占位内容"——
+    /// 加载器日志一切正常，只是插件的内容永远看不见。
+    /// <para>
+    /// 占位是"没人提供时兜底"，所以它的 priority 必须大于插件默认值。
+    /// </para>
+    /// </remarks>
+    private static string? PlaceholderYieldsToPlugin(bool inject)
+    {
+        var slots = new SlotRegistry();
+        slots.Declare(ReservedSlots.RightBar, SlotKind.Single);
+
+        using var loader = new UiExtensionLoader(slots);
+
+        // 先注册占位（用清单里的真实优先级）
+        var placeholderPriority = inject ? 100 : BuiltInModules.PlaceholderPriority;
+        slots.Register(ReservedSlots.RightBar, new SlotOccupant(
+            "builtin.placeholder", placeholderPriority, new FuncTemplate())
+        {
+            Origin = SlotOccupantOrigin.BuiltIn,
+        });
+
+        // 再注册插件（加载器用 500）
+        var result = loader.Register(new FakeExtension("p", ReservedSlots.RightBar, null));
+        if (result.Status != ExtensionLoadStatus.Loaded)
+            return $"插件注册失败：{result.Reason}";
+
+        // 解析出来的应该是插件，不是占位
+        var winner = slots.Resolve(ReservedSlots.RightBar);
+        if (winner is null) return "解析不到任何模板";
+
+        var isPlugin = winner is not FuncTemplate;
+
+        return isPlugin
+            ? null
+            : "占位模块压住了插件——占位 priority 必须大于插件默认值(500)，"
+              + "否则插件加载成功但内容永远不可见";
+    }
+
+    /// <summary>测试用模板，用于区分"占位"与"插件"。</summary>
+    private sealed class FuncTemplate : Avalonia.Controls.Templates.IDataTemplate
+    {
+        public bool Match(object? data) => true;
+        public Control? Build(object? param) => new TextBlock { Text = "placeholder" };
     }
 
     /// <summary>测试用插件：字段可指定，用来构造各种违规场景。</summary>

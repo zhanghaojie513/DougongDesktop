@@ -45,11 +45,18 @@ public sealed class AppShell : UserControl
                 content.ContentTemplate = slots.Resolve(slotKey, key as string);
                 content.Content = key;
             }
+
+            // 右栏：有内容才展开，没内容保持折叠（空栏不该白占宽度）
+            if (slotKey == ReservedSlots.RightBar && _rightBarPanel is not null)
+                _rightBarPanel.IsCollapsed = slots.Resolve(slotKey) is null;
         };
     }
 
     /// <summary>single/keyed slot 的 ContentControl，用于响应注册表变化。</summary>
     private readonly Dictionary<string, ContentControl> _contentBySlot = new(StringComparer.Ordinal);
+
+    /// <summary>右栏面板，用于"有内容时自动展开"。</summary>
+    private ResizablePanel? _rightBarPanel;
 
     /// <summary>声明五个 slot。必须在任何注册之前调用。</summary>
     public static void DeclareSlots(SlotRegistry slots)
@@ -99,9 +106,13 @@ public sealed class AppShell : UserControl
             MinSize = 280,
             MaxSize = 640,
             IsCollapsible = true,
-            IsCollapsed = true,
+            // 默认折叠，但有占位者时自动展开——否则注册进去的插件永远看不见。
+            // 实测发现过：示例插件注册到 shell.trailing，而右栏折叠着，
+            // 插件加载成功但内容不可见，等于没做成。
+            IsCollapsed = _slots.Resolve(ReservedSlots.RightBar) is null,
             Content = SlotSingle(ReservedSlots.RightBar),
         });
+        _rightBarPanel = panels.Panels[^1];
 
         // 底部条：list kind，空内容不占位
         var bottom = new ItemsControl

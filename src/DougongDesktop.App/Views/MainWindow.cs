@@ -87,8 +87,14 @@ public sealed class MainWindow : Window
 
         foreach (var module in BuiltInModules.All)
         {
+            // 占位用更大的 priority：它是"没人提供时兜底"，插件注册后该顶掉它。
+            // 真正的内置功能仍用 BuiltIn(100)，插件要替换必须显式给更小值。
+            var priority = module.Kind == BuiltInModuleKind.Placeholder
+                ? BuiltInModules.PlaceholderPriority
+                : BuiltIn;
+
             var handle = _slots.Register(module.SlotKey, new SlotOccupant(
-                module.Id, BuiltIn, MakeTemplate(() => BuildModule(module)), module.Key)
+                module.Id, priority, MakeTemplate(() => BuildModule(module)), module.Key)
             {
                 Origin = Origin,
             });
@@ -358,7 +364,6 @@ public sealed class MainWindow : Window
         Console.Error.WriteLine($"[shell] ContentControl {all.OfType<ContentControl>().Count()}");
         Console.Error.WriteLine($"[shell] Sidebar {all.OfType<TKCode.Arc.Sidebar>().Count()}");
         Console.Error.WriteLine($"[shell] AgentStatus {all.OfType<TKCode.Arc.AgentStatus>().Count()}");
-        Console.Error.WriteLine($"[shell] ItemsControl {all.OfType<ItemsControl>().Count()}");
-        Console.Error.WriteLine("[shell] DUMP-END");
+        Console.Error.WriteLine($"[shell] ItemsControl {all.OfType<ItemsControl>().Count()}");        Console.Error.WriteLine("[shell] DUMP-END");
     }
 }

@@ -33,6 +33,7 @@ checks="$checks ext-origin-always-installed ext-rejects-reserved-key"
 checks="$checks ext-skips-non-plugin-dll ext-missing-dir-throws"
 checks="$checks ext-unload-leaves-no-residue"
 checks="$checks modules-list-is-explicit-and-ordered modules-list-has-no-duplicate-slot"
+checks="$checks placeholder-yields-to-plugin"
 
 for check in $checks; do
   printf '%-36s ' "$check"
