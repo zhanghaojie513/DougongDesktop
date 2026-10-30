@@ -226,15 +226,21 @@ public sealed class IpcServer : IAsyncDisposable
         var workspace = string.IsNullOrWhiteSpace(command.Workspace) ? _workspace : command.Workspace;
         var title = command.Title ?? "新会话";
 
+        // 审批器要在创建之前交给 composer，而"拒绝并停止"需要拿到运行时才能
+        // 取消回合——先有鸡还是先有蛋。用一个延迟赋值的句柄绕开：
+        // 审批只会在回合进行中发生，那时 runtime 一定已经赋好值了。
+        SessionRuntime? created = null;
+
         var runtime = await _composer.CreateAsync(
             sessionId, title, workspace,
-            CreateApprover(connection),
+            CreateApprover(connection, () => created?.Cancel()),
             evt => connection.SendAsync(evt, cancellationToken),
             NextStatusSequence,
             _options.ContextWindowTokens,
             _options.MaxOutputTokens,
             cancellationToken).ConfigureAwait(false);
 
+        created = runtime;
         _sessions[sessionId] = runtime;
 
         await connection.SendAsync(new SessionOpenedEvent
@@ -299,7 +305,15 @@ public sealed class IpcServer : IAsyncDisposable
         }, CancellationToken.None);
     }
 
-    private IToolApprover CreateApprover(IpcConnection connection) =>
+    /// <summary>
+    /// 建审批器。
+    /// </summary>
+    /// <param name="connection">IPC 连接，用来把审批推给客户端。</param>
+    /// <param name="stopTurn">
+    /// "拒绝并停止"时取消回合的动作。为 null 时该档退化为普通拒绝
+    /// （审批器会记日志，不让它静默退化）。
+    /// </param>
+    private IToolApprover CreateApprover(IpcConnection connection, Action? stopTurn = null) =>
         new IpcApprover(async (approval, ct) =>
         {
             var pending = new TaskCompletionSource<ApprovalResponse>(
@@ -324,7 +338,9 @@ public sealed class IpcServer : IAsyncDisposable
             {
                 _pendingApprovals.TryRemove(approval.RequestId, out _);
             }
-        });
+        },
+        timeout: null,
+        stopTurn: _ => stopTurn?.Invoke());
 
     private Task PushStatusAsync(EngineState state, string? detail)
     {

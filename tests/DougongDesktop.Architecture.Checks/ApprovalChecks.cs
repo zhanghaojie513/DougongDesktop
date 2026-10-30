@@ -26,6 +26,7 @@ internal static class ApprovalChecks
         failures += Case("approval-session-scope-is-narrow", slug => SessionScopeIsNarrow(breakMode == slug));
         failures += Case("approval-silence-is-denial", slug => SilenceIsDenial(breakMode == slug));
         failures += Case("approval-channel-failure-denies", slug => ChannelFailureDenies(breakMode == slug));
+        failures += Case("approval-deny-and-stop-really-stops", slug => DenyAndStopStops(breakMode == slug));
 
         return failures;
     }
@@ -150,6 +151,53 @@ internal static class ApprovalChecks
         return decision.Approved
             ? "审批通道异常时必须按拒绝处理"
             : null;
+    }
+
+    /// <summary>
+    /// "拒绝并停止"必须真的触发停止动作，不能只返回 Deny。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条抓的是一个真实缺陷</b>：复检时发现 SDK 的
+    /// <see cref="ToolApprovalDecision"/> 只有 <c>Approved</c> 与 <c>Reason</c>，
+    /// <b>表达不了"这个拒绝还要终止回合"</b>。原先的实现是
+    /// <c>DenyAndStop => ToolApprovalDecision.Deny(...)</c>——模型收到
+    /// "工具被拒"然后继续下一轮，用户点了"拒绝并停止"却发现它还在跑。
+    /// <para>
+    /// <b>断言的是"停止回调被调用"，不是返回值</b>：返回值在两种实现下都是
+    /// Deny，区分不了。只有观测副作用才能抓到这个缺陷。
+    /// </para>
+    /// </remarks>
+    private static string? DenyAndStopStops(bool inject)
+    {
+        var stopCalls = 0;
+        string? stopReason = null;
+
+        var approver = new IpcApprover(
+            (_, _) => Task.FromResult<DougongDesktop.Ipc.ApprovalResponse?>(
+                new DougongDesktop.Ipc.ApprovalResponse(
+                    "inv-stop", DougongDesktop.Ipc.ApprovalDecision.DenyAndStop, "不要再写了")),
+            timeout: null,
+            stopTurn: reason =>
+            {
+                stopCalls++;
+                stopReason = reason;
+            });
+
+        var decision = approver
+            .RequestApprovalAsync(MakeRequest("inv-stop", "write_file", "{\"path\":\"x\"}"))
+            .AsTask().GetAwaiter().GetResult();
+
+        if (inject) return "反证注入：拒绝并停止没有触发停止动作";
+
+        if (decision.Approved)
+            return "拒绝并停止必须返回拒绝";
+
+        if (stopCalls == 0)
+            return "「拒绝并停止」没有触发停止动作 —— 回合会继续，用户点了停止却发现还在跑";
+
+        return stopCalls == 1
+            ? null
+            : $"停止动作应恰好调用一次，实际 {stopCalls} 次";
     }
 
     // 待决锁（P6 判据"单一待决锁"）没有在这里断言：

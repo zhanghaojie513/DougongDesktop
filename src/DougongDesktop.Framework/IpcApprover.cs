@@ -35,12 +35,30 @@ public sealed class IpcApprover : IToolApprover
     private readonly object _sync = new();
     private readonly TimeSpan _timeout;
 
+    /// <summary>
+    /// "拒绝并停止"的落地动作。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么需要这个回调，而不是只返回 Deny</b>：SDK 的
+    /// <see cref="ToolApprovalDecision"/> 只有 <c>Approved</c> 与 <c>Reason</c>
+    /// 两个字段——它<b>表达不了"这个拒绝还要终止整个回合"</b>。
+    /// 只返回 Deny 的话，模型会收到"工具被拒绝"然后**继续下一轮**，
+    /// 用户点了"拒绝并停止"却发现它还在跑。
+    /// <para>
+    /// 所以停止动作必须由宿主自己做：这个回调会去取消当前回合的
+    /// <see cref="CancellationTokenSource"/>。
+    /// </para>
+    /// </remarks>
+    private readonly Action<string?>? _stopTurn;
+
     public IpcApprover(
         Func<ApprovalRequest, CancellationToken, Task<ApprovalResponse?>> ask,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        Action<string?>? stopTurn = null)
     {
         _ask = ask;
         _timeout = timeout ?? TimeSpan.FromMinutes(5);
+        _stopTurn = stopTurn;
     }
 
     public async ValueTask<ToolApprovalDecision> RequestApprovalAsync(
@@ -107,9 +125,34 @@ public sealed class IpcApprover : IToolApprover
         {
             ApprovalDecision.AllowOnce => ToolApprovalDecision.Allow("用户批准本次调用。"),
             ApprovalDecision.AllowForSession => RememberForSession(request, sessionKey),
-            ApprovalDecision.DenyAndStop => ToolApprovalDecision.Deny("用户拒绝并要求停止。"),
+            ApprovalDecision.DenyAndStop => StopTurn(response.Reason),
             _ => ToolApprovalDecision.Deny(response.Reason ?? "用户拒绝。"),
         };
+    }
+
+    /// <summary>
+    /// 拒绝并终止回合。
+    /// </summary>
+    /// <remarks>
+    /// <b>先停再返回拒绝</b>：反过来的话，模型可能在这一行返回与取消生效之间
+    /// 已经开始下一轮。取消令牌是协作式的，越早触发越好。
+    /// <para>
+    /// <b>没配回调时退化为普通拒绝，并且要记日志</b>：静默退化会让
+    /// "拒绝并停止"变成"只拒绝"，而界面上按钮文案还写着"停止"——
+    /// 那种不一致比不实现更糟。
+    /// </para>
+    /// </remarks>
+    private ToolApprovalDecision StopTurn(string? reason)
+    {
+        if (_stopTurn is null)
+        {
+            Console.Error.WriteLine(
+                "[approver] 未配置停止回调：「拒绝并停止」退化为普通拒绝，回合会继续。");
+            return ToolApprovalDecision.Deny(reason ?? "用户拒绝。");
+        }
+
+        _stopTurn(reason);
+        return ToolApprovalDecision.Deny(reason ?? "用户拒绝并要求停止回合。");
     }
 
     /// <summary>
