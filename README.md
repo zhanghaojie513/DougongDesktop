@@ -169,7 +169,42 @@ bash scripts/all-checks.sh
 
 ### 跑起来
 
-引擎与界面是两个进程：
+```bash
+dotnet run --project src/DougongDesktop.App
+```
+
+界面启动时会自动拉起引擎（`AgentHost`）——引擎把端口写进
+`~/.dougong-desktop/endpoint.json`，UI 读它来连接。
+
+> [!IMPORTANT]
+> **首次使用需要在设置里添加提供商。** 桌面端不内置任何 provider 目录，
+> 也没有账户登录——你需要自己填服务地址、模型名和密钥，跟其他 AI 客户端一样。
+>
+> 还没做设置界面的阶段（P0–P2），只能靠环境变量驱动引擎，
+> 见下方「开发期配置」。
+
+#### 提供商配置（P9 完成后）
+
+设置 → 提供商 → 添加：
+
+| 字段 | 说明 |
+|---|---|
+| 名称 | 随便取，用于区分多条配置 |
+| 服务地址 | 如 `https://api.minimaxi.com/anthropic` |
+| 协议 | `openai` / `anthropic` / `responses`——**必须与端点匹配** |
+| 模型 | 如 `MiniMax-M3.1-Flash` |
+| 密钥 | 存入系统钥匙串，**不写配置文件** |
+| 最大上下文 | 按模型名推断预填，可改 |
+| 最大输出 | 默认 4096 |
+
+> [!TIP]
+> **协议必须显式匹配端点。** 地址含 `/anthropic` 但协议写 `openai` 会 404，
+> 而报错信息不会指向这个原因。
+
+<details>
+<summary><b>开发期配置（P0–P2，仅环境变量）</b></summary>
+
+设置界面还没做，所以现在只能这样跑：
 
 ```bash
 # 终端 1：引擎
@@ -183,36 +218,23 @@ dotnet run --project src/DougongDesktop.AgentHost
 dotnet run --project src/DougongDesktop.App
 ```
 
-引擎启动后把端口写进 `~/.dougong-desktop/endpoint.json`，UI 读它来连接。
-
-> [!IMPORTANT]
-> **密钥不进配置文件、不进日志、不进会话记录。**
-> 当前版本（P0–P2）只从环境变量读；桌面端的凭据管理器接入在 P9，
-> 届时可用系统钥匙串保存（SDK 的契约允许"环境变量**或宿主凭据通道**"）。
-> 无论哪条路，**明文永不落盘**。
-
-> [!TIP]
-> **协议必须显式匹配端点。** 地址含 `/anthropic` 但协议写 `openai` 会 404，
-> 而报错信息不会指向这个原因。
-
-<details>
-<summary><b>环境变量全表</b></summary>
+**这只是临时形态，不是产品设计。** P9 会把这一层换成"环境变量优先，
+否则问凭据管理器"，让用户能在界面里配。
 
 | 变量 | 必需 | 说明 |
 |---|:---:|---|
 | `DOUGONG_PROVIDER_BASE` | ✅ | 服务地址 |
 | `DOUGONG_PROVIDER_MODEL` | ✅ | 模型名 |
-| `DOUGONG_PROVIDER_KEY` | ✅ | 密钥（当前唯一来源；P9 后可用系统凭据管理器） |
+| `DOUGONG_PROVIDER_KEY` | ✅ | 密钥（P9 后可存系统钥匙串） |
 | `DOUGONG_PROVIDER_PROTOCOL` | | `openai`（默认）/ `anthropic` / `responses` |
 | `DOUGONG_ANTHROPIC_PATH` | | Anthropic 路径覆盖，默认 `/v1/messages` |
-| `DOUGONG_CONTEXT_WINDOW` | | 模型窗口 token 数；不设则按模型名推断 |
+| `DOUGONG_CONTEXT_WINDOW` | | 模型窗口；不设则按模型名推断 |
 | `DOUGONG_MAX_OUTPUT` | | 单次输出上限，默认 4096 |
 | `DOUGONG_SESSION_DIR` | | 会话目录，默认 `~/.dougong-desktop/sessions` |
 | `DOUGONG_WORKSPACE` | | 工作区目录 |
 
 </details>
 
----
 
 ## 目录结构
 
