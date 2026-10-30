@@ -54,6 +54,9 @@ public static class Program
         // 靠人工点击几乎不可能发现。
         failures += SlotChecks.Run(breakMode);
 
+        // UI 插件加载器的行为检查
+        failures += ExtensionChecks.Run(breakMode);
+
         Console.WriteLine();
         Console.WriteLine(failures == 0
             ? "ARCHITECTURE: ALL PASS"

@@ -26,6 +26,7 @@ public sealed class MainWindow : Window
     private IReadOnlyList<SessionSummary>? _currentSessions;
     private readonly StatusCapsule _capsule = new();
     private IDisposable? _capsuleHandle;
+    private readonly UiExtensionLoader _uiPlugins;
 
     public MainWindow()
     {
@@ -35,9 +36,12 @@ public sealed class MainWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         AppShell.DeclareSlots(_slots);
+        _uiPlugins = new UiExtensionLoader(_slots, msg => Console.Error.WriteLine(msg));
         RegisterBuiltInPlaceholders();
 
         Content = new AppShell(_slots, _vm);
+
+        LoadUiPlugins();
 
         Opened += async (_, _) =>
         {
@@ -238,6 +242,40 @@ public sealed class MainWindow : Window
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[ui] 打开会话失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 加载 UI 插件。
+    /// </summary>
+    /// <remarks>
+    /// <b>插件目录用环境变量指定</b>，不是硬编码路径——P3b 只验证加载链路，
+    /// 真正的安装目录约定等插件管理做好再定。
+    /// <para>
+    /// <b>加载失败不能让 App 起不来</b>：与 agent 插件不同，UI 插件失败只是少一块。
+    /// </para>
+    /// </remarks>
+    private void LoadUiPlugins()
+    {
+        var dir = Environment.GetEnvironmentVariable("DOUGONG_UI_PLUGINS");
+        if (string.IsNullOrWhiteSpace(dir)) return;
+
+        try
+        {
+            var results = _uiPlugins.LoadFromDirectory(dir);
+
+            foreach (var r in results.Where(r => r.IsUserVisible))
+            {
+                Console.Error.WriteLine(
+                    $"[ui-plugin] {r.AssemblyFile}: {r.Status} " +
+                    $"{(r.ExtensionId is null ? "" : r.ExtensionId + " ")}{r.Reason}");
+            }
+
+            Console.Error.WriteLine($"[ui-plugin] 共加载 {_uiPlugins.Loaded.Count} 个插件");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui-plugin] 加载目录失败：{ex.Message}");
         }
     }
 

@@ -24,3 +24,7 @@ Thumbs.db
 
 # 日志
 *.log
+
+# UI 插件测试目录
+samples/SampleUiPlugin/bin/
+samples/SampleUiPlugin/obj/
