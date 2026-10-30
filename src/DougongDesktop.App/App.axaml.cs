@@ -20,7 +20,7 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new Views.ArcProbeWindow();
+            desktop.MainWindow = new Views.MainWindow();
         }
 
         base.OnFrameworkInitializationCompleted();

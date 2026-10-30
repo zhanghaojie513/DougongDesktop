@@ -157,25 +157,33 @@ internal static class SlotChecks
         return null;
     }
 
-    // ── 6. conversation 是保留 key，占用被拒 ────────────────────
+    // ── 6. conversation 是内置专用，外部不能覆盖 ──────────────────
 
+    /// <remarks>
+    /// <b>这条检查的语义改过一次，值得记。</b>第一版让注册表在 Register 时一律拒绝
+    /// <c>main/conversation</c>，结果**内置实现自己都注册不进去，App 启动直接抛异常**。
+    ///
+    /// 正确语义：内置可以注册，**外部 UI 插件不能覆盖**（用 priority 也不行）。
+    /// 而"谁在注册"这件事只有加载器知道，注册表不知道——所以拦截放在 P3b 的加载器里。
+    /// 这里的检查改成验证注册表**允许**内置注册、且能正常解析。
+    /// </remarks>
     private static string? ConversationKeyReserved(bool inject)
     {
         var r = new SlotRegistry();
         r.Declare(ReservedSlots.Main, SlotKind.Keyed);
 
-        if (inject) return "反证注入：允许插件占用 conversation";
+        // 内置实现注册 conversation 必须成功
+        var builtin = Template("builtin");
+        r.Register(ReservedSlots.Main,
+            new SlotOccupant("builtin.conversation", 100, builtin, Key: ReservedSlots.Conversation));
 
-        try
-        {
-            r.Register(ReservedSlots.Main,
-                new SlotOccupant("evil", 1, Template("evil"), Key: ReservedSlots.Conversation));
-            return "注册 main/conversation 应被拒绝——占用它会让用户切走后丢会话上下文";
-        }
-        catch (SlotConflictException)
-        {
-            return null;
-        }
+        if (inject) return "反证注入：内置注册 conversation 后解析不到";
+
+        var resolved = r.Resolve(ReservedSlots.Main, ReservedSlots.Conversation);
+        if (!ReferenceEquals(resolved, builtin))
+            return "内置实现应该能注册并解析到 conversation（第一版错在连内置都拒了，App 起不来）";
+
+        return null;
     }
 
     // ── 7. 卸载不留残留 ────────────────────────────────────────

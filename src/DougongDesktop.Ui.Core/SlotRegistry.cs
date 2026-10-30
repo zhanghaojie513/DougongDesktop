@@ -47,12 +47,27 @@ public sealed record SlotOccupant(
     internal int RegistrationIndex { get; init; }
 }
 
-/// <summary>保留的 slot key。插件与内置模块都不可占用。</summary>
+/// <summary>保留的 slot key。</summary>
 public static class ReservedSlots
 {
     public const string Main = "main";
 
-    /// <summary>会话界面。占用它会让用户切走后丢掉会话上下文。</summary>
+    /// <summary>
+    /// 会话界面。
+    /// </summary>
+    /// <remarks>
+    /// <b>语义是"内置专用"，不是"谁都别用"</b>。第一版把这条写成注册时一律拒绝，
+    /// 结果内置实现自己都注册不进去，App 启动直接抛异常。
+    /// <para>
+    /// 正确语义：内置实现可以注册，**外部 UI 插件不能覆盖它**（用 priority 也不行）。
+    /// 占用它会让人切走后丢掉会话上下文——那个代价由内置实现承担是合理的，
+    /// 交给第三方则不可接受。
+    /// </para>
+    /// <para>
+    /// 实现放在加载器那层（P3b 判断插件来源），不在注册表这层——
+    /// 注册表不知道谁在调它。
+    /// </para>
+    /// </remarks>
     public const string Conversation = "conversation";
 
     public const string Sidebar = "shell.leading";
@@ -138,9 +153,6 @@ public sealed class SlotRegistry
     /// <exception cref="SlotConflictException">占用保留 key，或 keyed 同 key 重复。</exception>
     public IDisposable Register(string slotKey, SlotOccupant occupant)
     {
-        // 保留 key 硬拦：插件占了 conversation，用户切走后会话界面就没了
-        if (slotKey == ReservedSlots.Main && occupant.Key == ReservedSlots.Conversation)
-            throw new SlotConflictException(slotKey, ReservedSlots.Conversation, occupant.Id);
 
         // 未声明的 slot 直接拒绝：静默接受会让"注册了但界面空着"变成无解的问题
         if (!_kinds.TryGetValue(slotKey, out var kind))
