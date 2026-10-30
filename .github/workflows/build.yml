@@ -1,0 +1,52 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-check:
+    # 与 SDK 仓库一致跑双平台：Avalonia 是跨平台框架，
+    # 只在 Windows 上绿说明不了 Linux/macOS 能用。
+    # 两个平台跑同一份 scripts/all-checks.sh，保证检查内容不因平台分叉。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          # 与 global.json 一致
+          dotnet-version: '10.0.402'
+
+      - name: Restore
+        run: dotnet restore DougongDesktop.slnx
+
+      # 刻意走脚本而不是在这里重写命令。
+      # 两套流程必然漂移，而漂移方向总是"本地全绿、CI 红"。
+      # 这个脚本包含：构建 + 架构守卫正向 + 架构守卫反证。
+      - name: Full self-check
+        shell: bash
+        run: bash scripts/all-checks.sh
+
+      # 反证是守卫测试的价值所在：一条从没红过的检查等于没有检查。
+      # all-checks.sh 内部会逐条验证"破坏架构时守卫真的会失败"，
+      # 但 CI 上单独再贴一次结果，让日志里能直接看到。
+      - name: Show architecture guard verdicts
+        if: always()
+        shell: bash
+        run: |
+          echo "== 正向 =="
+          dotnet run --project tests/DougongDesktop.Architecture.Checks \
+            -c Release --no-build || true
