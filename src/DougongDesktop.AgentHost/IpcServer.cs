@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using Dougong.Agent;
+using Dougong.Ai;
 using DougongDesktop.Framework;
 using DougongDesktop.Ipc;
 
@@ -159,6 +160,11 @@ public sealed class IpcServer : IAsyncDisposable
                     await OpenSessionAsync(open, connection, cancellationToken).ConfigureAwait(false);
                     break;
 
+                case ListModelsCommand:
+                    await connection.SendAsync(BuildModelsEvent(), cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
+
                 case ListDirectoryCommand list:
                     await ListDirectoryAsync(list, connection, cancellationToken).ConfigureAwait(false);
                     break;
@@ -221,6 +227,45 @@ public sealed class IpcServer : IAsyncDisposable
                 connection, $"{command.GetType().Name} 失败：{ex.Message}", cancellationToken)
                 .ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// 构建模型目录（响应 <see cref="ListModelsCommand"/>）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么由宿主算而不是 UI 自己查</b>：模型能力表来自 SDK 的
+    /// <c>ProviderCatalog</c>，而 App 层禁止引用 SDK（架构守卫会红）。
+    /// 经 IPC 传纯数据，UI 侧再转成 Arc 的 <c>AiModel</c>——分层不破，
+    /// UI 也不必知道 SDK 类型。
+    /// </remarks>
+    private ModelsListedEvent BuildModelsEvent()
+    {
+        var models = new List<ModelInfo>();
+        var providers = new List<string>();
+
+        foreach (var (providerId, preset) in ProviderCatalog.AllPresets
+                     .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            providers.Add(providerId);
+
+            foreach (var m in preset.Models)
+            {
+                models.Add(new ModelInfo(
+                    providerId,
+                    m.Id,
+                    m.ContextWindow,
+                    m.MaxOutputTokens,
+                    m.SupportsReasoning));
+            }
+        }
+
+        return new ModelsListedEvent
+        {
+            Sequence = NextStatusSequence(),
+            Models = models,
+            Providers = providers,
+            CurrentModelId = _options.Model,
+        };
     }
 
     /// <summary>

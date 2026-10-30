@@ -81,6 +81,7 @@ public abstract partial record ConversationItem
 [JsonDerivedType(typeof(CancelTurnCommand), "turn/cancel")]
 [JsonDerivedType(typeof(RespondApprovalCommand), "approval/respond")]
 [JsonDerivedType(typeof(ListDirectoryCommand), "fs/list")]
+[JsonDerivedType(typeof(ListModelsCommand), "models/list")]
 public abstract record ClientCommand
 {
     /// <summary>请求 ID。响应带同一个 ID 回来，用于配对。</summary>
@@ -122,6 +123,7 @@ public abstract record ClientCommand
 [JsonDerivedType(typeof(EngineStatusEvent), "engine/status")]
 [JsonDerivedType(typeof(DirectoryListedEvent), "fs/listed")]
 [JsonDerivedType(typeof(WorkspaceChangedEvent), "fs/changed")]
+[JsonDerivedType(typeof(ModelsListedEvent), "models/listed")]
 public abstract record ServerEvent
 {
     public required long Sequence { get; init; }

@@ -113,6 +113,16 @@ public sealed class MainWindow : Window
 
         // 输入区 → 引擎。三段式：确保有会话 → 发回合 → 把本地消息先显示出来
         _conversation.MessageSubmitted += text => _ = SubmitAsync(text);
+
+        // 斜杠命令：/ 开头能选的是"全局动作"，与会话状态无关
+        _conversation.Composer.SetCommands(BuildSlashCommands());
+        _conversation.Composer.CommandInvoked += RunSlashCommand;
+
+        // 用户在 composer 里换了模型：只记日志。
+        // 真正切换需要重开会话（模型是会话级参数），那是 P8d 的事——
+        // 现在假装切换成功比不响应更糟。
+        _conversation.Composer.ModelChanged += modelId =>
+            Console.Error.WriteLine($"[ui] 选择模型 {modelId}（切换需重开会话，P8d 接入）");
         _conversation.StopRequested += () => _ = StopTurnAsync();
 
         LoadUiPlugins();
@@ -326,6 +336,13 @@ public sealed class MainWindow : Window
 
         // 右栏文件 tab 一打开就要有内容，不等用户手动切
         await RequestDirectoryAsync(string.Empty);
+
+        // 模型目录：composer 的模型 pill 需要它。
+        // 不请求的话 pill 会是空的——Arc 在 Models 为空时直接隐藏它。
+        await _engine.SendAsync(new ListModelsCommand
+        {
+            RequestId = Guid.NewGuid().ToString("N"),
+        });
     }
 
     private void OnEngineEvent(ServerEvent evt)
@@ -341,6 +358,16 @@ public sealed class MainWindow : Window
             case EngineStatusEvent status:
                 Console.Error.WriteLine($"[ui] 引擎：{status.State} · {status.Detail}");
                 Shell.StatusBar.SetEngineState(status.State, status.ModelName, status.Detail);
+                break;
+
+            case ModelsListedEvent listed:
+                Console.Error.WriteLine(
+                    $"[ui] 模型目录：{listed.Models.Count} 个 / {listed.Providers.Count} 家，" +
+                    $"当前={listed.CurrentModelId ?? "(未配置)"}");
+                _conversation.Composer.SetModels(
+                    ModelProjection.ToAiModels(listed.Models),
+                    ModelProjection.ToProviders(listed.Providers));
+                _conversation.Composer.SelectModel(listed.CurrentModelId);
                 break;
 
             case WorkspaceChangedEvent changed:
@@ -620,6 +647,66 @@ public sealed class MainWindow : Window
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[ui] 审批答复发送失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 斜杠命令清单。
+    /// </summary>
+    /// <remarks>
+    /// <b>只放已实现的</b>：Arc 会把命令列给用户，点了没反应比没有更糟。
+    /// 现在能用的只有"清空对话"和"打开设置"——它们是纯本地动作，
+    /// 不依赖引擎状态。
+    /// <para>
+    /// dsh 的 <c>ui-commands</c> 有更多（/model、/permission、/compact…）。
+    /// 那些要等对应功能实现后再加，现在加等于给假入口。
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<TKCode.Arc.AiCommand> BuildSlashCommands() =>
+    [
+        new TKCode.Arc.AiCommand
+        {
+            Id = "clear",
+            Name = "clear",
+            Description = "清空当前消息流（不删除会话）",
+        },
+        new TKCode.Arc.AiCommand
+        {
+            Id = "settings",
+            Name = "settings",
+            Description = "打开设置",
+        },
+    ];
+
+    /// <summary>
+    /// 执行斜杠命令。
+    /// </summary>
+    /// <remarks>
+    /// <b>只做本地动作，不发给引擎</b>：斜杠命令在 dsh 里也是客户端行为。
+    /// 需要引擎参与的命令（/model 切换要重开会话）等对应功能实现后再加。
+    /// </remarks>
+    private void RunSlashCommand(string commandId)
+    {
+        switch (commandId)
+        {
+            case "clear":
+                _conversation.Clear();
+                break;
+
+            case "settings":
+                _vm.ActivePanel = "settings";
+                break;
+
+            default:
+                // 不认识的命令：如实说明，不静默吞掉
+                Console.Error.WriteLine($"[ui] 未实现的斜杠命令：{commandId}");
+                _conversation.Add(new NoticeItem
+                {
+                    Id = $"notice-{Guid.NewGuid():N}"[..16],
+                    Level = NoticeLevel.Warning,
+                    Text = $"命令 /{commandId} 还没有实现。",
+                });
+                break;
         }
     }
 

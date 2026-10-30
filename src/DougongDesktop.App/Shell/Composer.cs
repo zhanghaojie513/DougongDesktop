@@ -55,17 +55,32 @@ public sealed class Composer : UserControl
 
         _composer.Sent += (_, e) =>
         {
+            if (_approvalPending) return;
+
+            // 先看有没有命令 token：/clear 这类是**本地动作**，
+            // 不该当成消息发给引擎。
+            //
+            // Arc 没有"命令被选中"的独立事件——命令以 token 形式随 Sent 一起回来。
+            // 所以判断"这一条是命令还是普通消息"只能看 Tokens。
+            if (TryRunCommand(e.Message))
+            {
+                _composer.Clear();
+                return;
+            }
+
             var text = e.Message?.Text?.Trim();
             if (string.IsNullOrEmpty(text)) return;
-
-            // 待决锁：审批没答时不许发新的
-            if (_approvalPending) return;
 
             _composer.Clear();
             Submitted?.Invoke(text);
         };
 
         _composer.StopRequested += (_, _) => StopRequested?.Invoke();
+
+        _composer.ModelChanged += (_, e) =>
+        {
+            if (e.NewModel?.Id is { Length: > 0 } id) ModelChanged?.Invoke(id);
+        };
 
         // 待决提示：不遮挡输入框，就压在输入框上方一行
         _lockHint = new TextBlock
@@ -83,8 +98,110 @@ public sealed class Composer : UserControl
         };
     }
 
+    /// <summary>
+    /// 如果这条输入里带命令 token，执行它并返回 true。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么用 token 而不是解析文本</b>：用户可能手打 "/clear" 当普通文本。
+    /// token 是 Arc 在用户真正从命令列表里选中时才会产生的，用它区分
+    /// "选中了命令"和"打了个像命令的词"。
+    /// <para>
+    /// <b>命令优先于正文</b>：带命令的输入不发给引擎。
+    /// 这一条与 dsh 一致——斜杠命令是本地动作。
+    /// </para>
+    /// </remarks>
+    private bool TryRunCommand(AiComposerMessage? message)
+    {
+        if (message?.Tokens is not { Count: > 0 }) return false;
+
+        foreach (var token in message.Tokens)
+        {
+            // 只认命令类 token；提及（@）与命令不是一回事
+            var kind = token.GetType().GetProperty("Kind")?.GetValue(token)?.ToString();
+            if (kind is not "Command") continue;
+
+            var id = token.GetType().GetProperty("Id")?.GetValue(token) as string;
+            if (id is { Length: > 0 })
+            {
+                CommandInvoked?.Invoke(id);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>用户从 "/" 列表选中并发送了一条命令。</summary>
+    public event Action<string>? CommandInvoked;
+
     /// <summary>底层控件，供诊断确认尺寸。</summary>
     public AiComposer Inner => _composer;
+
+    /// <summary>
+    /// 装上斜杠命令。
+    /// </summary>
+    /// <remarks>
+    /// <b>命令由宿主提供而不是写死在这里</b>：命令的可用性取决于当前状态
+    /// （引擎连上没有、有没有会话）。写死在 Composer 里会让它需要知道
+    /// 这些状态，而它应当只负责输入。
+    /// </remarks>
+    public void SetCommands(IReadOnlyList<AiCommand> commands)
+    {
+        _composer.Commands.Clear();
+        foreach (var c in commands) _composer.Commands.Add(c);
+    }
+
+    /// <summary>
+    /// 装上模型清单与 provider 分组。
+    /// </summary>
+    /// <remarks>
+    /// <b>空列表会隐藏模型 pill</b>（Arc 的行为）。这正是我们要的：
+    /// 没连引擎时不该显示一个点不开的模型选择器。
+    /// </remarks>
+    public void SetModels(IReadOnlyList<AiModel> models, IReadOnlyList<AiModelProvider> providers)
+    {
+        _composer.Models.Clear();
+        foreach (var m in models) _composer.Models.Add(m);
+
+        _composer.Providers.Clear();
+        foreach (var p in providers) _composer.Providers.Add(p);
+    }
+
+    /// <summary>选中某个模型（按 Id）。</summary>
+    /// <remarks>
+    /// <b>找不到时不报错</b>：模型清单可能滞后于当前配置
+    /// （比如配置文件里的模型不在能力表里）。那时 pill 保持未选中状态，
+    /// 比显示一个不存在的模型好。
+    /// </remarks>
+    public void SelectModel(string? modelId)
+    {
+        if (string.IsNullOrWhiteSpace(modelId))
+        {
+            _composer.SelectedModel = null;
+            return;
+        }
+
+        _composer.SelectedModel = _composer.Models
+            .FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 装上 "&#64;" 可引用的条目。
+    /// </summary>
+    /// <remarks>
+    /// <b>工作区文件与目录都放进去</b>：用户想写 "看看 @src/Agent" 和
+    /// "看看 @README.md" 是同一类需求，分成两个入口反而要他先想清楚。
+    /// </remarks>
+    public void SetContextItems(IReadOnlyList<AiContextItem> items)
+    {
+        _composer.ContextItems.Clear();
+        foreach (var i in items) _composer.ContextItems.Add(i);
+    }
+
+    /// <summary>用户选了某个模型。</summary>
+    public event Action<string>? ModelChanged;
+
+
 
     /// <summary>当前是否处于待决锁。</summary>
     public bool IsApprovalPending => _approvalPending;
