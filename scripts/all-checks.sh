@@ -45,6 +45,8 @@ checks="$checks approval-silence-is-denial approval-channel-failure-denies"
 checks="$checks approval-deny-and-stop-really-stops"
 checks="$checks fs-list-rejects-escape dock-unimplemented-tabs-are-labeled fs-list-roundtrips"
 checks="$checks diff-detects-add-modify-delete diff-ignores-same-content"
+checks="$checks cols-match-dsh-constants cols-sidebar-default-280 cols-rightbar-yields-first"
+checks="$checks cols-rightbar-drops-before-center cols-rightbar-default-45pct"
 checks="$checks sdk-files-stay-contained"
 
 for check in $checks; do

@@ -1,0 +1,375 @@
+# dsh 桌面对照规格（1:1 复刻依据）
+
+> **这份文档是什么**：从 dsh 源码实测提取的布局与视觉规格，作为桌面端 1:1 复刻的唯一依据。
+> 所有数字都有出处（文件:行），不是估计。
+
+## 版本索引
+
+| 项 | 值 |
+|---|---|
+| **dsh 版本** | `0.2.2-alpha.2` |
+| **commit** | `ce7073d51254c26cd63b22a60835b8f948deb447` |
+| **commit 时间** | 2026-10-30 00:13:15 +0800 |
+| **仓库** | https://github.com/deepseek-ai/deepseek-harness |
+| **源码位置** | `C:\work\myProject\dsh-src`（sparse checkout，只拉 UI 相关包） |
+| **提取日期** | 2026-10-30 |
+
+**复现命令**：
+
+```sh
+git clone --depth 1 --filter=blob:none --sparse \
+  https://github.com/deepseek-ai/deepseek-harness.git dsh-src
+cd dsh-src
+git sparse-checkout set \
+  packages/client/ui-layout packages/client/ui-theme packages/client/ui-dockkit \
+  packages/client/ui-sidebar packages/client/ui-sidebar-right \
+  packages/client/ui-sidebar-files packages/client/ui-chat \
+  packages/client/ui-conversation packages/client/ui-primitives
+```
+
+**升级时要做的事**：dsh 处于 developer preview，README 原话是
+"THERE WILL BE COMPATIBILITY-BREAKING CHANGES"。换版本后必须重跑提取，
+逐条对比本文件的数字。**不要假设规格稳定。**
+
+---
+
+## 0. 一个必须先说清的事实
+
+**dsh 桌面端没有独立的桌面 UI。** 它是 Electron 外壳，加载的是**同源的 Web 应用**。
+`apps/desktop/README.zh.md` 原话：
+
+> 桌面应用是完整 dsh Web 应用外的一层 Electron 壳。
+
+所以"1:1 复刻 dsh 桌面端"= **1:1 复刻 dsh 的 Web UI**，外壳差异（标题栏、原生菜单、
+窗口按钮）不属于 UI 复刻范围。
+
+**这带来一个直接结论**：`packages/client/ui-*` 就是全部 UI 规格来源，不看 `apps/desktop`。
+
+---
+
+## 1. 三栏几何（最关键的规格）
+
+出处：`packages/client/ui-layout/src/client/columns.ts`
+
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `SIDEBAR_DEFAULT` | **280** | 侧边栏默认宽度 |
+| `SIDEBAR_MIN` | **264** | 拖拽下限 |
+| `SIDEBAR_MAX` | **420** | 拖拽上限 |
+| `SIDEBAR_COLLAPSED` | **56** | 收起后的图标轨道（24px 图标栏 + 两侧 16px padding） |
+| `CENTER_MIN` | **400** | 中栏保护下限 |
+| `RIGHTBAR_MIN` | **300** | 右栏拖拽下限 |
+| `RIGHTBAR_MAX_RATIO` | **0.7** | 右栏上限 = 框架宽 × 70% |
+| `RIGHTBAR_DEFAULT_RATIO` | **0.45** | 右栏首次打开 = 框架宽 × 45% |
+| `SIDEBAR_DRAWER_BREAKPOINT` | **768** | 低于此宽度侧边栏变抽屉（浮层，不占列宽） |
+| `SIDEBAR_AUTO_COLLAPSE` | **1024** | 低于此宽度侧边栏自动收起到轨道 |
+
+### 求解顺序（这是 dsh 的核心取舍）
+
+`computeColumns()` 的顺序是**右栏先让步**：
+
+```ts
+const s = sidebar === 0 ? collapsedWidth : clampWidth(sidebar, 264, 420)
+const available = viewport - s - CENTER_MIN
+const r = rightbar === 0 || available < RIGHTBAR_MIN
+  ? 0                                                    // 放不下就整条轨道消失
+  : Math.min(available, clampWidth(rightbar, 300, viewport * 0.7))
+return { sidebar: s, center: Math.max(0, viewport - s - r), rightbar: r }
+```
+
+**顺序含义**：
+1. 侧边栏**不让步**（除响应式自动收起外）
+2. 右栏**先缩小**到 300
+3. 右栏再让就**整条轨道消失**（`r = 0`）
+4. 只有轨道消失后，中栏才允许低于 400
+
+**这与我当前实现的关键差异**：我现在用 `ResizablePanels` + 百分比 `Sizes`，
+而 dsh 用**像素**宽度 + 这个求解器。百分比在窗口缩放时会漂移，像素才是 dsh 的行为。
+
+### 拖拽
+
+`AppFrame.tsx`：
+- 侧边栏拖拽：`setSidebar(base + dx)`（`base` 是**拖拽开始时的渲染宽度**，
+  不是存储的偏好值——防止"抓住已被压缩的面板"时跳回）
+- 右栏拖拽：`setRightbar(base - dx)`（**反向**，因为右栏贴右边缘）
+- 用 `setPointerCapture` + `requestAnimationFrame` 节流
+- 拖拽期间**暂停轨道过渡动画**，否则列边缘会脱手
+
+---
+
+## 2. 侧边栏几何
+
+出处：`packages/client/ui-sidebar/src/client/SidebarRoot.module.css`
+
+| 位置 | 值 |
+|---|---|
+| 根容器 padding | `6px 8px`（上/下 6，左/右 8） |
+| 根容器字号 | **14px** |
+| 品牌行（展开态） | 高度 **52px**，负 margin `-6px -8px 0`（抵消根 padding，让分隔线通栏） |
+| 品牌行（Windows 原生标题栏） | 高度 **40px** |
+| 新建会话按钮 | 高度 **36px**，圆角 `radius-md`(12px) |
+| 控件行（通用） | 高度 **28px**，圆角 `radius-sm`(8px) |
+| 会话行 | 高度 **36px**，圆角 `radius-md`(12px) |
+| 行内 gap | **6px**（`--dsh-sidebar-label-gap`） |
+| 行 padding | **12px**（`--dsh-sidebar-row-padding`） |
+
+### 收起轨道几何（Figma rail spec，CSS 注释原话）
+
+> 36x36 control boxes centered in the 56px rail (10px side padding),
+> 12px vertical rhythm, 18px from the rail top to the whale's box (24px to the 24-wide whale glyph itself).
+
+- 收起态 padding：`18px 10px 6px`
+- 控件盒：**36 × 36**，居中于 56px 轨道（两侧留 10px）
+- 垂直节奏：**12px**
+- 顶部到 logo 盒：**18px**
+
+### 结构（从上到下）
+
+1. **品牌行**：logo mark + 名称（两个独立 slot）+ 折叠按钮
+2. **新建会话**：占满宽度，左侧图标 + 文字 + 右侧快捷键
+3. **工作区 / 会话列表**：可滚动区，滚动条隐藏但保留布局（`.quietBars`）
+4. **设置**：**固定在底部**
+
+---
+
+## 3. 主区与右栏
+
+出处：`packages/client/ui-layout/README.zh.md` + `AppFrame.tsx`
+
+- 右栏**是一条轨道（track），不是一个盒子**：占位者把自己的面板贴到框架右边缘绘制，
+  轨道只决定中栏要不要让出空间
+- 右栏首次打开：视口宽 × **45%**
+- 右栏上限：视口宽 × **70%**
+- 中栏保护：**400px**
+- `shell.bottom` **横跨三列**，在整行下方；三列按它的高度缩短；**空内容不预留空间**
+- `shell.overlay` 覆盖整个框架
+- `shell.leading` 只在抽屉态或 macOS 侧栏完全隐藏时挂载
+
+### 底部行
+
+**注意与我的实现差异**：我把状态条放在底部行的**右侧**（`*,Auto` 两列）。
+dsh 的 `shell.bottom` 是**横跨整行的单一 slot**，且默认组合**不占用它**。
+
+---
+
+## 4. 颜色 token
+
+出处：`packages/client/ui-theme/src/styles/design-platform.css`（430 行）
+
+- **light**：`body { ... }`（第 177 行起）
+- **dark**：`body[data-ds-dark-theme] { ... }`（第 300 行起）
+- 两段各有 **108 个 `--dsw-alias-*`** 语义 token
+- 前缀 `--dsw-static-*` 是原始色阶（amber / blue / deepseek / green / neutral-bluish / red / violet）
+- 另有 `--dsw-specific-sidebar-fill`（侧边栏填充，与主区分开）
+
+### 关键 token（light / dark 成对）
+
+| token | 用途 |
+|---|---|
+| `--dsw-alias-bg-base` | 文档底色 |
+| `--dsw-alias-bg-layer-1/2/3` | 三层容器 |
+| `--dsw-alias-label-primary` | 主文字 |
+| `--dsw-alias-border-l1..l4` | 四级描边（0.04 / 0.10 / 0.12 / 0.16 黑） |
+| `--dsw-alias-brand-primary` | 品牌色 |
+| `--dsw-alias-bg-mask-1/2/3` | 三级遮罩 |
+
+### 圆角
+
+| token | 值 |
+|---|---|
+| `--dsw-radius-xs` | 4px |
+| `--dsw-radius-sm` | 8px |
+| `--dsw-radius-md` | 12px |
+| `--dsw-radius-lg` | 16px |
+| `--dsw-radius-xl` | 20px |
+| `--dsw-radius-panel` | **28px** |
+
+### 字体
+
+- 品牌字体：**Montserrat**（`--dsw-font-family-brand`）
+- 正文字号默认 **14px**（10–22 可调）
+- 代码字号默认 **11px**（10–16）
+- 终端字号默认 **13px**（10–20）
+
+---
+
+## 4.5 功能面盘点（59 个 UI 包）
+
+> **关键认知修正**：用户要求的是"包含功能"的 1:1，不只是 UI。
+> dsh 有 **59 个 `ui-*` 包**，每个都是一个独立功能域。下面按功能归类。
+
+### 已实现（我们已有）
+
+| dsh 包 | 我们对应 |
+|---|---|
+| `ui-layout` | AppShell 三栏（本轮改成 dsh 几何） |
+| `ui-sidebar` | SidebarView |
+| `ui-chat` / `ui-conversation` | ConversationView |
+| `ui-tool` | ToolCall 卡片（P5） |
+| `ui-approval` | ApprovalCard（P6） |
+| `ui-plan` | 计划 tab（P5/P7） |
+| `ui-theme` | 部分（Arc 主题，未对齐 `--dsw-*`） |
+| `ui-slots` | Ui.Core 的 SlotRegistry |
+
+### 未实现，且**不依赖新 SDK 能力**（可做）
+
+| dsh 包 | 功能 | 工作量估计 |
+|---|---|---|
+| `ui-commands` | `/` 斜杠命令 | 中 |
+| `ui-shortcuts` | 快捷键总览与搜索 | 小 |
+| `ui-model-selection` | `/model` 弹窗 + composer 模型位 | 中 |
+| `ui-settings-general` | 设置外壳 + 通用分区 | 中 |
+| `ui-settings-models` | provider 行、API 密钥、模型列表 | 大 |
+| `ui-settings-plugin-inventory` | 插件清单（按作用域分组） | 中 |
+| `ui-settings-plugins` | 内置插件设置分区 | 中 |
+| `ui-workspace` | 工作区浏览器（分组/扁平会话行） | 中 |
+| `ui-session` | 会话控制器与逐会话上下文 | 中 |
+| `ui-attachment` | 附件栏、拖放、图片画廊、灯箱 | 大 |
+| `ui-input-trigger` | `/` 与 `@` 触发流水线与候选菜单 | 中 |
+| `ui-reference` | `@file` / `@session` 引用 | 中 |
+| `ui-context-menu` | 右键菜单扩展点 | 小 |
+| `ui-message-feedback` | 消息 Like/Dislike + 反馈弹窗 | 小 |
+| `ui-user-questions` | `ask_user_question` 卡片 + 计时等待 | 中 |
+| `ui-deliverables` | 改动文件卡片、交付文件卡片、review tab | 中 |
+| `ui-trajectory` | 按轮次的事件记录表 + 时间概览 | 大 |
+| `ui-dockkit` | 可分裂的标签格树（引线布局套件） | 大 |
+| `ui-sidebar-right` | 每会话一个停靠面 + tab 类型注册表 | 大 |
+| `ui-sidebar-files` | 工作区文件树（逐层列出） | 中（部分已有） |
+| `ui-sidebar-documentpreview` | Markdown/代码/图片/PDF/Office 预览 | 大 |
+| `ui-goal` | composer 目标条带 | 小 |
+| `ui-skill` | skill 引用与调用卡片 | 中 |
+| `ui-jobs` | 后台任务列表 + 流式输出面板 | 中 |
+| `ui-schedule` | 自动化任务与会话提醒 | 大 |
+| `ui-subagent` | subagent 目录与 `@` 引用 | 大 |
+| `ui-workflow-run` | 工作流运行节点 | 大 |
+| `ui-permission-presets` | 默认权限行 + `/permission` 选择器 | 中 |
+| `ui-agent-preset` | Agent preset 选择与说明 | 中 |
+| `ui-secret-mask` | 已发送文本里的凭据遮挡 | 小 |
+| `ui-file-actions` | 下载/另存原始文件 | 小 |
+| `ui-file-drag` | 应用内文件拖放 | 小 |
+| `ui-plugin-manager` | 插件组合包管理与配置 | 大 |
+| `ui-plugin-market` | 插件市场「发现」页 | 大 |
+
+### 未实现，且**依赖我们没有的能力**（做不到 / 需外部组件）
+
+| dsh 包 | 功能 | 障碍 |
+|---|---|---|
+| `ui-sidebar-terminal` | 交互式 shell 标签页 | **PTY 独立进程**，SDK 不做，工作量约一个阶段 |
+| `ui-sidebar-browser` | 沙箱内浏览 HTTP(S) 页面 | 需要内嵌浏览器内核（WebView2），Avalonia 需额外集成 |
+| `ui-settings-account` | DeepSeek 账号登录 | **用户已明确不做账户登录** |
+| `ui-settings-web-search` | 网页搜索 API 设置 | 依赖 DeepSeek 侧 API，我们没有 |
+| `ui-settings-subagent` | 子智能体委派深度/并行 | 依赖 SDK 的 subagent 能力 |
+| `ui-settings-agent-loop` | 并行工具调用上限 | 依赖 SDK 暴露该配置 |
+| `ui-open-in-app` | 在外部应用打开文件 | 平台相关，Avalonia 可做（`Process.Start`），低优先 |
+| `ui-directory-picker-native` | 原生目录选择器 | Avalonia 有 `StorageProvider`，**可做** |
+
+### 数量结论
+
+| 类别 | 数量 |
+|---|---|
+| 已实现 | 8 |
+| 可做（不依赖新能力） | 30 |
+| 依赖我们没有的能力 | 8 |
+| **合计** | 46 个功能域（包数 59，含 13 个基础/内部包） |
+
+**30 个"可做"是主要工作量来源。** 按每项 0.5–3 天估，全做完约 **45–60 天**，
+远超原计划 P8 的定位。这必须由用户决定取舍。
+
+---
+
+## 5. 与当前实现的差异清单
+
+| # | 项目 | 当前实现 | dsh | 影响 |
+|---|---|---|---|---|
+| 1 | 三栏宽度 | Arc `ResizablePanels` + 百分比 `Sizes` | **像素** + `computeColumns` 求解器 | 布局行为不同：dsh 右栏先让步并整条消失 |
+| 2 | 侧边栏默认宽 | 404（实测，2.4 份） | **280** | 视觉明显不同 |
+| 3 | 侧边栏收起 | Arc 面板折叠 | **56px 图标轨道** | 收起后要有图标栏，不是消失 |
+| 4 | 右栏 | `Tabs` 横排 tab | 贴右边缘的面板 + 轨道 | 形态不同 |
+| 5 | 底部行 | 左侧 slot + 右侧状态条 | 横跨三列的单一 slot，**默认空** | 需要重构 |
+| 6 | 状态条 | 自建色点 + 文字 | dsh **底部默认不占位** | 可能要移除或移位 |
+| 7 | 断点 | 无 | 768（抽屉）/ 1024（自动收起） | 需要响应式 |
+| 8 | 配色 | Arc 主题 | `--dsw-*` 108 个语义 token | 需要映射表 |
+
+---
+
+## 6. 无法 1:1 复刻的部分（逐条反馈）
+
+| 项目 | dsh 做法 | 我们做不到的原因 | 处置 |
+|---|---|---|---|
+| **Electron 毛玻璃/vibrancy** | macOS 侧边栏半透明叠加窗口 vibrancy | Avalonia 无对应窗口模糊 API | 用不透明背景替代，深浅色分别取值 |
+| **CSS `grid-template-columns` 过渡** | 轨道宽度离散变化时有 600ms 缓动 | Avalonia 的 Grid 列宽无内建过渡 | 用 `Transitions` 做宽度动画，效果接近但非像素级一致 |
+| **精确 60fps 拖拽跟随** | rAF 节流 + 指针捕获 | Avalonia 拖拽是事件驱动，无 rAF | 直接跟随指针，实际体验一致 |
+| **`device-posture` 折叠屏** | 半折叠时侧边栏占半宽 | Avalonia 无设备姿态 API | **不做**，桌面端无折痕屏场景 |
+| **Web 字体回退链** | 用户自选字体列表 + CSS 通用族 | Avalonia 需 `FontManager` 注册，无 CSS 回退 | 只支持已注册字体，不支持任意字体名 |
+| **`color-mix()` 动态混色** | 部分 token 用 `color-mix` 运行时混 | Avalonia 无运行时混色 | 预计算成固定值 |
+
+---
+
+## 7. 复刻顺序（按依赖）
+
+1. **三栏几何**——换成像素求解器（影响最大，其余都建在它上面）
+2. **配色 token**——建立 `--dsw-*` → Avalonia `Color` 的映射表
+3. **侧边栏**——按 280/56/品牌行 52/会话行 36 重排
+4. **底部行**——改成横跨三列的单一 slot
+5. **右栏**——从 `Tabs` 改成贴边面板 + 轨道
+6. **断点**——768 抽屉 / 1024 自动收起
+
+---
+
+## 8. 复刻验收方式
+
+沿用既有判据——**控件树 dump 优于截图**：
+
+- 三栏宽度必须等于 `computeColumns(视口宽, ...)` 的计算结果（逐像素）
+- 侧边栏收起后必须是 **56px 且含图标**
+- 断点：窗口宽 1023 时侧边栏自动收起；767 时变抽屉（不占列宽）
+- 右栏在中栏不足 400 时整条消失
+
+---
+
+## 9. 由目标组件决定的偏差（逐条反馈）
+
+> 这一节记的是**我们的 UI 框架做不到 dsh 那个数值**的地方。
+> 不硬凑，如实记录差在哪、为什么、影响多大。
+
+### 9.1 侧边栏收起宽度：dsh 56px vs Arc 64px
+
+| 项 | dsh | 我们（TKCode.Arc `Sidebar`） |
+|---|---|---|
+| 收起轨道宽度 | **56px** | **64px**（写死，无可绑定属性） |
+| 可调项 | — | 只有 `OpenWidth` 可绑定 |
+
+**证据**：`TKCode.Arc.Blocks.xml` 里 `Sidebar.IsCollapsed` 的注释是
+"Whether the sidebar is the 64px icon rail (two-way)"，且属性列表里
+没有任何宽度相关的可绑定项用于收起态（`PaneWidth` 是只读的实际宽度）。
+
+**影响**：整体宽度差 8px，中栏因此宽 8px。视觉上可见但不突兀。
+
+**选项**：
+1. 接受 8px 差异（推荐——用 Arc 的 `Sidebar` 换来品牌行/筛选/折叠动画全部现成）
+2. 自建侧边栏控件，精确复刻 56px。代价：重写约 400 行，并失去 Arc 的折叠动画与无障碍处理
+
+**当前选择**：方案 1，接受 8px。
+
+### 9.2 待确认的其他偏差
+
+| 项 | dsh | 我们 | 状态 |
+|---|---|---|---|
+| 折叠动画 | CSS 过渡 | Arc 的 morph spring | 视觉接近，时长不同 |
+| 会话行圆角 | 12px（`radius-md`） | Arc Section 内建 | 待核 |
+| 品牌行高 | 52px | Arc `Header` | 待核 |
+
+---
+
+## 10. 实现进度（P8a）
+
+| 项 | 状态 |
+|---|---|
+| 三栏像素求解器 | ✅ 完成，实测 1280 → `280 / 1000 / 0`，右栏开 → `280 / 424 / 576` |
+| 常量对齐 dsh `columns.ts` | ✅ 全部（280/264/420/56/400/300/0.7/0.45/768/1024） |
+| 响应式 1024 自动收起 / 768 抽屉 | ✅ 已实现（`_narrowExpanded` 尊重手动展开） |
+| 底部行横跨三列 | ✅ 已改（单一 slot，空内容不占位） |
+| 状态条移到侧边栏底部 | ✅ 完成（260×14） |
+| 右栏注册与 45% 首开 | ✅ 完成（576px） |
+| 收起 56px 轨道 | ⚠️ **做不到，Arc 是 64px**（见 9.1） |
+| 配色 token 108 个 | ⬜ 待做 |

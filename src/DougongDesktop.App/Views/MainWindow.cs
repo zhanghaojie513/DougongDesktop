@@ -764,7 +764,15 @@ public sealed class MainWindow : Window
         }
 
         Report("AppShell", shell);
-        Report("ResizablePanels", shell?.GetVisualDescendants().OfType<ResizablePanels>().FirstOrDefault());
+
+        // dsh 对照：三栏宽度必须等于求解器结果（不是"看起来差不多"）
+        if (shell is AppShell host)
+        {
+            var lay = host.Layout;
+            Console.Error.WriteLine(
+                $"[shell] dsh 三栏 sidebar={lay.Sidebar:0} center={lay.Center:0} rightbar={lay.Rightbar:0}" +
+                $"（期望 sidebar {Columns.SidebarDefault:0} / 右栏 {(host.IsRightbarShown ? "45%" : "0")}）");
+        }
         // 按类型取 FirstOrDefault 会拿到消息流里的 ItemsControl（那是最大的一个），
         // 不是底部条。改成从 AppShell 拿它自己持有的引用。
         if (shell is AppShell appShell)

@@ -70,6 +70,9 @@ public static class Program
         // P7：右栏 dock 的路径边界与未实现标注
         failures += DockChecks.Run(breakMode);
 
+        // P8a：三栏几何必须与 dsh columns.ts 一致
+        failures += ColumnChecks.Run(breakMode);
+
         // 事件投影（纯映射层，表驱动）
         failures += ProjectionChecks.Run(breakMode);
 
