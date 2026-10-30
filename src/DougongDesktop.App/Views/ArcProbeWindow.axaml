@@ -55,6 +55,23 @@
         </StackPanel>
       </arc:Card>
 
+      <!-- 5. Special 包的 agent 组件（P5/P7/P7.5 的核心） -->
+      <arc:Card Title="5. Special 组件（ToolCall / AgentStatus / AgentPlan / ContextWindow）">
+        <StackPanel Spacing="16" Margin="0,12,0,0">
+          <TextBlock Text="AgentStatus（状态胶囊，收起态）" FontSize="12" Opacity="0.7"/>
+          <arc:AgentStatus x:Name="ProbeStatus" HorizontalAlignment="Left"/>
+
+          <TextBlock Text="ToolCall（单次工具调用）" FontSize="12" Opacity="0.7"/>
+          <arc:ToolCall x:Name="ProbeToolCall"/>
+
+          <TextBlock Text="AgentPlan（计划清单）" FontSize="12" Opacity="0.7"/>
+          <arc:AgentPlan x:Name="ProbePlan" Height="140"/>
+
+          <TextBlock Text="ContextWindow（上下文用量）" FontSize="12" Opacity="0.7"/>
+          <arc:ContextWindow x:Name="ProbeContext" Height="200"/>
+        </StackPanel>
+      </arc:Card>
+
       <!-- 4. 主题切换 -->
       <arc:Card Title="4. 主题">
         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">

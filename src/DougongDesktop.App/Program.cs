@@ -16,6 +16,7 @@ internal static class Program
             .WithInterFont()      // Avalonia.Fonts.Inter：正文字体
             .WithArcFonts()       // TKCode.Arc.Fonts：Geist 显示体 + Geist Mono 代码体
             .UseArc(arc => arc
-                .UseArcControls())  // 注册控件、主题、令牌（0.3.2 入口，不再是 UseAtomUI）
+                .UseArcControls()    // 基础控件、主题、令牌（0.3.2 入口，不再是 UseAtomUI）
+                .UseArcSpecial())    // agent 组件：ToolCall/AgentStatus/AgentPlan/ContextWindow
             .LogToTrace();
 }

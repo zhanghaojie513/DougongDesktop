@@ -206,6 +206,12 @@ public sealed partial class ArcProbeWindow : Window
         var switches = this.GetLogicalDescendants().OfType<TKCode.Arc.Switch>().ToArray();
         Console.Error.WriteLine($"[probe] Arc.Switch 实例数     {switches.Length}");
 
+        // Special 包的 agent 组件
+        Report("AgentStatus", this.FindControl<TKCode.Arc.AgentStatus>("ProbeStatus"));
+        Report("ToolCall", this.FindControl<TKCode.Arc.ToolCall>("ProbeToolCall"));
+        Report("AgentPlan", this.FindControl<TKCode.Arc.AgentPlan>("ProbePlan"));
+        Report("ContextWindow", this.FindControl<TKCode.Arc.ContextWindow>("ProbeContext"));
+
         Console.Error.WriteLine($"[probe] 窗口客户区           {ClientSize.Width:0.0} x {ClientSize.Height:0.0}");
         Console.Error.WriteLine("[probe] DUMP-END");
     }
