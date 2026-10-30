@@ -1,0 +1,267 @@
+using System.Diagnostics;
+using System.Net.Sockets;
+using System.Text.Json;
+using DougongDesktop.Ipc;
+
+namespace DougongDesktop.App.Services;
+
+/// <summary>
+/// UI 侧的 IPC 客户端。
+/// </summary>
+/// <remarks>
+/// <b>它只依赖 <c>DougongDesktop.Ipc</c></b>——不认识 SDK、不认识 Framework。
+/// 这是"换掉 agent 框架时 UI 一行不改"的具体体现。
+/// <para>
+/// 三条职责：
+/// <list type="number">
+/// <item>发现引擎：读 <c>endpoint.json</c>，连不上就尝试拉起 AgentHost</item>
+/// <item>收发消息：命令出去、事件回来，按 <c>Sequence</c> 检测缺口</item>
+/// <item>故障可见：连不上、序号乱、引擎报错都要让用户看见，不静默重试</item>
+/// </list>
+/// </para>
+/// </remarks>
+public sealed class EngineClient : IAsyncDisposable
+{
+    private readonly string _endpointFile;
+    private readonly Action<string> _log;
+    private IpcConnection? _connection;
+    private CancellationTokenSource? _readLoop;
+    private long _lastSequence;
+
+    public EngineClient(Action<string>? log = null)
+    {
+        _endpointFile = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".dougong-desktop", "endpoint.json");
+
+        _log = log ?? (_ => { });
+    }
+
+    /// <summary>连接状态变化。UI 用它更新状态胶囊。</summary>
+    public event Action<EngineConnectionState, string?>? StateChanged;
+
+    /// <summary>收到服务端事件。</summary>
+    public event Action<ServerEvent>? EventReceived;
+
+    public EngineConnectionState State { get; private set; } = EngineConnectionState.Disconnected;
+
+    public long LastSequence => Interlocked.Read(ref _lastSequence);
+
+    /// <summary>
+    /// 连接引擎。失败时按顺序尝试：读端点 → 拉起 AgentHost → 再连。
+    /// </summary>
+    /// <param name="executablePath">
+    /// AgentHost 可执行文件路径。null 时按"与 UI 同目录的 AgentHost"推断。
+    /// </param>
+    public async Task<bool> ConnectAsync(string? executablePath = null, CancellationToken ct = default)
+    {
+        SetState(EngineConnectionState.Connecting, null);
+
+        // ① 先试现有端点
+        if (await TryConnectEndpointAsync(ct).ConfigureAwait(false))
+            return true;
+
+        // ② 连不上：可能没启动，也可能端点文件残留。拉起一个再试。
+        _log("端点不可用，尝试启动 AgentHost…");
+        SetState(EngineConnectionState.Starting, null);
+
+        if (!await StartAgentHostAsync(executablePath, ct).ConfigureAwait(false))
+            return false;
+
+        // ③ 等它就绪（最多 15 秒）
+        for (var i = 0; i < 30; i++)
+        {
+            await Task.Delay(500, ct).ConfigureAwait(false);
+            if (await TryConnectEndpointAsync(ct).ConfigureAwait(false))
+                return true;
+        }
+
+        SetState(EngineConnectionState.Failed, "AgentHost 启动后 15 秒内仍未就绪。");
+        return false;
+    }
+
+    /// <summary>发命令。未连接时抛错，不排队假装成功。</summary>
+    public async Task SendAsync(ClientCommand command, CancellationToken ct = default)
+    {
+        var connection = _connection
+            ?? throw new InvalidOperationException("未连接引擎，无法发送命令。");
+
+        await connection.SendAsync(command, ct).ConfigureAwait(false);
+    }
+
+    private async Task<bool> TryConnectEndpointAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!File.Exists(_endpointFile)) return false;
+
+            var json = await File.ReadAllTextAsync(_endpointFile, ct).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+
+            if (!doc.RootElement.TryGetProperty("port", out var portElement)) return false;
+            var port = portElement.GetInt32();
+
+            // 协议版本不匹配时明确拒绝，不"尽量解析"
+            if (doc.RootElement.TryGetProperty("protocolVersion", out var version)
+                && version.GetInt32() != IpcProtocol.Version)
+            {
+                SetState(EngineConnectionState.Failed,
+                    $"引擎协议版本 {version.GetInt32()} 与客户端 {IpcProtocol.Version} 不一致。");
+                return false;
+            }
+
+            var connection = await IpcConnection.ConnectAsync($"127.0.0.1:{port}", ct)
+                .ConfigureAwait(false);
+
+            _connection = connection;
+            _readLoop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+            _ = Task.Run(() => ReadLoopAsync(connection, _readLoop.Token), CancellationToken.None);
+
+            SetState(EngineConnectionState.Connected, null);
+            _log($"已连接 127.0.0.1:{port}");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or SocketException)
+        {
+            // 端点文件残留是正常现象：进程被杀时来不及清理。
+            // 所以文件存在不代表引擎活着——必须真的连上才算。
+            return false;
+        }
+    }
+
+    private async Task ReadLoopAsync(IpcConnection connection, CancellationToken ct)
+    {
+        try
+        {
+            await connection.ReadLoopAsync(
+                json =>
+                {
+                    if (json.Deserialize<ServerEvent>(IpcProtocol.Json) is not { } evt) return Task.CompletedTask;
+
+                    // 序号缺口检测：不假装完整，明确要求重同步
+                    var expected = Interlocked.Read(ref _lastSequence) + 1;
+                    if (evt.Sequence > 0 && evt.Sequence != expected && _lastSequence > 0)
+                    {
+                        _log($"[序号缺口] 期望 {expected}，收到 {evt.Sequence}");
+                        SetState(EngineConnectionState.Failed,
+                            $"事件序号缺口（期望 {expected}，收到 {evt.Sequence}），需要重新同步。");
+                    }
+
+                    if (evt.Sequence > 0) Interlocked.Exchange(ref _lastSequence, evt.Sequence);
+
+                    EventReceived?.Invoke(evt);
+                    return Task.CompletedTask;
+                },
+                (line, ex) => _log($"[坏行] {ex.Message}：{(line.Length > 80 ? line[..80] : line)}"),
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // 正常关闭
+        }
+        catch (Exception ex)
+        {
+            _log($"[读循环异常] {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested)
+                SetState(EngineConnectionState.Disconnected, "引擎连接已断开。");
+        }
+    }
+
+    /// <summary>
+    /// 启动 AgentHost。
+    /// </summary>
+    /// <remarks>
+    /// <b>不通过命令行参数传密钥</b>：环境变量已经在本进程里，子进程默认继承。
+    /// 命令行参数会出现在进程列表里，任何人 `ps` 一下就看到了。
+    /// </remarks>
+    private async Task<bool> StartAgentHostAsync(string? executablePath, CancellationToken ct)
+    {
+        var path = executablePath ?? InferAgentHostPath();
+        if (path is null || !File.Exists(path))
+        {
+            SetState(EngineConnectionState.Failed,
+                $"找不到 AgentHost：{path ?? "(未推断出路径)"}。" +
+                "请先运行 dotnet build，或手动启动 src/DougongDesktop.AgentHost。");
+            return false;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = path,
+                // 不重定向输出：AgentHost 的日志走它自己的 stderr，
+                // 我们不需要在这里读（否则还要处理缓冲区满的问题）
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+
+            _log($"已启动 {Path.GetFileName(path)}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetState(EngineConnectionState.Failed, $"启动 AgentHost 失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>按约定推断 AgentHost 路径：与 UI 同目录、或是开发期的 build 输出。</summary>
+    private static string? InferAgentHostPath()
+    {
+        var exe = OperatingSystem.IsWindows() ? "DougongDesktop.AgentHost.exe" : "DougongDesktop.AgentHost";
+
+        // ① 发布后：与 UI 同目录
+        var beside = Path.Combine(AppContext.BaseDirectory, exe);
+        if (File.Exists(beside)) return beside;
+
+        // ② 开发期：src 下的 build 输出
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(
+                dir.FullName, "src", "DougongDesktop.AgentHost", "bin", "Release", "net10.0", exe);
+            if (File.Exists(candidate)) return candidate;
+
+            var debug = Path.Combine(
+                dir.FullName, "src", "DougongDesktop.AgentHost", "bin", "Debug", "net10.0", exe);
+            if (File.Exists(debug)) return debug;
+
+            dir = dir.Parent;
+        }
+
+        return null;
+    }
+
+    private void SetState(EngineConnectionState state, string? detail)
+    {
+        if (State == state && detail is null) return;
+        State = state;
+        StateChanged?.Invoke(state, detail);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _readLoop?.Cancel();
+        _readLoop?.Dispose();
+
+        if (_connection is not null)
+            await _connection.DisposeAsync().ConfigureAwait(false);
+
+        _connection = null;
+    }
+}
+
+/// <summary>引擎连接状态。UI 用它渲染状态胶囊。</summary>
+public enum EngineConnectionState
+{
+    Disconnected,
+    Connecting,
+    Starting,
+    Connected,
+    Failed,
+}

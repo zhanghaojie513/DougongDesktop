@@ -176,6 +176,20 @@ public sealed class SlotRegistry
         _kinds.TryGetValue(slotKey, out var kind) ? kind : null;
 
     /// <summary>
+    /// 某 slot 的占位者集合发生变化（注册、注销、优先级变化）。
+    /// </summary>
+    /// <remarks>
+    /// <b>没有这个通知，single/keyed 类型的 slot 换了模板也不会重绘</b>——
+    /// <c>ContentControl</c> 只在 <c>Content</c> 或 <c>ContentTemplate</c> 属性被赋值时才更新，
+    /// 而注册表内部变了它不知道。实测确认过：注册新模板后界面仍是旧的。
+    /// <para>
+    /// list 类型不走这里——<see cref="ObservableCollection{T}"/> 已经自动通知
+    /// <c>ItemsControl</c>。
+    /// </para>
+    /// </remarks>
+    public event Action<string>? Changed;
+
+    /// <summary>
     /// 注册一个占位者。返回句柄，释放即注销。
     /// </summary>
     /// <exception cref="SlotConflictException">占用保留 key，或 keyed 同 key 重复。</exception>
@@ -212,6 +226,7 @@ public sealed class SlotRegistry
         // list kind 才进可观察集合；kind 来自声明，不再靠硬编码名字
         if (kind == SlotKind.List) _lists[slotKey].Add(stamped);
 
+        Changed?.Invoke(slotKey);
         return new Registration(this, slotKey, stamped);
     }
 
@@ -319,10 +334,12 @@ public sealed class SlotRegistry
 
     private void Unregister(string slotKey, SlotOccupant occupant)
     {
+        var changed = false;
         if (_registrations.TryGetValue(slotKey, out var list))
         {
             _registrations[slotKey] = list = list.Where(o => o.RegistrationIndex != occupant.RegistrationIndex).ToList();
             if (list.Count == 0) _registrations.Remove(slotKey);
+            changed = true;
         }
 
         // list kind 同步从可观察集合移除，ItemsControl 会自动回收视图
@@ -331,6 +348,9 @@ public sealed class SlotRegistry
             var existing = observable.FirstOrDefault(o => o.RegistrationIndex == occupant.RegistrationIndex);
             if (existing is not null) observable.Remove(existing);
         }
+
+        if (changed && _kinds.TryGetValue(slotKey, out var kind) && kind != SlotKind.List)
+            Changed?.Invoke(slotKey);
     }
 
     private sealed class Registration(SlotRegistry registry, string slotKey, SlotOccupant occupant) : IDisposable

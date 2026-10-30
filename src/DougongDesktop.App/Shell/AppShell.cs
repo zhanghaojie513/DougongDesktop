@@ -31,7 +31,18 @@ public sealed class AppShell : UserControl
 
         Content = Build();
         DataContext = vm;
+
+        // slot 变化后重取模板：ContentControl 不知道注册表内部变了。
+        // 只影响 single/keyed——list 由 ObservableCollection 自动通知。
+        slots.Changed += slotKey =>
+        {
+            if (_contentBySlot.TryGetValue(slotKey, out var content))
+                content.ContentTemplate = slots.Resolve(slotKey, content.Content as string);
+        };
     }
+
+    /// <summary>single/keyed slot 的 ContentControl，用于响应注册表变化。</summary>
+    private readonly Dictionary<string, ContentControl> _contentBySlot = new(StringComparer.Ordinal);
 
     /// <summary>声明五个 slot。必须在任何注册之前调用。</summary>
     public static void DeclareSlots(SlotRegistry slots)
@@ -133,27 +144,40 @@ public sealed class AppShell : UserControl
     /// <summary>single slot：ContentControl + ContentTemplate。</summary>
     private Control SlotSingle(string slotKey)
     {
-        var template = _slots.Resolve(slotKey);
-        return new ContentControl
+        var control = new ContentControl
         {
             Content = slotKey,
-            ContentTemplate = template,
+            ContentTemplate = _slots.Resolve(slotKey),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
         };
+
+        _contentBySlot[slotKey] = control;
+        return control;
     }
 
     /// <summary>keyed slot：按当前选中的面板 key 取模板。</summary>
     private Control SlotKeyed(string slotKey)
     {
-        var template = _slots.Resolve(slotKey, _vm.ActivePanel);
-        return new ContentControl
+        var control = new ContentControl
         {
             Content = _vm.ActivePanel,
-            ContentTemplate = template,
+            ContentTemplate = _slots.Resolve(slotKey, _vm.ActivePanel),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
         };
+
+        _contentBySlot[slotKey] = control;
+
+        // 面板切换时重取模板（keyed 按 ActivePanel 分派）
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != AppShellViewModel.ActivePanelProperty) return;
+            control.Content = _vm.ActivePanel;
+            control.ContentTemplate = _slots.Resolve(slotKey, _vm.ActivePanel);
+        };
+
+        return control;
     }
 
     /// <summary>安全构建占位者内容：异常隔离在 slot 层。</summary>

@@ -1,6 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.VisualTree;
+using DougongDesktop.App.Services;
 using DougongDesktop.App.Shell;
+using DougongDesktop.Ipc;
 using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
@@ -17,6 +19,8 @@ public sealed class MainWindow : Window
 {
     private readonly SlotRegistry _slots = new();
     private readonly AppShellViewModel _vm = new();
+    private readonly EngineClient _engine = new(msg => Console.Error.WriteLine($"[ui] {msg}"));
+    private IDisposable? _sidebarHandle;
 
     public MainWindow()
     {
@@ -30,7 +34,11 @@ public sealed class MainWindow : Window
 
         Content = new AppShell(_slots, _vm);
 
-        Opened += (_, _) => DumpLayout();
+        Opened += async (_, _) =>
+        {
+            DumpLayout();
+            await ConnectEngineAsync();
+        };
     }
 
     /// <summary>
@@ -84,6 +92,100 @@ public sealed class MainWindow : Window
         {
             Origin = Origin,
         });
+    }
+
+    /// <summary>
+    /// 连接引擎，成功后就拉一次会话列表。
+    /// </summary>
+    /// <remarks>
+    /// <b>失败要可见</b>：连不上时在侧边栏显示原因，而不是留一个空白框让用户猜。
+    /// 这条是 P3a-5 的验收点——"连不上时明确提示"比"连上了能用"更容易被忽略。
+    /// </remarks>
+    private async Task ConnectEngineAsync()
+    {
+        _engine.StateChanged += (state, detail) =>
+            Console.Error.WriteLine($"[ui] 引擎状态 {state}{(detail is null ? "" : $"：{detail}")}");
+
+        _engine.EventReceived += OnEngineEvent;
+
+        var ok = await _engine.ConnectAsync();
+        if (!ok)
+        {
+            Console.Error.WriteLine("[ui] 引擎连接失败，会话列表不可用");
+            return;
+        }
+
+        // 连上后立刻要一次会话列表（真实数据，不是占位）
+        await _engine.SendAsync(new ListSessionsCommand { RequestId = Guid.NewGuid().ToString("N") });
+    }
+
+    private void OnEngineEvent(ServerEvent evt)
+    {
+        switch (evt)
+        {
+            case SessionListedEvent listed:
+                Console.Error.WriteLine($"[ui] 会话列表：{listed.Sessions.Count} 条");
+                foreach (var s in listed.Sessions.Take(5))
+                    Console.Error.WriteLine($"[ui]   {s.Id} · {s.Title} · {s.ItemCount} 条目");
+                UpdateSidebar(listed.Sessions);
+                break;
+
+            case EngineStatusEvent status when status.Detail is { Length: > 0 }:
+                Console.Error.WriteLine($"[ui] 引擎：{status.State} · {status.Detail}");
+                break;
+        }
+    }
+
+    /// <summary>把真实会话列表填进侧边栏 slot（替换占位）。</summary>
+    private void UpdateSidebar(IReadOnlyList<SessionSummary> sessions)
+    {
+        if (_sidebarHandle is null) return;
+
+        _sidebarHandle.Dispose();
+        _sidebarHandle = _slots.Register(ReservedSlots.Sidebar, new SlotOccupant(
+            "builtin.sidebar", 100, MakeTemplate(() => BuildSessionList(sessions)))
+        {
+            Origin = SlotOccupantOrigin.BuiltIn,
+        });
+
+    }
+
+    private Control BuildSessionList(IReadOnlyList<SessionSummary> sessions)
+    {
+        var panel = new StackPanel { Spacing = 2, Margin = new Avalonia.Thickness(8) };
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = sessions.Count == 0 ? "还没有会话" : $"会话（{sessions.Count}）",
+            FontSize = 12,
+            Opacity = 0.6,
+            Margin = new Avalonia.Thickness(8, 8, 8, 6),
+        });
+
+        foreach (var s in sessions.Take(20))
+        {
+            panel.Children.Add(new Border
+            {
+                Padding = new Avalonia.Thickness(8, 6),
+                CornerRadius = new Avalonia.CornerRadius(6),
+                Child = new StackPanel
+                {
+                    Spacing = 2,
+                    Children =
+                    {
+                        new TextBlock { Text = s.Title, FontSize = 13 },
+                        new TextBlock
+                        {
+                            Text = $"{s.ItemCount} 条目 · {s.UpdatedAt:MM-dd HH:mm}",
+                            FontSize = 11,
+                            Opacity = 0.5,
+                        },
+                    },
+                },
+            });
+        }
+
+        return panel;
     }
 
     private static Control Placeholder(string title, string subtitle) => new Border
