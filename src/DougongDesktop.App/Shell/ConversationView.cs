@@ -1,5 +1,8 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Collections;
 using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
@@ -161,8 +164,36 @@ public sealed class ConversationView : UserControl
                     ? "结果未知：可能已执行，请人工核实，不要重试。"
                     : null,
                 Status = status,
+
+                // 两段耗时：成功的那条两段都有，其余只演一种情形，
+                // 用来验证 §6.6 的四行映射规则都显示对。
+                ApprovalElapsed = status switch
+                {
+                    IpcToolCallStatus.Succeeded => TimeSpan.FromMilliseconds(1200),
+                    IpcToolCallStatus.Rejected => TimeSpan.FromMilliseconds(3400),
+                    _ => null,
+                },
+                ExecutionElapsed = status switch
+                {
+                    IpcToolCallStatus.Succeeded => TimeSpan.FromMilliseconds(45),
+                    IpcToolCallStatus.Failed => TimeSpan.FromMilliseconds(12),
+                    _ => null,
+                },
             });
         }
+
+        // JSON 输出：验证 Arc 的 JsonOutput 着色与十行折叠
+        Add(new IpcToolCallItem
+        {
+            Id = NextId(),
+            InvocationId = "inv-json",
+            ToolName = "read_config",
+            ArgumentsJson = "{\"path\":\"appsettings.json\",\"depth\":2}",
+            ResultText = "{\"name\":\"dougong\",\"version\":\"0.1.5\",\"features\":[\"ipc\",\"slots\",\"plugins\"],"
+                         + "\"limits\":{\"context\":200000,\"output\":8192}}",
+            Status = IpcToolCallStatus.Succeeded,
+            ExecutionElapsed = TimeSpan.FromMilliseconds(8),
+        });
 
         Add(new PlanItem
         {
@@ -182,7 +213,15 @@ public sealed class ConversationView : UserControl
             Text = "上下文已压缩：移除 12 条消息，约 48000 → 12000 tokens。模型看到的不再是完整历史。",
         });
 
-        Add(new ReasoningItem { Id = NextId(), Text = "（推理内容示例——SDK 目前不产出实时事件，仅在恢复历史时可能出现）" });
+        // 推理内容：SDK 0.1.1 起有 ReasoningDelta 实时事件，
+        // 但是否出现取决于 provider（只有思考模式的模型才给）
+        Add(new ReasoningItem
+        {
+            Id = NextId(),
+            Text = "（推理示例）用户要看的是默认布局对不对。先确认三栏尺寸，"
+                 + "再看消息流里每种条目是否都渲染。等等——这里要注意 JSON 输出那一档，"
+                 + "它走的是折叠路径，和纯文本不一样。",
+        });
 
         Add(new AssistantMessageItem
         {
@@ -367,7 +406,7 @@ public sealed class ConversationView : UserControl
     private static Control BuildToolCall(IpcToolCallItem item)
     {
         // 用 Arc 的 ToolCall 卡片；状态由 ToolCallItem.Status 决定。
-        // Message 只放一行摘要（诊断原因），完整输出单独处理——
+        // Message 只放一行摘要（诊断原因），完整输出走 Output——
         // 全塞进 Message 会让卡片被长输出撑开。
         var toolItem = new ArcToolCallItem
         {
@@ -375,22 +414,160 @@ public sealed class ConversationView : UserControl
             ToolName = item.ToolName,
             Status = MapStatus(item.Status),
             Title = DescribeTitle(item),
-            Message = item.Diagnostic,
+            Message = DescribeMessage(item),
+            Output = BuildOutput(item.ResultText),
         };
 
-        var card = new ToolCall { Item = toolItem };
+        // Input 是只读集合（没有 AvaloniaProperty，状态变化靠 Id 不重建行），
+        // 所以是"构造后往里加"而不是对象初始化器。
+        foreach (var argument in ParseInput(item.ArgumentsJson) ?? [])
+            toolItem.Input.Add(argument);
 
-        // 没有输出就没有折叠区
-        if (string.IsNullOrWhiteSpace(item.ResultText))
-            return new Border { Margin = new Thickness(12, 4), Child = card };
+        ApplyDuration(toolItem, item);
 
-        var output = BuildToolOutput(item.ResultText);
+        return new Border { Margin = new Thickness(12, 4), Child = new ToolCall { Item = toolItem } };
+    }
 
-        return new Border
+    /// <summary>
+    /// 把参数 JSON 解析成 Arc 的键值对列表。
+    /// </summary>
+    /// <remarks>
+    /// <b>显示的是"模型传了什么"，不是原始 JSON</b>：Arc 的 Input 区是
+    /// 等宽键值列表，比让用户自己在一行压缩 JSON 里找参数清楚得多。
+    /// <para>
+    /// <b>解析失败要退回原文而不是显示空白</b>：参数不可解析本身就是重要信息
+    /// （可能模型吐了坏 JSON）。吞掉它会让用户以为"这个工具没参数"。
+    /// </para>
+    /// </remarks>
+    private static List<ToolCallArgument>? ParseInput(string? argumentsJson)
+    {
+        if (string.IsNullOrWhiteSpace(argumentsJson) || argumentsJson == "{}")
+            return null;
+
+        var list = new List<ToolCallArgument>();
+
+        try
         {
-            Margin = new Thickness(12, 4),
-            Child = new StackPanel { Spacing = 4, Children = { card, output } },
+            using var doc = JsonDocument.Parse(argumentsJson);
+
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                list.Add(new ToolCallArgument
+                {
+                    Key = "(参数)",
+                    Value = argumentsJson,
+                });
+                return list;
+            }
+
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                list.Add(new ToolCallArgument
+                {
+                    Key = prop.Name,
+                    Value = prop.Value.ValueKind == JsonValueKind.String
+                        ? prop.Value.GetString() ?? ""
+                        : prop.Value.GetRawText(),
+                });
+            }
+        }
+        catch (JsonException)
+        {
+            // 坏 JSON：原样给出，不假装没有参数
+            list.Add(new ToolCallArgument { Key = "(无法解析的参数)", Value = argumentsJson });
+        }
+
+        return list.Count > 0 ? list : null;
+    }
+
+    /// <summary>
+    /// 按内容形状选 Arc 的输出类型。
+    /// </summary>
+    /// <remarks>
+    /// <b>JSON 用 <see cref="ToolCallJsonOutput"/>，其余用文本</b>：
+    /// JSON 那一档自带缩进、着色、超过十行折叠——这些自己实现一遍不会更好。
+    /// <para>
+    /// <b>判定用"整段能否解析成 JSON 对象或数组"，不是"看起来像 JSON"</b>：
+    /// 纯数字、`true`、带引号的字符串都是合法 JSON，但它们当文本显示更自然。
+    /// 只认容器类型可以避开这个坑。
+    /// </para>
+    /// </remarks>
+    private static ToolCallOutput? BuildOutput(string? resultText)
+    {
+        if (string.IsNullOrWhiteSpace(resultText)) return null;
+
+        var trimmed = resultText.TrimStart();
+        if (trimmed.StartsWith('{') || trimmed.StartsWith('['))
+        {
+            try
+            {
+                using var _ = JsonDocument.Parse(resultText);
+                return new ToolCallJsonOutput(JsonNode.Parse(resultText)!);
+            }
+            catch (JsonException)
+            {
+                // 不是合法 JSON（可能是被截断的）：退回文本，不吞内容
+            }
+        }
+
+        return new ToolCallTextOutput(resultText);
+    }
+
+    /// <summary>
+    /// 把两段耗时映射到 Arc 的单一 <c>Duration</c> + <c>Summary</c>。
+    /// </summary>
+    /// <remarks>
+    /// <b>都是 null 时不设 Duration</b>：Arc 的 Duration 是可空值，null 表示不显示。
+    /// 用 0 代替会显示出一个假的"瞬间完成"——§6.6 明确禁止。
+    /// <para>
+    /// <b>Summary 里保留两段的拆分</b>：Arc 只有一个时长槽位，但"审批慢"和"执行慢"
+    /// 的排查方向相反。所以合并总分的同时，把拆分写进 Summary。
+    /// </para>
+    /// </remarks>
+    private static void ApplyDuration(ArcToolCallItem toolItem, IpcToolCallItem item)
+    {
+        var approval = item.ApprovalElapsed;
+        var execution = item.ExecutionElapsed;
+
+        if (approval is null && execution is null) return;   // 不显示，不是显示 0
+
+        toolItem.Duration = (approval ?? TimeSpan.Zero) + (execution ?? TimeSpan.Zero);
+
+        toolItem.Summary = (approval, execution) switch
+        {
+            ({ } a, { } e) => $"审批 {FormatSpan(a)} / 执行 {FormatSpan(e)}",
+            (null, { } e) => $"执行 {FormatSpan(e)}",
+            ({ } a, null) => $"等待审批 {FormatSpan(a)}",
+            _ => null,
         };
+    }
+
+    /// <summary>耗时格式化：小于 1 秒用毫秒，否则用一位小数的秒。</summary>
+    /// <remarks>
+    /// <b>毫秒不取整到 0</b>：工具执行常在几十毫秒，取整后显示"0ms"
+    /// 会让人以为没执行。
+    /// </remarks>
+    private static string FormatSpan(TimeSpan span) => span.TotalSeconds >= 1
+        ? $"{span.TotalSeconds:0.0}s"
+        : $"{Math.Max(1, (int)span.TotalMilliseconds)}ms";
+
+    /// <summary>
+    /// 卡片的补充说明。
+    /// </summary>
+    /// <remarks>
+    /// <b>结果未知的文案必须压过诊断信息</b>：两者都有时，先要让用户看到
+    /// "不要重试"——诊断细节是给排查用的，放后面。
+    /// </remarks>
+    private static string? DescribeMessage(IpcToolCallItem item)
+    {
+        if (item.Status == IpcToolCallStatus.Unknown)
+        {
+            return item.Diagnostic is { Length: > 0 } d
+                ? $"结果未知，请人工核实，不要重试。（{d}）"
+                : "结果未知，请人工核实，不要重试。";
+        }
+
+        return item.Diagnostic;
     }
 
     /// <summary>

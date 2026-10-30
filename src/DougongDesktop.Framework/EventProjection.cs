@@ -49,6 +49,16 @@ public static class EventProjection
         /// </remarks>
         public sealed record TextDelta(string Text) : Projection;
 
+        /// <summary>
+        /// 推理内容的增量。
+        /// </summary>
+        /// <remarks>
+        /// <b>不能并进 <see cref="TextDelta"/></b>：推理不是回答。当正文显示会让用户
+        /// 以为模型已经答完；而且推理里常带未定稿的自我纠错（"等等，这里算错了"），
+        /// 当结论呈现就是误导。
+        /// </remarks>
+        public sealed record ReasoningDelta(string Text) : Projection;
+
         /// <summary>工具调用的终态——需要按 InvocationId 找到对应条目。</summary>
         public sealed record ToolCompleted(ToolDispatchResult Result) : Projection;
 
@@ -66,6 +76,10 @@ public static class EventProjection
     public static Projection Map(AgentEvent evt) => evt switch
     {
         AgentEvent.TextDelta delta => new Projection.TextDelta(delta.Text),
+
+        // 推理：SDK 0.1.1 起有实时事件。是否出现取决于 provider——
+        // 不支持思考模式的模型一个都不会有，不能当成必然信号。
+        AgentEvent.ReasoningDelta reasoning => new Projection.ReasoningDelta(reasoning.Text),
 
         AgentEvent.ToolCallRequested requested => new Projection.Added(new ToolCallItem
         {
@@ -155,6 +169,11 @@ public static class EventProjection
             },
             ResultText = result.Result?.Content.GetRawText() ?? result.Diagnostic,
             Diagnostic = result.Diagnostic,
+
+            // 两段耗时原样透传，不做合并——合并会丢掉"慢在哪一段"。
+            // null 保持 null：UI 靠它区分"没发生"和"瞬间完成"。
+            ApprovalElapsed = result.ApprovalElapsed,
+            ExecutionElapsed = result.ExecutionElapsed,
         };
 
     /// <summary>运行结果到 turn 状态。</summary>

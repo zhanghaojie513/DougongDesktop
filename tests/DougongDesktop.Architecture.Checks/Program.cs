@@ -61,6 +61,9 @@ public static class Program
         // 序号缺口 → 重同步。P3 复检补的：原来只有检测没有处置。
         failures += ResyncChecks.Run(breakMode);
 
+        // P5：两段耗时、推理流隔离、计划全量替换
+        failures += ToolChecks.Run(breakMode);
+
         // 事件投影（纯映射层，表驱动）
         failures += ProjectionChecks.Run(breakMode);
 

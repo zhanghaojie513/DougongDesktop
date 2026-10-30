@@ -384,7 +384,7 @@ public sealed class SessionComposer : IDisposable
     {
         dispatcher.Register(new ReadFileTool(workspace));
         dispatcher.Register(new ListDirectoryTool(workspace));
-        dispatcher.Register(new PlanToolAdapter());
+        dispatcher.Register(PlanTools.Create());
     }
 
     public void Dispose() => _client?.Dispose();

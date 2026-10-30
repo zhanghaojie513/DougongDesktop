@@ -41,6 +41,15 @@ public sealed class SessionRuntime : IAsyncDisposable
     private CancellationTokenSource? _currentTurn;
     private string? _currentAssistantItemId;
 
+    /// <summary>
+    /// 当前正在流式的推理条目。
+    /// </summary>
+    /// <remarks>
+    /// <b>与正文条目分开维护</b>：推理与回答是两条独立的流，交错到达。
+    /// 共用一个 Id 会让推理追加到回答里——那正是"把推理当结论"的错误。
+    /// </remarks>
+    private string? _currentReasoningItemId;
+
     private readonly Func<long> _nextSequence;
 
     /// <param name="nextSequence">
@@ -126,6 +135,7 @@ public sealed class SessionRuntime : IAsyncDisposable
 
         _currentTurn = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _currentAssistantItemId = null;
+        _currentReasoningItemId = null;
 
 
         try
@@ -164,6 +174,10 @@ public sealed class SessionRuntime : IAsyncDisposable
                 {
                     case EventProjection.Projection.TextDelta delta:
                         await AppendTextDeltaAsync(turnId, delta.Text, emit).ConfigureAwait(false);
+                        break;
+
+                    case EventProjection.Projection.ReasoningDelta reasoning:
+                        await AppendReasoningDeltaAsync(turnId, reasoning.Text, emit).ConfigureAwait(false);
                         break;
 
                     case EventProjection.Projection.Added added:
@@ -281,6 +295,48 @@ public sealed class SessionRuntime : IAsyncDisposable
 
         var updated = UpdateItem<AssistantMessageItem>(
             turnId, _currentAssistantItemId,
+            existing => existing with { Text = existing.Text + text });
+
+        if (updated is not null)
+        {
+            await emit(new ItemUpdatedEvent
+            {
+                Sequence = NextSequence(),
+                SessionId = SessionId,
+                Item = updated,
+            }).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 追加推理增量。
+    /// </summary>
+    /// <remarks>
+    /// 与正文增量同构，但维护独立的条目 Id。
+    /// <para>
+    /// <b>推理条目标记 IsStreaming</b>：它随 provider 逐段到达，
+    /// 不标的话界面上会显示成"已经写完了的一段引用"，
+    /// 用户会误以为那是模型给出的结论。
+    /// </para>
+    /// </remarks>
+    private async Task AppendReasoningDeltaAsync(
+        string turnId, string text, Func<ServerEvent, Task> emit)
+    {
+        if (_currentReasoningItemId is null)
+        {
+            var item = new ReasoningItem
+            {
+                Id = NextItemId(),
+                Text = text,
+                IsStreaming = true,
+            };
+            _currentReasoningItemId = item.Id;
+            await AppendItemAsync(turnId, item, emit).ConfigureAwait(false);
+            return;
+        }
+
+        var updated = UpdateItem<ReasoningItem>(
+            turnId, _currentReasoningItemId,
             existing => existing with { Text = existing.Text + text });
 
         if (updated is not null)

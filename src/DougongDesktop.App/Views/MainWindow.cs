@@ -4,6 +4,7 @@ using DougongDesktop.App.Services;
 using DougongDesktop.App.Shell;
 using DougongDesktop.Ipc;
 using IpcToolCallItem = DougongDesktop.Ipc.ToolCallItem;
+using IpcToolCallStatus = DougongDesktop.Ipc.ToolCallStatus;
 using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
@@ -266,6 +267,13 @@ public sealed class MainWindow : Window
 
             case ItemUpdatedEvent updated:
                 _conversation.Update(updated.Item);
+
+                // 工具终态 → 回切到"思考中"。不回切的话胶囊会永远停在
+                // "执行 xxx"，看起来像卡住（P5 判据：Working/NeedsInput/Done 随事件变化）
+                if (updated.Item is IpcToolCallItem { Status: not IpcToolCallStatus.Running
+                                                        and not IpcToolCallStatus.Requested
+                                                        and not IpcToolCallStatus.AwaitingApproval })
+                    _capsule.OnToolCompleted();
                 break;
 
             case SessionOpenedEvent opened:
@@ -516,6 +524,16 @@ public sealed class MainWindow : Window
         // 消息条目同理：条目数对但容器数为 0，说明模板没匹配上（P3a 踩过）。
         Console.Error.WriteLine(
             $"[shell] 消息容器 {_conversation.RenderedContainerCount} / 条目 {_conversation.Count}");
+
+        // 工具卡片（P5）：确认 Input 真解析出键值对、Duration 真按规则映射。
+        // 光看"卡片在"不够——Input 解析失败和"这个工具本来就没参数"在界面上一样。
+        var toolCards = all.OfType<TKCode.Arc.ToolCall>().ToArray();
+        var withInput = toolCards.Count(c => c.Item?.Input?.Count > 0);
+        var withDuration = toolCards.Count(c => c.Item?.Duration is not null);
+        var withSummary = toolCards.Count(c => c.Item?.Summary is { Length: > 0 });
+        Console.Error.WriteLine(
+            $"[shell] ToolCall {toolCards.Length} 张" +
+            $"（有 Input {withInput}、有 Duration {withDuration}、有 Summary {withSummary}）");
 
         // 命令面板：光有实例不算数，要确认命令列表真的装上去了
         // （P3a 踩过的坑：控件在、尺寸对、里面是空的）

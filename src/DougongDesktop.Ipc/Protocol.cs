@@ -101,6 +101,22 @@ public sealed record ToolCallItem : ConversationItem
     public ToolCallStatus Status { get; init; } = ToolCallStatus.Requested;
     public string? Diagnostic { get; init; }
 
+    /// <summary>
+    /// 等待审批的耗时。null 表示这一段没有发生（没配审批器），不是 0。
+    /// </summary>
+    /// <remarks>
+    /// <b>与执行耗时分开</b>：审批等待取决于人多快点确认，执行耗时取决于工具本身多慢，
+    /// 两者的优化方向相反。合成一个数会让"这次调用很慢"无法归因。
+    /// <para>
+    /// <b>0 与 null 是两件事</b>：0 表示"审批瞬间通过"，null 表示"根本没有这一阶段"。
+    /// 用 0 冒充会让统计里混进一批假的"审批很快"。
+    /// </para>
+    /// </remarks>
+    public TimeSpan? ApprovalElapsed { get; init; }
+
+    /// <summary>工具执行的耗时。null 表示没有执行（被拒绝或被取消）。</summary>
+    public TimeSpan? ExecutionElapsed { get; init; }
+
     /// <summary>是否可能产生不可撤销的副作用。UI 据此决定风险提示的强度。</summary>
     public bool MayHaveIrreversibleEffects { get; init; }
 }

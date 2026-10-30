@@ -140,69 +140,21 @@ file static class FileInfoExtensions
         info is FileInfo file ? file.Length : 0;
 }
 
-/// <summary>
-/// 计划工具的适配器。SDK 提供 <c>todo_write</c> 工具，模型显式声明计划，
-/// 运行时把结果投影成 <see cref="AgentEvent.PlanUpdated"/>。
+/// 计划工具：直接用 SDK 的 <see cref="TodoWriteTool"/>。
 /// </summary>
 /// <remarks>
-/// 这里用最小实现而不是包装 SDK 内部类型：计划是**模型声明**的，
-/// 不是运行时猜的。没有真实数据源时宁可没有计划，也不要凭空推测。
+/// <b>这里原来手写了一个 <c>PlanToolAdapter</c>，已删除。</b>
+/// 手写版与 SDK 的 <c>TodoWriteTool</c> 逐字重复——同样的 schema、
+/// 同样的权限描述、同样的"全量替换"语义。重复实现的风险不是多写几行，
+/// 而是**将来 SDK 改 schema 时我们这份不会跟着变**，模型按旧 schema 传参
+/// 就会被校验拒绝，而错误信息看起来像是模型的问题。
+/// <para>
+/// SDK 的那个还能顺带被运行时识别成计划来源（投影出 <c>PlanUpdated</c> 事件），
+/// 手写版只是"一个名字叫 todo_write 的普通工具"，计划根本不会出现在界面上。
+/// </para>
 /// </remarks>
-internal sealed class PlanToolAdapter : IAgentTool
+public static class PlanTools
 {
-    public ToolDescriptor Descriptor { get; } = new(
-        Id: "todo_write",
-        Name: "todo_write",
-        Version: "1.0",
-        Description:
-        "声明或更新当前任务的计划。全量替换语义：每次传入完整列表。" +
-        "用于让用户看到你要做什么、做到哪一步。",
-        InputSchema: JsonSerializer.SerializeToElement(new
-        {
-            type = "object",
-            properties = new
-            {
-                entries = new
-                {
-                    type = "array",
-                    description = "完整的计划条目列表",
-                    items = new
-                    {
-                        type = "object",
-                        properties = new
-                        {
-                            content = new { type = "string", description = "这一步要做什么" },
-                            status = new
-                            {
-                                type = "string",
-                                @enum = new[] { "pending", "in_progress", "completed" },
-                            },
-                            priority = new { type = "string", @enum = new[] { "high", "medium", "low" } },
-                        },
-                        required = new[] { "content", "status" },
-                    },
-                },
-            },
-            required = new[] { "entries" },
-        }));
-
-    public ToolPermission DescribePermission(JsonElement arguments) =>
-        new(ToolAccess.None, true, [], [], []);
-
-    public ToolExecutionPlan DescribeExecution(JsonElement arguments) =>
-        new(ToolConcurrency.Serial);
-
-    public ValueTask<AgentToolResult> ExecuteAsync(
-        ToolInvocation invocation, CancellationToken cancellationToken)
-    {
-        // 参数已由 dispatcher 校验；这里只回一个确认，计划内容由
-        // LoopAgentRuntime 转成 PlanUpdated 事件。
-        var count = invocation.Arguments.TryGetProperty("entries", out var entries)
-                    && entries.ValueKind == JsonValueKind.Array
-            ? entries.GetArrayLength()
-            : 0;
-
-        return ValueTask.FromResult(
-            new AgentToolResult(JsonSerializer.SerializeToElement(new { content = $"计划已记录（{count} 项）。" })));
-    }
+    /// <summary>构造计划工具。无参——SDK 的实现不需要工作区。</summary>
+    public static IAgentTool Create() => new TodoWriteTool();
 }

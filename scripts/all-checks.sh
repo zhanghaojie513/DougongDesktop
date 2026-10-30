@@ -37,6 +37,8 @@ checks="$checks placeholder-yields-to-plugin"
 checks="$checks proj-text-delta proj-tool-requested-new-item proj-tool-id-is-deterministic"
 checks="$checks proj-unknown-outcome-preserved proj-unknown-event-ignored proj-outcome-mapping"
 checks="$checks resync-command-roundtrips resync-request-carries-session diag-uiplugin-has-phase"
+checks="$checks tool-durations-passed-through tool-null-duration-stays-null"
+checks="$checks reasoning-separate-from-text plan-replaces-wholesale plan-tool-comes-from-sdk"
 checks="$checks sdk-files-stay-contained"
 
 for check in $checks; do

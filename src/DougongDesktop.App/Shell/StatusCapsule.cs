@@ -141,6 +141,23 @@ public sealed class StatusCapsule : UserControl
         _status.Activity = new AgentStatusActivity($"执行 {toolName}");
 
     /// <summary>
+    /// 工具结束、回到模型思考。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须显式回切</b>：胶囊只在收到新活动描述时才变。工具完成后若不回切，
+    /// 界面会一直停在"执行 read_file"，即使模型已经开始下一轮——
+    /// 那是"卡住"的假象，而胶囊的全部价值就是区分"慢"和"死"。
+    /// </remarks>
+    public void OnToolCompleted()
+    {
+        // 只在回合进行中回切：已经结束的回合不该被拉回"思考中"
+        if (_turnStartedAt is null || _pauseStartedAt is not null) return;
+
+        _status.Status = AgentStatusRunState.Working;
+        _status.Activity = new AgentStatusActivity("思考中");
+    }
+
+    /// <summary>
     /// 回合结束。
     /// </summary>
     /// <remarks>
