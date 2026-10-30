@@ -227,31 +227,53 @@ public sealed record EngineOptions
     /// 校验容量配置自洽。
     /// </summary>
     /// <remarks>
-    /// SDK 的 <c>TokenBudget.EffectiveInput</c> 在预算为负时**直接抛
-    /// ArgumentOutOfRangeException**，而压缩发生在每轮调模型之前——
-    /// 用户填了「上下文 8000 + 输出 8192」，第一次对话就崩，
-    /// 报的错完全看不出是配置问题。
+    /// <b>判定完全走 SDK 的 <see cref="ContextBudgetValidation.Check"/></b>，
+    /// 这里不再自己算减法。此前本类手写了一份
+    /// <c>ctx - out - 512 &lt;= 0</c> 的判断，其中 <c>512</c> 是从
+    /// <c>ContextLimits.OverheadTokens</c> 抄来的副本——那种副本的问题不是
+    /// 抄错了值，而是 <b>SDK 改预留值时我们这份不会跟着变</b>，于是
+    /// "能过我们这关"与"能过 SDK 那关"变成两个不同的判据。判据有两个真源，
+    /// 迟早会分叉，而分叉的表现是"装配通过了，第一次对话才崩"。
     /// <para>
-    /// 所以必须在装配时就拦下来，给出能看懂的话。
+    /// <b>为什么必须在装配时拦</b>：SDK 的 <c>TokenBudget.EffectiveInput</c>
+    /// 在预算为负时直接抛 <see cref="ArgumentOutOfRangeException"/>，而压缩发生在
+    /// 每轮调模型之前——用户填了「上下文 8000 + 输出 8192」，第一次对话就崩，
+    /// 报的错完全看不出是配置问题。
+    /// </para>
+    /// <para>
+    /// <b>窗口未配置是合法状态</b>：<c>IsUsable=true, IsEnabled=false</c>
+    /// 表示"配置没问题，只是压缩不启用"。把它当错误拦下来会让"不配窗口
+    /// 直接聊天"这种用法不可用。
     /// </para>
     /// </remarks>
     public void Validate()
     {
-        if (ContextWindowTokens <= 0) return;   // 没配窗口 = 不压缩，合法
+        var verdict = ContextBudgetValidation.Check(
+            ContextWindowTokens,
+            MaxOutputTokens,
+            TokenBudget.DefaultOverheadTokens);
 
-        // 512 = ContextLimits.OverheadTokens 的默认值（估算误差与工具声明的预留）
-        const int overhead = 512;
-        var effective = ContextWindowTokens - MaxOutputTokens - overhead;
+        if (verdict.IsUsable) return;
 
-        if (effective <= 0)
-        {
-            throw new InvalidOperationException(
-                $"上下文窗口配置不可行：窗口 {ContextWindowTokens} 减去输出 {MaxOutputTokens} " +
-                $"与预留 {overhead} 后为 {effective}，必须为正。\n" +
-                $"请把 DOUGONG_CONTEXT_WINDOW 调到大于 " +
-                $"{MaxOutputTokens + overhead}，或用 DOUGONG_MAX_OUTPUT 调小输出上限。");
-        }
+        // 文案直接用 SDK 的：它知道自己的预留值，也知道该建议调到多少。
+        // 复述一遍只会多一处需要跟着改的地方。
+        throw new InvalidOperationException(
+            verdict.Hint is { Length: > 0 }
+                ? verdict.Detail + Environment.NewLine + verdict.Hint
+                : verdict.Detail);
     }
+
+    /// <summary>
+    /// 当前的容量校验结论（不抛异常版本，供界面展示）。
+    /// </summary>
+    /// <remarks>
+    /// P6 之后的设置页要显示"当前策略"，它需要的是结论而不是异常。
+    /// 与 <see cref="Validate"/> 共用同一次 <c>Check</c> 调用，不另算一套。
+    /// </remarks>
+    public ContextBudgetVerdict Inspect() => ContextBudgetValidation.Check(
+        ContextWindowTokens,
+        MaxOutputTokens,
+        TokenBudget.DefaultOverheadTokens);
 }
 
 /// <summary>

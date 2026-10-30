@@ -18,6 +18,18 @@ namespace DougongDesktop.Architecture.Checks;
 /// </remarks>
 internal static class ToolChecks
 {
+    /// <summary>仓库根：从检查程序所在目录往上找 slnx。</summary>
+    private static readonly string RepoRoot = FindRepoRoot();
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "DougongDesktop.slnx")))
+            dir = dir.Parent;
+
+        return dir?.FullName ?? AppContext.BaseDirectory;
+    }
+
     public static int Run(string? breakMode)
     {
         var failures = 0;
@@ -29,6 +41,7 @@ internal static class ToolChecks
         failures += Case("plan-tool-comes-from-sdk", slug => PlanToolFromSdk(breakMode == slug));
         failures += Case("caps-table-beats-guess", slug => CapsBeatsGuess(breakMode == slug));
         failures += Case("max-output-never-eats-context", slug => MaxOutputNeverEatsContext(breakMode == slug));
+        failures += Case("budget-check-comes-from-sdk", slug => BudgetCheckFromSdk(breakMode == slug));
 
         return failures;
     }
@@ -261,6 +274,149 @@ internal static class ToolChecks
         return okValue == 64_000
             ? null
             : $"正常值不该被改动：200k 窗口下 64k 输出应保持 64000，实际 {okValue}";
+    }
+
+    /// <summary>
+    /// 桌面端不得自己算预算，也不得保留 512 的副本。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么必须读源码，而不是对比结论</b>：我先写了一版"逐格对比
+    /// 桌面端判定与 SDK 判定是否一致"的检查，然后真的把桌面端改回自己算去验证——
+    /// <b>它照样通过</b>。因为副本与真源此刻值相同（都是 512），自己算和
+    /// 调 SDK 得出同样的结论。结论式断言抓不住"值相同但来源不同"。
+    /// <para>
+    /// 真正要守的是：<b>SDK 改预留值时这里能跟着变</b>。那只能用源码断言——
+    /// 检查 <c>Validate</c> 的实现里出现了 <c>ContextBudgetValidation.Check</c>，
+    /// 且没有把 <c>512</c> 写成字面量。字面量一旦写死，SDK 改了也不会跟着变。
+    /// </para>
+    /// <para>
+    /// 顺带断言<b>结论仍然正确</b>：边界（有效预算恰为 0）必须拒绝，
+    /// 窗口未配置必须"可用但不启用"。两条一起，既守来源也守行为。
+    /// </para>
+    /// </remarks>
+    private static string? BudgetCheckFromSdk(bool inject)
+    {
+        var overhead = TokenBudget.DefaultOverheadTokens;
+
+        // ① 行为：边界与未配置
+        var boundary = ContextBudgetValidation.Check(overhead + 8192, 8192, overhead);
+        if (boundary.IsUsable)
+            return "有效预算为 0 时必须判定不可用（SDK 要求为正）";
+
+        var unconfigured = ContextBudgetValidation.Check(0, 8192, overhead);
+        if (!unconfigured.IsUsable || unconfigured.IsEnabled)
+            return $"窗口为 0 应是「可用但不启用」，实际 usable={unconfigured.IsUsable} enabled={unconfigured.IsEnabled}";
+
+        // ② 桌面端结论必须与 SDK 一致（七组配置）
+        var mismatch = CompareVerdicts(overhead);
+        if (mismatch is not null) return mismatch;
+
+        // ③ 源码：Validate 必须调用 SDK，且不得写死预留值
+        var path = Path.Combine(
+            RepoRoot, "src", "DougongDesktop.Framework", "SessionComposer.cs");
+
+        if (!File.Exists(path)) return $"找不到被测源码：{path}";
+        var source = File.ReadAllText(path);
+
+        var validateBody = ExtractMethodBody(source, "public void Validate()");
+        if (validateBody is null) return "没能定位 Validate() 的方法体";
+
+        if (inject)
+        {
+            // 反证：抹掉对 SDK 的调用，模拟"又抄了一份自己算"
+            validateBody = validateBody.Replace("ContextBudgetValidation.Check", "/*removed*/");
+        }
+
+        if (!validateBody.Contains("ContextBudgetValidation.Check", StringComparison.Ordinal))
+        {
+            return "Validate() 没有调用 ContextBudgetValidation.Check —— " +
+                   "自己算的判据会在 SDK 调整预留值后与真源分叉";
+        }
+
+        // 512 的字面量是"副本还在"的直接证据
+        if (System.Text.RegularExpressions.Regex.IsMatch(validateBody, @"512"))
+        {
+            return "Validate() 里出现了 512 字面量 —— 预留值必须取 " +
+                   "TokenBudget.DefaultOverheadTokens，写死会在 SDK 改值时失配";
+        }
+
+        return null;
+    }
+
+    /// <summary>逐组对比桌面端与 SDK 的可用性判定。</summary>
+    private static string? CompareVerdicts(int overhead)
+    {
+        var cases = new (int Window, int Output)[]
+        {
+            (200_000, 8_192),
+            (1_048_576, 1_048_576),    // 病态：out == ctx
+            (1_048_576, 524_288),      // 夹取后
+            (8_000, 8_192),            // 用户填小了
+            (0, 8_192),                // 未配置窗口
+            (overhead + 8_192, 8_192), // 边界：恰为 0
+            (overhead + 8_193, 8_192), // 边界：恰为 1
+        };
+
+        foreach (var (window, output) in cases)
+        {
+            var sdkVerdict = ContextBudgetValidation.Check(window, output, overhead);
+
+            var options = new EngineOptions
+            {
+                BaseUrl = "https://example.invalid",
+                Model = "test-model",
+                ContextWindowTokens = window,
+                MaxOutputTokens = output,
+            };
+
+            bool threw;
+            try
+            {
+                options.Validate();
+                threw = false;
+            }
+            catch (InvalidOperationException)
+            {
+                threw = true;
+            }
+
+            if (threw != !sdkVerdict.IsUsable)
+            {
+                return $"窗口 {window} / 输出 {output}：桌面端 {(threw ? "拒绝" : "通过")}，" +
+                       $"SDK {(sdkVerdict.IsUsable ? "通过" : "拒绝")} —— 两套判据已分叉";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 从源码里截出某个方法的方法体（花括号配平）。
+    /// </summary>
+    /// <remarks>
+    /// <b>按配平花括号截取而不是取到下一个 <c>///</c></b>：方法体里有
+    /// 对象初始化器与插值字符串，靠模式匹配很容易截早或截晚。
+    /// </remarks>
+    private static string? ExtractMethodBody(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        if (start < 0) return null;
+
+        var open = source.IndexOf('{', start);
+        if (open < 0) return null;
+
+        var depth = 0;
+        for (var i = open; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}')
+            {
+                depth--;
+                if (depth == 0) return source[open..(i + 1)];
+            }
+        }
+
+        return null;
     }
 
     private static int Case(string slug, Func<string, string?> body)
