@@ -32,7 +32,7 @@ for (var i = 0; i < args.Length; i++)
                 用法：
                   dougong-desktop-host [--port <端口>] [--workspace <目录>]
 
-                环境变量（密钥只从环境变量读，不落盘）：
+                环境变量（当前阶段密钥只从这里读，不落盘）：
                   DOUGONG_PROVIDER_BASE      服务地址，如 https://api.deepseek.com
                   DOUGONG_PROVIDER_MODEL     模型名
                   DOUGONG_PROVIDER_KEY       密钥

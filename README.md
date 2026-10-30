@@ -186,7 +186,10 @@ dotnet run --project src/DougongDesktop.App
 引擎启动后把端口写进 `~/.dougong-desktop/endpoint.json`，UI 读它来连接。
 
 > [!IMPORTANT]
-> **密钥只从环境变量读，不落盘、不进日志。** 这是刻意的——配置文件会进 git、进备份、进日志。
+> **密钥不进配置文件、不进日志、不进会话记录。**
+> 当前版本（P0–P2）只从环境变量读；桌面端的凭据管理器接入在 P9，
+> 届时可用系统钥匙串保存（SDK 的契约允许"环境变量**或宿主凭据通道**"）。
+> 无论哪条路，**明文永不落盘**。
 
 > [!TIP]
 > **协议必须显式匹配端点。** 地址含 `/anthropic` 但协议写 `openai` 会 404，
@@ -199,7 +202,7 @@ dotnet run --project src/DougongDesktop.App
 |---|:---:|---|
 | `DOUGONG_PROVIDER_BASE` | ✅ | 服务地址 |
 | `DOUGONG_PROVIDER_MODEL` | ✅ | 模型名 |
-| `DOUGONG_PROVIDER_KEY` | ✅ | 密钥 |
+| `DOUGONG_PROVIDER_KEY` | ✅ | 密钥（当前唯一来源；P9 后可用系统凭据管理器） |
 | `DOUGONG_PROVIDER_PROTOCOL` | | `openai`（默认）/ `anthropic` / `responses` |
 | `DOUGONG_ANTHROPIC_PATH` | | Anthropic 路径覆盖，默认 `/v1/messages` |
 | `DOUGONG_CONTEXT_WINDOW` | | 模型窗口 token 数；不设则按模型名推断 |

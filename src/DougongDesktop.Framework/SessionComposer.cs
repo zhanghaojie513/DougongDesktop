@@ -87,8 +87,16 @@ public sealed record EngineOptions
     }
 
     /// <summary>
-    /// 从环境变量读取。密钥只从环境变量来，不落盘、不进日志——
-    /// 这条与 SDK 的纪律一致（见 SDK 的 --doctor 输出）。
+    /// 从环境变量读取。
+    /// <para>
+    /// <b>当前阶段（P0–P2）密钥只从环境变量来。</b>P9 会接入系统凭据管理器，
+    /// 那时这一层变成"环境变量优先，否则问凭据通道"。
+    /// </para>
+    /// <para>
+    /// 红线不变：<b>不进配置文件、不进日志、不进会话记录</b>。
+    /// SDK 的契约原话是"环境变量<em>或</em>宿主凭据通道"（architecture.md §5.1），
+    /// 所以凭据管理器是合规的——别把 CLI 的限制当成通用限制。
+    /// </para>
     /// </summary>
     public static EngineOptions? FromEnvironment()
     {
@@ -250,7 +258,8 @@ public sealed class SessionComposer : IDisposable
         {
             var detail =
                 "未配置模型连接：缺少 DOUGONG_PROVIDER_KEY。" +
-                "密钥只从环境变量读，不落盘。请设置后重启引擎。";
+                "当前版本密钥从环境变量读（DOUGONG_PROVIDER_KEY），不落盘。" +
+                "请设置后重启引擎；P9 之后也可在设置里填，存入系统凭据管理器。";
             await emitEngineEvent(new EngineStatusEvent
             {
                 Sequence = 0,
