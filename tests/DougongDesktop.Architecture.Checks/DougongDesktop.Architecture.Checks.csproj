@@ -17,6 +17,11 @@
   <ItemGroup>
     <!-- 仅引用机制层：SlotRegistry 需要实例化才能测行为 -->
     <ProjectReference Include="..\..\src\DougongDesktop.Ui.Core\DougongDesktop.Ui.Core.csproj" />
+    <!-- 投影检查要测 EventProjection（纯映射层），它在 Framework 里。
+         检查工程引用它会间接拿到 SDK 依赖——这是**测试的正当成本**：
+         被测对象就是 SDK 投影层。产品工程的分层不受影响，
+         由 sdk-files-stay-contained 那条检查守着。 -->
+    <ProjectReference Include="..\..\src\DougongDesktop.Framework\DougongDesktop.Framework.csproj" />
   </ItemGroup>
 
   <ItemGroup>

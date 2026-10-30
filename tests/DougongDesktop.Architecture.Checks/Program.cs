@@ -49,6 +49,7 @@ public static class Program
         failures += Check("app-does-not-reference-sdk", () => AppDoesNotReferenceSdk(breakMode == "app-does-not-reference-sdk"));
         failures += Check("sdk-side-has-no-ui-dependencies", () => SdkSideHasNoUiDependencies(breakMode == "sdk-side-has-no-ui-dependencies"));
         failures += Check("ipc-depends-on-nothing-but-bcl", () => IpcDependsOnNothingButBcl(breakMode == "ipc-depends-on-nothing-but-bcl"));
+        failures += Check("sdk-files-stay-contained", () => SdkFilesStayContained(breakMode == "sdk-files-stay-contained"));
 
         // slot 框架的行为检查（九条）。这些错误全是"出错时看起来正常"类型，
         // 靠人工点击几乎不可能发现。
@@ -56,6 +57,9 @@ public static class Program
 
         // UI 插件加载器的行为检查
         failures += ExtensionChecks.Run(breakMode);
+
+        // 事件投影（纯映射层，表驱动）
+        failures += ProjectionChecks.Run(breakMode);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -193,6 +197,59 @@ public static class Program
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 引用 SDK 的文件数不能超出预算。
+    /// </summary>
+    /// <remarks>
+    /// <b>防的是"SDK 类型泄漏到别处"</b>：换掉 agent 框架时只有 Framework 需要重写
+    /// （约 800 行）。一旦 SDK 类型出现在别的层，那个估算就不成立了——
+    /// 而且这种扩散是渐进的：每次只多一个文件，没人会注意到，
+    /// 直到某天要换框架时发现到处都要改。
+    /// <para>
+    /// 预算按当前实际值锁定。新增引用必须显式调高这个数字，
+    /// 那个动作本身就是一次"要不要这么做"的复审。
+    /// </para>
+    /// </remarks>
+    private static string? SdkFilesStayContained(bool inject)
+    {
+        // 当前预算：Framework 5 个文件（实测值）。
+        //
+        // 2026-10-30 从 4 调到 5：新增 EventProjection.cs（事件投影纯映射层），
+        // 它就是"认识 SDK 事件类型"的那一层，必须引用 SDK。
+        // 这次调高经过了确认——这正是这个预算存在的意义：
+        // 每次扩散都要显式做一次"要不要这么做"的判断。
+        const int budget = 5;
+
+        var violations = new List<string>();
+
+        foreach (var project in new[] { "DougongDesktop.Ipc", "DougongDesktop.Ui.Core", "DougongDesktop.App" })
+        {
+            var dir = Path.Combine(RepoRoot, "src", project);
+            if (!Directory.Exists(dir)) continue;
+
+            var count = Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
+                .Count(f => File.ReadAllText(f).Contains("using Dougong.", StringComparison.Ordinal)
+                         || File.ReadAllText(f).Contains("Dougong.Agent", StringComparison.Ordinal)
+                         || File.ReadAllText(f).Contains("Dougong.Hosting", StringComparison.Ordinal));
+
+            if (count > 0) violations.Add($"{project}: {count} 个文件引用了 SDK");
+        }
+
+        var frameworkDir = Path.Combine(RepoRoot, "src", "DougongDesktop.Framework");
+        var frameworkCount = Directory.EnumerateFiles(frameworkDir, "*.cs", SearchOption.AllDirectories)
+            .Count(f => File.ReadAllText(f).Contains("using Dougong.", StringComparison.Ordinal));
+
+        if (inject) violations.Add($"(反证注入) Framework: {budget + 1} 个文件");
+
+        if (violations.Count > 0)
+            return "SDK 类型只允许出现在 Framework：" + string.Join("；", violations);
+
+        return frameworkCount <= budget
+            ? null
+            : $"Framework 引用 SDK 的文件 {frameworkCount} 个，超出预算 {budget}。"
+              + "新增引用请同步调高预算——那个动作是复审的机会。";
     }
 
     private static int Check(string name, Func<string?> body)

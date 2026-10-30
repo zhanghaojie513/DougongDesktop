@@ -158,63 +158,37 @@ public sealed class SessionRuntime : IAsyncDisposable
             await foreach (var evt in _runtime.RunAsync(request, _currentTurn.Token)
                                .ConfigureAwait(false))
             {
-                switch (evt)
+                // 投影逻辑在 EventProjection（纯映射），这里只做状态维护。
+                // 换 agent 框架时只改 EventProjection，这段不动。
+                switch (EventProjection.Map(evt))
                 {
-                    case AgentEvent.TextDelta delta:
+                    case EventProjection.Projection.TextDelta delta:
                         await AppendTextDeltaAsync(turnId, delta.Text, emit).ConfigureAwait(false);
                         break;
 
-                    case AgentEvent.ToolCallRequested requested:
-                        await AppendItemAsync(turnId, new ToolCallItem
-                        {
-                            Id = $"tool-{requested.InvocationId}",
-                            InvocationId = requested.InvocationId,
-                            ToolName = requested.ToolId,
-                            ArgumentsJson = requested.Arguments.GetRawText(),
-                            Status = ToolCallStatus.Running,
-                        }, emit).ConfigureAwait(false);
+                    case EventProjection.Projection.Added added:
+                        await AppendItemAsync(turnId, added.Item, emit).ConfigureAwait(false);
                         break;
 
-                    case AgentEvent.ToolCallCompleted completed:
+                    case EventProjection.Projection.ToolCompleted completed:
                         await UpdateToolCallAsync(turnId, completed.Result, emit).ConfigureAwait(false);
                         break;
 
-                    case AgentEvent.PlanUpdated planUpdated:
-                        await AppendItemAsync(turnId, new PlanItem
-                        {
-                            Id = $"plan-{Guid.NewGuid():N}"[..14],
-                            Steps = [.. planUpdated.Entries
-                                .Select(e => new PlanStep(e.Content, e.Status, e.Priority))],
-                        }, emit).ConfigureAwait(false);
+                    case EventProjection.Projection.Signal signal:
+                        outcome = signal.Outcome;
+                        diagnostic = signal.Diagnostic;
                         break;
 
-                    case AgentEvent.ContextCompacted compacted:
-                        await AppendItemAsync(turnId, new NoticeItem
+                    case EventProjection.Projection.Updated updated:
+                        await emit(new ItemUpdatedEvent
                         {
-                            Id = NextItemId(),
-                            Level = NoticeLevel.Warning,
-                            Text = compacted.Applied
-                                ? $"上下文已压缩：移除 {compacted.RemovedMessages} 条消息，" +
-                                  $"约 {compacted.EstimatedTokensBefore} → {compacted.EstimatedTokensAfter} tokens。" +
-                                  "模型看到的不再是完整历史。"
-                                : $"上下文压缩已决定但未生效：{compacted.Diagnostic ?? "预算不足"}",
-                        }, emit).ConfigureAwait(false);
+                            Sequence = NextSequence(),
+                            SessionId = SessionId,
+                            Item = updated.Item,
+                        }).ConfigureAwait(false);
                         break;
 
-                    case AgentEvent.ToolResultTruncated truncated:
-                        await AppendItemAsync(turnId, new NoticeItem
-                        {
-                            Id = NextItemId(),
-                            Level = NoticeLevel.Info,
-                            Text = $"工具 {truncated.ToolId} 的输出过长，进入模型上下文时" +
-                                   $"裁剪为 {truncated.KeptChars} / {truncated.OriginalChars} 字符。" +
-                                   "会话记录仍保留完整原文。",
-                        }, emit).ConfigureAwait(false);
-                        break;
-
-                    case AgentEvent.RunFinished finished:
-                        outcome = finished.Outcome;
-                        diagnostic = finished.Diagnostic;
+                    case EventProjection.Projection.Ignored:
                         break;
                 }
             }

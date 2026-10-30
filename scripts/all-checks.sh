@@ -34,6 +34,9 @@ checks="$checks ext-skips-non-plugin-dll ext-missing-dir-throws"
 checks="$checks ext-unload-leaves-no-residue"
 checks="$checks modules-list-is-explicit-and-ordered modules-list-has-no-duplicate-slot"
 checks="$checks placeholder-yields-to-plugin"
+checks="$checks proj-text-delta proj-tool-requested-new-item proj-tool-id-is-deterministic"
+checks="$checks proj-unknown-outcome-preserved proj-unknown-event-ignored proj-outcome-mapping"
+checks="$checks sdk-files-stay-contained"
 
 for check in $checks; do
   printf '%-36s ' "$check"

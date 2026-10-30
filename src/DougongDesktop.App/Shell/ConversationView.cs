@@ -118,6 +118,15 @@ public sealed class ConversationView : UserControl
             Text = "好的，我先读文件。**这是加粗**，`这是行内代码`。\n\n```csharp\nvar x = 1;\n```",
         });
 
+        // 流式条目：验证 Stream 路径（Push + Complete）
+        Add(new AssistantMessageItem
+        {
+            Id = NextId(),
+            Text = "## 流式渲染验证\n\n这段文字通过 **MarkdownStream.Push** 推入，"
+                 + "不是重设 Text。如果标题和加粗都正常，说明 Stream 路径可用。",
+            IsStreaming = true,
+        });
+
         // 工具：五种状态各来一个
         foreach (var (status, label) in new[]
         {
@@ -308,11 +317,21 @@ public sealed class ConversationView : UserControl
 
     private static Control BuildAssistantMessage(AssistantMessageItem item)
     {
-        var markdown = new Markdown
+        var markdown = new Markdown();
+
+        if (item.IsStreaming)
         {
-            Text = item.Text,
-            // 流式时不设 Height，让文档自然增长（Arc 的 Markdown 不自带内部滚动）
-        };
+            // 流式：用 Stream 属性拿"只解析增量"的能力。
+            // Text 每次重设会重解析全文，长回复时明显（实测 500 段后卡顿）。
+            var stream = new StreamMark.Avalonia.MarkdownStream(
+                pacing: default, smooth: true, fadeDuration: null, profile: default);
+            markdown.Stream = stream;
+            stream.Push(item.Text);
+        }
+        else
+        {
+            markdown.Text = item.Text;
+        }
 
         return new Border
         {
