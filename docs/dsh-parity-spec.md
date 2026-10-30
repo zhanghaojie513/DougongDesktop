@@ -393,7 +393,7 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 | A5 | 响应式 768 抽屉 | ✅ | `AppShell.ApplyColumns()` 的 `drawer` 判断，列宽传 0 | `cols-responsive-breakpoints`：767→0 不占列宽 |
 | A6 | 底部行横跨三列、空不占位 | ✅ | `AppShell.Build()`：`bottom` 作为 `stack` 第二行；`SyncBottomVisibility()` | dump `Bottom(list) 1280x40` |
 | A7 | 状态条移到侧栏底部 | ✅ | `AppShell.Build()`：`_sidebarHost` 为两行 Grid，状态条在第 1 行 | dump `EngineStatusBar 260x14` |
-| A8 | 毛玻璃 | 🚧 | `MainWindow` 声明 `TransparencyLevelHint = [AcrylicBlur, Blur, None]` | 待补：读实际 `TransparencyLevel` 确认生效级别 |
+| A8 | 毛玻璃 | ✅ | `TransparencyLevelHint = [AcrylicBlur, Blur, None]`；**实测实际生效 `AcrylicBlur`** | dump 读 `ActualTransparencyLevel` = AcrylicBlur。**但侧栏仍用不透明填充——这是对的**，见下 |
 | A9 | 侧边栏 280 / 52 品牌行 / 36 会话行 | ⬜ | 需设 `Sidebar.OpenWidth = 280`（**当前未设**，用的是列宽）；行高需覆盖 Arc Section 模板 | 待做 |
 | A10 | 侧边栏收起 56px 轨道 | ⏳ | **Arc 写死 64px**，见 §9.1。接受 8px 差异 | — |
 | A11 | 108 个 `--dsw-alias-*` 映射 | ✅ | `scripts/sync-dsh-tokens.py` 生成 `Theme/DshTokens.g.cs`（light/dark 各 108）；`DshTheme` 提供按主题取色 | `dsh-tokens-complete`（216 常量）、`dsh-tokens-themes-differ`（两套底色必须不同）；dump 底色 = White 与 dsh light 一致 |
@@ -500,6 +500,37 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 4. **底部行**——改成横跨三列的单一 slot ✅ 已做（A6）
 5. **右栏**——从 `Tabs` 改成贴边面板 + 轨道 ⬜ **未做**：`RightDock` 目前仍用 Arc `Tabs`
 6. **断点**——768 抽屉 / 1024 自动收起 ✅ 已做（A4/A5）
+
+---
+
+### 7.10 A8 毛玻璃：能力可用，但不该用（与 dsh 一致）
+
+**实测结果**：`TransparencyLevelHint` 请求 `AcrylicBlur/Blur/None`，
+`ActualTransparencyLevel` 实际生效 **`AcrylicBlur`**——Windows 上毛玻璃是真的可用。
+
+**但侧栏仍然用不透明 `#F9FAFB`，这符合 dsh 的设计。**
+
+核实 dsh 的 `AppFrame.module.css`：半透明只挂在
+<code>:global([data-platform='darwin'])</code> 下——
+
+```css
+[data-platform='darwin'] .frame:not([data-sidebar-drawer]) .sidebarCol {
+  background:
+    linear-gradient(...),
+    color-mix(in srgb, color-mix(in srgb,
+      var(--dsw-specific-sidebar-fill) 97%, rgb(122 155 240)) 40%, transparent);
+  border-right: none;
+}
+```
+
+Windows 走 `.sidebarCol` 的默认规则：`background: var(--dsw-specific-sidebar-fill)`
+——不透明。而且 Windows 下还会保留 `border-right: 0.5px`，macOS 反而去掉边框。
+
+**所以"我们做不到毛玻璃"这个原判断错了两处**：
+1. 技术上 Avalonia 12 有 `AcrylicBlur`，实测生效
+2. 即便能做，**dsh 本身在 Windows 上也不用**——照抄才是对的
+
+当前实现（声明能力 + 侧栏不透明 + 保留分界线）与 dsh 的 Windows 行为一致。
 
 ---
 

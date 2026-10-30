@@ -9,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using DougongDesktop.Ipc;
+using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 using IpcToolCallItem = DougongDesktop.Ipc.ToolCallItem;
 using IpcToolCallStatus = DougongDesktop.Ipc.ToolCallStatus;
@@ -53,6 +54,21 @@ public sealed class ConversationView : UserControl
         _list.GetVisualDescendants().OfType<ContentPresenter>().Count();
     /// <summary>输入区。宿主用它切换生成态与待决锁。</summary>
     public Composer Composer { get; } = new();
+
+    /// <summary>
+    /// 顶部信息栏（会话标题 + 状态词 + 右侧工具栏）。
+    /// </summary>
+    /// <remarks>
+    /// dsh 的 <c>.header</c>：<c>min-height: 76px</c>、
+    /// <c>padding: 10px 28px 0 20px</c>、底部 <c>0.5px solid border-l3</c>，
+    /// 两列 <c>auto minmax(0,1fr)</c>。
+    /// <para>
+    /// <b>76px 这个高度不是随便定的</b>：它等于侧栏的 tab strip（38px）+
+    /// 面板头（38px），这样两边的分隔线能在列边缘对齐。我们的侧栏没有那两层，
+    /// 所以只取内容需要的高度，不强凑 76——强凑会在顶部留一块空白。
+    /// </para>
+    /// </remarks>
+    public Border Header { get; } = new();
 
     /// <summary>审批卡片区：在消息流与输入区之间，常驻、不参与虚拟化。</summary>
     private readonly StackPanel _approvalHost = new() { Spacing = 0 };
@@ -116,17 +132,25 @@ public sealed class ConversationView : UserControl
         // 输入区固定在下方，消息流占剩余空间。
         // 用 Grid 两行而不是把 Composer 叠在 ScrollViewer 上——叠上去会遮住
         // 最后几条消息，而"审批卡片被输入框挡住"正是 P6 判据明确要避免的。
-        var root = new Grid { RowDefinitions = new RowDefinitions("*,Auto,Auto") };
+        BuildHeader();
 
-        Grid.SetRow(grid, 0);
+        // 顶部信息栏：dsh 的 .header 是 76px 高、padding 10/28/0/20、
+        // 底部 0.5px 分隔线、两列（标题区 + 右侧工具栏）。
+        // 没有它时主区从窗口顶端直接开始，与 dsh 差一条明显的横线。
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto") };
+
+        Grid.SetRow(Header, 0);
+        root.Children.Add(Header);
+
+        Grid.SetRow(grid, 1);
         root.Children.Add(grid);
 
         // 审批区在消息流下方、输入区上方：不遮挡输入框（P6 判据），
         // 也不被虚拟化回收
-        Grid.SetRow(_approvalHost, 1);
+        Grid.SetRow(_approvalHost, 2);
         root.Children.Add(_approvalHost);
 
-        Grid.SetRow(Composer, 2);
+        Grid.SetRow(Composer, 3);
         root.Children.Add(Composer);
 
         Content = root;
@@ -425,6 +449,109 @@ public sealed class ConversationView : UserControl
             () => _scroll.ScrollToEnd(), Avalonia.Threading.DispatcherPriority.Background);
 
     // ── 条目构建：按 kind 分派 ──────────────────────────────
+
+    /// <summary>
+    /// 建顶部信息栏。
+    /// </summary>
+    /// <remarks>
+    /// 形态照 dsh：左边是会话标题 + 状态词（"你好 · 标准模式"），
+    /// 右边是工具栏（文件夹 / 更多 / 刷新 / 侧栏切换）。
+    /// <para>
+    /// <b>会话标题暂时用静态占位</b>：它应该来自当前会话的摘要，
+    /// 而 <see cref="ConversationView"/> 拿不到会话列表（那是主窗口的事）。
+    /// 先放固定文字，等 P8d 的会话增强把标题流接进来再替换。
+    /// 宁可显示一个明确的占位，也不要显示空——空白让人以为加载失败。
+    /// </para>
+    /// </remarks>
+    private void BuildHeader()
+    {
+        Header.Padding = new Thickness(20, 10, 28, 10);
+        Header.BorderBrush = new SolidColorBrush(DshTheme.BorderL3);
+        Header.BorderThickness = new Thickness(0, 0, 0, 0.5);
+
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+
+        // 标题
+        var title = new TextBlock
+        {
+            Text = "会话",
+            FontSize = 14,
+            FontWeight = FontWeight.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(title, 0);
+        row.Children.Add(title);
+
+        // 状态词：dsh 这里是"标准模式"
+        var mode = new TextBlock
+        {
+            Text = "标准模式",
+            FontSize = 12,
+            Opacity = 0.55,
+            Margin = new Thickness(12, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(mode, 1);
+        row.Children.Add(mode);
+
+        // 右侧工具条
+        var tools = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 2,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        foreach (var kind in new[]
+        {
+            TKCode.Arc.Icons.Lucide.LucideIconKind.Folder,
+            TKCode.Arc.Icons.Lucide.LucideIconKind.Ellipsis,
+            TKCode.Arc.Icons.Lucide.LucideIconKind.RotateCw,
+            TKCode.Arc.Icons.Lucide.LucideIconKind.PanelRight,
+        })
+        {
+            tools.Children.Add(HeaderToolButton(kind));
+        }
+
+        Grid.SetColumn(tools, 2);
+        row.Children.Add(tools);
+
+        Header.Child = row;
+    }
+
+    /// <summary>顶栏的纯图标按钮。</summary>
+    /// <remarks>
+    /// 功能待接（P8d）。先让形态对上——工具栏的位置与图标是
+    /// "看起来像不像 dsh"的一部分，而它们不影响任何人点击其他东西。
+    /// </remarks>
+    private static Control HeaderToolButton(TKCode.Arc.Icons.Lucide.LucideIconKind kind)
+    {
+        var button = new Avalonia.Controls.Button
+        {
+            Content = new TKCode.Arc.Icons.Lucide.LucideIcon
+            {
+                Kind = kind,
+                Size = 16,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+            Width = 28,
+            Height = 28,
+            Padding = new Thickness(0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(Columns.RadiusSm),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Opacity = 0.7,
+        };
+
+        button.PointerEntered += (_, _) => button.Background = new SolidColorBrush(
+            Color.FromArgb(20, 0, 0, 0));
+        button.PointerExited += (_, _) => button.Background = Brushes.Transparent;
+
+        return button;
+    }
 
     private static Control BuildItem(ConversationItem item) => item switch
     {

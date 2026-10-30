@@ -145,6 +145,14 @@ public sealed class MainWindow : Window
 
         Opened += async (_, _) =>
         {
+            // A8 验证：TransparencyLevelHint 只是"我请求这些"，
+            // 实际生效的是 TransparencyLevel——平台可能一个都不支持。
+            // 不读这个值就不知道毛玻璃到底有没有开。
+            Console.Error.WriteLine(
+                $"[shell] 毛玻璃 请求={string.Join("/", TransparencyLevelHint)} " +
+                $"实际={ActualTransparencyLevel} " +
+                $"{(ActualTransparencyLevel == WindowTransparencyLevel.None ? "（未生效，已降级为不透明）" : "（生效）")}");
+
             DumpLayout();
 
             try
@@ -795,6 +803,15 @@ public sealed class MainWindow : Window
         }
 
         Report("AppShell", shell);
+
+        if (shell is not null)
+        {
+            var hdr = _conversation.Header;
+            Report("ConvHeader", hdr);
+            var hb = hdr.GetVisualDescendants().OfType<Avalonia.Controls.Button>().ToArray();
+            Console.Error.WriteLine($"[shell] 顶栏按钮 {hb.Length} 个：" +
+                string.Join(",", hb.Select(b => $"{b.Bounds.Width:0}x{b.Bounds.Height:0}")));
+        }
 
         // 标题栏：40px 高、与侧栏同色（dsh 的 Windows caption row）
         if (shell is AppShell barHost)
