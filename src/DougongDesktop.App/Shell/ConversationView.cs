@@ -51,6 +51,12 @@ public sealed class ConversationView : UserControl
     /// </remarks>
     public int RenderedContainerCount =>
         _list.GetVisualDescendants().OfType<ContentPresenter>().Count();
+    /// <summary>输入区。宿主用它切换生成态与待决锁。</summary>
+    public Composer Composer { get; } = new();
+
+    /// <summary>审批卡片区：在消息流与输入区之间，常驻、不参与虚拟化。</summary>
+    private readonly StackPanel _approvalHost = new() { Spacing = 0 };
+
     private readonly ScrollViewer _scroll;
     private readonly TextBlock _emptyHint;
 
@@ -106,8 +112,36 @@ public sealed class ConversationView : UserControl
         var grid = new Grid();
         grid.Children.Add(_scroll);
         grid.Children.Add(_emptyHint);
-        Content = grid;
+
+        // 输入区固定在下方，消息流占剩余空间。
+        // 用 Grid 两行而不是把 Composer 叠在 ScrollViewer 上——叠上去会遮住
+        // 最后几条消息，而"审批卡片被输入框挡住"正是 P6 判据明确要避免的。
+        var root = new Grid { RowDefinitions = new RowDefinitions("*,Auto,Auto") };
+
+        Grid.SetRow(grid, 0);
+        root.Children.Add(grid);
+
+        // 审批区在消息流下方、输入区上方：不遮挡输入框（P6 判据），
+        // 也不被虚拟化回收
+        Grid.SetRow(_approvalHost, 1);
+        root.Children.Add(_approvalHost);
+
+        Grid.SetRow(Composer, 2);
+        root.Children.Add(Composer);
+
+        Content = root;
+
+        // 发送 / 停止转发给宿主：本类不认识引擎，只负责把意图交出去
+        Composer.Submitted += text => MessageSubmitted?.Invoke(text);
+        Composer.StopRequested += () => StopRequested?.Invoke();
     }
+
+
+    /// <summary>用户在输入区提交了一条消息。</summary>
+    public event Action<string>? MessageSubmitted;
+
+    /// <summary>用户请求停止当前回合。</summary>
+    public event Action? StopRequested;
 
     /// <summary>
     /// 灌入自检数据，验证每种条目的渲染。
@@ -122,6 +156,24 @@ public sealed class ConversationView : UserControl
     /// </remarks>
     public void LoadSelfTestData()
     {
+        // 自检数据里放一条审批，让"审批卡片是否真的渲染出来"可观测。
+        // 审批是 P6 唯一会阻塞回合的交互，坏了没人会发现——用户只会以为卡了。
+        //
+        // 注意：这条只验证**卡片渲染**，不走 MainWindow.ShowApproval，
+        // 所以 dump 里"待决锁=False"是符合预期的——锁由宿主在真实事件里上。
+        // 真实审批链路的检查在 ApprovalChecks（断言锁与卡片互斥）。
+        AddApproval(new ApprovalCard(new DougongDesktop.Ipc.ApprovalRequest(
+            RequestId: "req-selftest",
+            SessionId: "sess-selftest",
+            TurnId: "turn-selftest",
+            InvocationId: "inv-selftest",
+            ToolName: "write_file",
+            Summary: "写入文件 README.md",
+            ArgumentsJson: "{\"path\":\"README.md\",\"content\":\"…\"}",
+            PermissionScope: "Write",
+            ExpiresAt: DateTimeOffset.Now.AddMinutes(5),
+            MayHaveIrreversibleEffects: true)));
+
         var now = DateTimeOffset.Now;
         var seq = 0;
         string NextId() => $"selftest-{++seq}";
@@ -298,6 +350,41 @@ public sealed class ConversationView : UserControl
 
         if (_stickToBottom) ScrollToBottom();
     }
+
+    /// <summary>
+    /// 插入一张审批卡片。
+    /// </summary>
+    /// <remarks>
+    /// <b>审批卡片不是 <see cref="ConversationItem"/></b>：它是**交互控件**
+    /// （按钮、定时器、答复回调），塞进纯数据条目会让 IPC 契约沾上 UI 概念。
+    /// 所以它放在消息流下方的独立区域，不进虚拟化列表。
+    /// <para>
+    /// <b>为什么在列表外</b>：虚拟化列表只构建可见条目，把带定时器的交互控件
+    /// 放进去，滚出视口就会被回收——定时器还在跑，控件已经不在树上，
+    /// 表现为"审批莫名其妙消失了"。审批是阻塞性的，必须常驻。
+    /// </para>
+    /// </remarks>
+    public void AddApproval(ApprovalCard card)
+    {
+        _approvalCards[card.RequestId] = card;
+        _approvalHost.Children.Add(card);
+
+        // 强制滚到底：审批不处理回合就停着，出现在视口外等于让会话静默卡住
+        ScrollToBottom();
+    }
+
+    /// <summary>移除一张审批卡片（已答复）。</summary>
+    /// <remarks>
+    /// <b>答复后保留显示、只把按钮换成结果文字</b>，不整个删掉——
+    /// 用户需要看到"我刚才拒了哪个调用"，那是回合记录的一部分。
+    /// 这里只把它从"待决"集合里摘掉。
+    /// </remarks>
+    public void ResolveApproval(string requestId) => _approvalCards.Remove(requestId);
+
+    /// <summary>当前未答复的审批。</summary>
+    public IReadOnlyDictionary<string, ApprovalCard> PendingApprovals => _approvalCards;
+
+    private readonly Dictionary<string, ApprovalCard> _approvalCards = new(StringComparer.Ordinal);
 
     /// <summary>
     /// 更新条目（流式文本追加、工具状态变化）。

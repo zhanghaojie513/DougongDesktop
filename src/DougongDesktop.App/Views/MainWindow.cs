@@ -22,6 +22,24 @@ public sealed class MainWindow : Window
     private readonly SlotRegistry _slots = new();
     private readonly AppShellViewModel _vm = new();
 
+    /// <summary>
+    /// 等待会话建立后要发送的第一条消息。
+    /// </summary>
+    /// <remarks>
+    /// 新建会话时正文要先挂起：会话 Id 由服务端生成并随
+    /// <c>SessionOpenedEvent</c> 回来，在那之前发不出回合。
+    /// </remarks>
+    private string? _pendingFirstMessage;
+
+    /// <summary>
+    /// 排队等待显示的审批。
+    /// </summary>
+    /// <remarks>
+    /// 引擎侧审批是串行的（同一会话不能并发回合），所以队列里通常最多一条。
+    /// 队列存在只是为了不丢请求——丢了就是"静默卡死"。
+    /// </remarks>
+    private readonly Queue<ApprovalRequest> _approvalQueue = new();
+
     /// <summary>命令面板的占位者 Id（不进 <see cref="BuiltInModules.All"/>，见注册处注释）。</summary>
     private const string CommandPaletteSlug = "builtin.command-palette";
 
@@ -58,11 +76,33 @@ public sealed class MainWindow : Window
         Content = new AppShell(_slots, _vm);
         Shell = (AppShell)Content;
 
+        // 输入区 → 引擎。三段式：确保有会话 → 发回合 → 把本地消息先显示出来
+        _conversation.MessageSubmitted += text => _ = SubmitAsync(text);
+        _conversation.StopRequested += () => _ = StopTurnAsync();
+
         LoadUiPlugins();
 
         // 自检模式：没 provider 时也能验证消息流渲染
         if (Environment.GetEnvironmentVariable("DOUGONG_UI_SELFTEST") is "1")
             _conversation.LoadSelfTestData();
+
+        // 审批自检：走真实的 ShowApproval 路径，验证待决锁真的上了。
+        // 与 LoadSelfTestData 里那张卡片不同——那张只验证渲染，
+        // 这条验证"有审批时输入区被锁"。
+        if (Environment.GetEnvironmentVariable("DOUGONG_UI_APPROVAL") is "1")
+        {
+            ShowApproval(new ApprovalRequest(
+                RequestId: "req-live",
+                SessionId: "sess-live",
+                TurnId: "turn-live",
+                InvocationId: "inv-live",
+                ToolName: "write_file",
+                Summary: "写入文件 README.md",
+                ArgumentsJson: "{\"path\":\"README.md\"}",
+                PermissionScope: "Write",
+                ExpiresAt: DateTimeOffset.Now.AddMinutes(5),
+                MayHaveIrreversibleEffects: true));
+        }
 
         // 压力模式：验证虚拟化（1000 条只该构建少量容器）
         if (int.TryParse(Environment.GetEnvironmentVariable("DOUGONG_UI_STRESS"), out var stress) && stress > 0)
@@ -257,6 +297,8 @@ public sealed class MainWindow : Window
 
             case TurnStartedEvent:
                 _capsule.OnTurnStarted();
+                // 生成中：发送键变停止键（Arc 的 AiComposer 自带这个切换）
+                _conversation.Composer.SetGenerating(true);
                 break;
 
             case ItemAddedEvent added:
@@ -282,14 +324,28 @@ public sealed class MainWindow : Window
                 foreach (var turn in opened.Snapshot.Turns)
                     foreach (var item in turn.Items)
                         _conversation.Add(item);
+
+                // 新会话建立：把挂起的第一条消息补发出去
+                if (_pendingFirstMessage is { Length: > 0 } first)
+                {
+                    _pendingFirstMessage = null;
+                    _selectedSessionId = opened.Snapshot.Id;
+                    _engine.AttachedSessionId = opened.Snapshot.Id;
+
+                    // 这里已经在 UI 线程（EventReceived 由 Dispatcher.Post 送回），
+                    // 不需要 Task.Run —— 换到线程池去发只会多一次线程跳转。
+                    _ = SendFirstTurnAsync(opened.Snapshot.Id, first);
+                }
                 break;
 
             case ApprovalRequestedEvent approval:
                 _capsule.OnApprovalRequested(approval.Request.ToolName);
+                ShowApproval(approval.Request);
                 break;
 
             case TurnCompletedEvent done:
                 _capsule.OnTurnCompleted(done.Status, done.Diagnostic);
+                _conversation.Composer.SetGenerating(false);
                 break;
         }
     }
@@ -360,6 +416,173 @@ public sealed class MainWindow : Window
             default:
                 Console.Error.WriteLine($"[ui] 未实现的命令：{commandId}");
                 break;
+        }
+    }
+
+    /// <summary>
+    /// 发送一条消息。
+    /// </summary>
+    /// <remarks>
+    /// <b>没有当前会话时先建一个</b>：用户打开应用直接打字是最自然的入口，
+    /// 让他先去侧边栏点"新建会话"才能开始说话是多余的仪式。
+    /// <para>
+    /// <b>先本地回显用户消息</b>：引擎会把它作为条目发回来，但那是异步的。
+    /// 不等回显会让用户按了回车之后界面毫无变化——看起来像没发出去。
+    /// 用本地条目保证"按下即有反馈"，服务端的同名条目到达时按 Id 覆盖。
+    /// </para>
+    /// </remarks>
+    private async Task SubmitAsync(string text)
+    {
+        try
+        {
+            if (_selectedSessionId is null)
+            {
+                // CreateSessionCommand 的响应是 SessionOpenedEvent，
+                // 会话 Id 在事件里回来——这里不能自己编一个。
+                // 所以先把待发的正文挂起，等 SessionOpenedEvent 到达再补发回合。
+                // 直接 return 会把用户刚输入的内容丢掉。
+                _pendingFirstMessage = text;
+
+                await _engine.SendAsync(new CreateSessionCommand
+                {
+                    RequestId = Guid.NewGuid().ToString("N"),
+                    Workspace = Environment.CurrentDirectory,
+                    Title = text.Length > 24 ? text[..24] : text,
+                });
+
+                return;
+            }
+
+            await _engine.SendAsync(new StartTurnCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                SessionId = _selectedSessionId,
+                Input = text,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 发送失败：{ex.Message}");
+            _conversation.Add(new NoticeItem
+            {
+                Id = $"notice-{Guid.NewGuid():N}"[..16],
+                Level = NoticeLevel.Error,
+                Text = $"消息没有发出去：{ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
+    /// 显示审批卡片、上待决锁。
+    /// </summary>
+    /// <remarks>
+    /// <b>单一待决锁</b>：同一时刻只允许一条未答复的审批。引擎侧本来就是串行的
+    /// （同一会话不能并发回合），但界面必须自己也守这条——否则第二条审批到达时
+    /// 会出现两张卡片，用户答完第一张后第二张的答案可能配错回合。
+    /// <para>
+    /// <b>同一 RequestId 重复到达要忽略</b>：重连或重同步可能重放事件，
+    /// 重复插入会出现两张一模一样的卡片，而答了其中一张另一张仍可点。
+    /// </para>
+    /// </remarks>
+    private void ShowApproval(ApprovalRequest request)
+    {
+        if (_conversation.PendingApprovals.ContainsKey(request.RequestId))
+        {
+            Console.Error.WriteLine($"[ui] 重复的审批请求已忽略：{request.RequestId}");
+            return;
+        }
+
+        // 单一待决锁：已有未答复的审批时，新的这条**必须排队**而不是丢弃。
+        // 丢弃的话引擎侧的审批器会一直阻塞到 5 分钟超时——用户看到的是
+        // "回合莫名其妙卡死"，而根本不知道有一条审批被界面吞了。
+        if (_conversation.PendingApprovals.Count > 0)
+        {
+            _approvalQueue.Enqueue(request);
+            Console.Error.WriteLine($"[ui] 已有待决审批，新的请求排队：{request.RequestId}");
+            return;
+        }
+
+        var card = new ApprovalCard(request);
+        card.Decided += (decision, reason) =>
+        {
+            _conversation.ResolveApproval(request.RequestId);
+            _conversation.Composer.SetApprovalPending(false);
+            _capsule.OnApprovalResolved();
+            _ = RespondApprovalAsync(request.RequestId, decision, reason);
+
+            // 展示排队中的下一条（如果有）
+            ShowNextQueuedApproval();
+        };
+
+        _conversation.AddApproval(card);
+        _conversation.Composer.SetApprovalPending(true, request.ToolName);
+    }
+
+    /// <summary>显示队列里的下一条审批。</summary>
+    private void ShowNextQueuedApproval()
+    {
+        if (_conversation.PendingApprovals.Count > 0) return;
+        if (!_approvalQueue.TryDequeue(out var next)) return;
+
+        ShowApproval(next);
+    }
+
+    /// <summary>把审批答复送回引擎。</summary>
+    /// <remarks>
+    /// <b>失败只记日志，不改界面状态</b>：卡片已经把"已允许"显示出来了。
+    /// 这里再回滚会让界面反复横跳；而且真正的事实由引擎的审批器决定——
+    /// 它收不到答复就按超时拒绝处理，回合会自己结束。
+    /// </remarks>
+    private async Task RespondApprovalAsync(string requestId, ApprovalDecision decision, string? reason)
+    {
+        try
+        {
+            await _engine.SendAsync(new RespondApprovalCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                Response = new ApprovalResponse(requestId, decision, reason),
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 审批答复发送失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>补发新会话的首条消息。</summary>
+    private async Task SendFirstTurnAsync(string sessionId, string text)
+    {
+        try
+        {
+            await _engine.SendAsync(new StartTurnCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                SessionId = sessionId,
+                Input = text,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 补发首条消息失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>取消当前回合。</summary>
+    private async Task StopTurnAsync()
+    {
+        if (_selectedSessionId is not { } sessionId) return;
+
+        try
+        {
+            await _engine.SendAsync(new CancelTurnCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                SessionId = sessionId,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 取消失败：{ex.Message}");
         }
     }
 
@@ -524,6 +747,29 @@ public sealed class MainWindow : Window
         // 消息条目同理：条目数对但容器数为 0，说明模板没匹配上（P3a 踩过）。
         Console.Error.WriteLine(
             $"[shell] 消息容器 {_conversation.RenderedContainerCount} / 条目 {_conversation.Count}");
+
+        // 审批卡片（P6）：卡片在、尺寸非零、按钮数量正确。
+        // 审批坏了的表现是"回合静默卡住"，用户完全看不出是卡片没渲染。
+        var approvals = _conversation.PendingApprovals.Values.ToArray();
+        foreach (var card in approvals)
+        {
+            Report($"ApprovalCard", card);
+            var buttons = card.GetVisualDescendants().OfType<TKCode.Arc.Button>().Count();
+            Console.Error.WriteLine(
+                $"[shell] 审批卡片 {card.RequestId} 按钮 {buttons} 个" +
+                $"（期望 4）过期={card.IsExpired}");
+        }
+        if (approvals.Length == 0)
+            Console.Error.WriteLine("[shell] 审批卡片            (无待决)");
+
+        // 输入区（P6）：光有实例不算数，要确认它有非零尺寸、且锁状态正确。
+        // AiComposer 是复合控件，尺寸为 0 时的表现是"输入框完全看不见"，
+        // 而那在截图里容易被当成布局留白。
+        Report("Composer", _conversation.Composer);
+        Console.Error.WriteLine(
+            $"[shell] Composer 尺寸 {_conversation.Composer.Inner.Bounds.Width:0} x " +
+            $"{_conversation.Composer.Inner.Bounds.Height:0} " +
+            $"待决锁={_conversation.Composer.IsApprovalPending}");
 
         // 工具卡片（P5）：确认 Input 真解析出键值对、Duration 真按规则映射。
         // 光看"卡片在"不够——Input 解析失败和"这个工具本来就没参数"在界面上一样。

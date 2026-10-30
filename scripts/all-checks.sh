@@ -40,6 +40,8 @@ checks="$checks resync-command-roundtrips resync-request-carries-session diag-ui
 checks="$checks tool-durations-passed-through tool-null-duration-stays-null"
 checks="$checks reasoning-separate-from-text plan-replaces-wholesale plan-tool-comes-from-sdk"
 checks="$checks caps-table-beats-guess max-output-never-eats-context"
+checks="$checks approval-duplicate-answer-denied approval-session-scope-is-narrow"
+checks="$checks approval-silence-is-denial approval-channel-failure-denies"
 checks="$checks sdk-files-stay-contained"
 
 for check in $checks; do

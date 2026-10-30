@@ -64,6 +64,9 @@ public static class Program
         // P5：两段耗时、推理流隔离、计划全量替换
         failures += ToolChecks.Run(breakMode);
 
+        // P6：审批闭环的安全语义
+        failures += ApprovalChecks.Run(breakMode);
+
         // 事件投影（纯映射层，表驱动）
         failures += ProjectionChecks.Run(breakMode);
 
