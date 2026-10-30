@@ -5,6 +5,12 @@
 
 ## 版本索引
 
+> **两套版本，都要记**：dsh 是复刻基线，Arc 是实现载体。
+
+### dsh（复刻基线）
+
+
+
 | 项 | 值 |
 |---|---|
 | **dsh 版本** | `0.2.2-alpha.2` |
@@ -30,6 +36,21 @@ git sparse-checkout set \
 **升级时要做的事**：dsh 处于 developer preview，README 原话是
 "THERE WILL BE COMPATIBILITY-BREAKING CHANGES"。换版本后必须重跑提取，
 逐条对比本文件的数字。**不要假设规格稳定。**
+
+### TKCode.Arc（实现载体）
+
+| 项 | 值 |
+|---|---|
+| **版本** | `0.3.2-preview.2`（2026-10-30 从 preview.1 升级） |
+| **仓库** | https://github.com/AIDotNet/TKCode.Arc |
+| **commit** | `db031ffe`（2026-10-30） |
+| **Avalonia** | 必须精确 `12.1.4` |
+| **包数** | 17 个（我们用了 4 个，另发现 Terminal / Workflow / Icons.Lucide 三个未用） |
+
+**升级记录**：从 `preview.1` → `preview.2`，零警告零错误，57 条检查全过，
+运行时三栏 `280/424/576` 正常，虚拟化仍生效（1000 条 → 7 容器）。
+**preview.2 没有修侧边栏 64px**（`Sidebar.IsCollapsed` 注释仍是 "64px icon rail"），
+所以 §9.1 的 8px 偏差依旧存在。
 
 ---
 
@@ -292,16 +313,64 @@ dsh 的 `shell.bottom` 是**横跨整行的单一 slot**，且默认组合**不�
 
 ---
 
-## 6. 无法 1:1 复刻的部分（逐条反馈）
+## 6. 偏差逐条核实（2026-10-31 修正）
 
-| 项目 | dsh 做法 | 我们做不到的原因 | 处置 |
-|---|---|---|---|
-| **Electron 毛玻璃/vibrancy** | macOS 侧边栏半透明叠加窗口 vibrancy | Avalonia 无对应窗口模糊 API | 用不透明背景替代，深浅色分别取值 |
-| **CSS `grid-template-columns` 过渡** | 轨道宽度离散变化时有 600ms 缓动 | Avalonia 的 Grid 列宽无内建过渡 | 用 `Transitions` 做宽度动画，效果接近但非像素级一致 |
-| **精确 60fps 拖拽跟随** | rAF 节流 + 指针捕获 | Avalonia 拖拽是事件驱动，无 rAF | 直接跟随指针，实际体验一致 |
-| **`device-posture` 折叠屏** | 半折叠时侧边栏占半宽 | Avalonia 无设备姿态 API | **不做**，桌面端无折痕屏场景 |
-| **Web 字体回退链** | 用户自选字体列表 + CSS 通用族 | Avalonia 需 `FontManager` 注册，无 CSS 回退 | 只支持已注册字体，不支持任意字体名 |
-| **`color-mix()` 动态混色** | 部分 token 用 `color-mix` 运行时混 | Avalonia 无运行时混色 | 预计算成固定值 |
+> **这一节被重写过一次。** 初版凭印象写了 5 条"Avalonia 做不到"，
+> 实测 API 后发现有 4 条是错的。保留这次修正的痕迹，因为
+> "没查就断言做不到"是个该记的教训。
+
+### 6.1 核实结论总表
+
+| # | 项目 | 初版判断 | **核实结果** | 处置 |
+|---|---|---|---|---|
+| 1 | Electron 毛玻璃/vibrancy | ❌ 无 API | ✅ **能做**：`WindowTransparencyLevel.{Blur,AcrylicBlur,Mica}` + `ExperimentalAcrylicBorder` | 用 `AcrylicBlur` + `ExperimentalAcrylicBorder` |
+| 2 | CSS grid 轨道过渡 | ❌ 列宽无过渡 | ✅ **能做**：`Transitions` + `DoubleTransition` | 动画一个 double 绑到列宽（`GridLength` 本身不可动画） |
+| 3 | 60fps 拖拽跟随 | ⚠️ 无 rAF | ✅ **本来就没问题** | 事件驱动直接跟手。rAF 是浏览器帧调度，不是"60fps" |
+| 4 | `device-posture` 折叠屏 | ❌ 无 API | ✅ **确实没有** | 桌面端无折痕屏，**不做** |
+| 5 | Web 字体回退链 | ❌ 只支持已注册 | ⚠️ **能做，形式不同**：`FontManagerOptions.FontFallbacks` / `FontFamilyMappings` / `EmbeddedFontCollection` 都在 | 设置页改为**选择已注册字体**，不支持自由输入任意字体名 |
+| 6 | `color-mix()` | ❌ 无运行时混色 | ⚠️ **能做**：`Color.ToHsl/ToHsv` 齐全，自己写 Mix | 写 `ColorMath.Mix()`，token 里的 color-mix 在编译期算成固定值 |
+
+**真实做不到的只有 1 条**（折叠屏姿态），且它对本项目无实际影响。
+
+### 6.2 各条的落地方式
+
+#### 1. 毛玻璃（可做）
+
+```csharp
+// 窗口级
+TransparencyLevelHint = new[] { WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur };
+
+// 侧边栏
+new ExperimentalAcrylicBorder
+{
+    Material = new ExperimentalAcrylicMaterial
+    {
+        BackgroundSource = AcrylicBackgroundSource.Digger,
+        TintColor = Color.Parse("#1B1B1C"),
+        TintOpacity = 0.85,
+        MaterialOpacity = 0.6,
+    },
+    Child = sidebarContent,
+};
+```
+
+**平台差异**：Windows 上是系统级 Acrylic（与 Electron 同级）；Linux 可能退化为无模糊（取决于合成器），需在启动时检查 `TransparencyLevel` 实际值并降级为不透明。
+
+#### 2. 轨道过渡（可做，但要绕一步）
+
+`GridLength` **不在** `DoubleTransition` 的可动画类型里。做法是：
+
+```csharp
+// 用一个 double 属性承载目标宽度，动画它，再同步到列定义
+public static readonly StyledProperty<double> SidebarPxProperty = ...;
+// Transitions 加 DoubleTransition；列宽在属性变化的回调里赋值
+```
+
+#### 5. 字体（可做，但设置形态不同）
+
+- 支持：`FontManagerOptions.FontFamilyMappings` 显式注册 + `FontFallbacks` 回退链
+- 不支持：用户输入 `"MyFont, sans-serif"` 这种 CSS 式自由列表——映射表必须预先建好
+- 所以设置页做**下拉选择**，而不是 dsh 的**自由文本输入**
 
 ---
 

@@ -66,6 +66,17 @@ public sealed class MainWindow : Window
         Title = "Dougong Desktop";
         Width = 1280;
         Height = 820;
+
+        // 毛玻璃：dsh 的 macOS 侧边栏是半透明叠加窗口 vibrancy。
+        // Avalonia 12 有 AcrylicBlur（Windows）/Blur/Mica，先按能力降级声明；
+        // 实际生效的级别在 Opened 里读 TransparencyLevel 确认，
+        // 拿不到时退化为不透明——不能假设某个平台支持。
+        TransparencyLevelHint =
+        [
+            WindowTransparencyLevel.AcrylicBlur,
+            WindowTransparencyLevel.Blur,
+            WindowTransparencyLevel.None,
+        ];
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         AppShell.DeclareSlots(_slots);
