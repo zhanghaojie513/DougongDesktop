@@ -21,11 +21,11 @@ public sealed class MainWindow : Window
     private readonly SlotRegistry _slots = new();
     private readonly AppShellViewModel _vm = new();
     private readonly EngineClient _engine = new(msg => Console.Error.WriteLine($"[ui] {msg}"));
-    private IDisposable? _sidebarHandle;
+    private readonly Dictionary<string, IDisposable> _handles = new(StringComparer.Ordinal);
+    private string? _connectionDetail;
     private string? _selectedSessionId;
     private IReadOnlyList<SessionSummary>? _currentSessions;
     private readonly StatusCapsule _capsule = new();
-    private IDisposable? _capsuleHandle;
     private readonly UiExtensionLoader _uiPlugins;
 
     public MainWindow()
@@ -37,7 +37,7 @@ public sealed class MainWindow : Window
 
         AppShell.DeclareSlots(_slots);
         _uiPlugins = new UiExtensionLoader(_slots, msg => Console.Error.WriteLine(msg));
-        RegisterBuiltInPlaceholders();
+        RegisterBuiltInModules();
 
         Content = new AppShell(_slots, _vm);
 
@@ -70,180 +70,46 @@ public sealed class MainWindow : Window
     /// 用 priority 100 段（内置标准层）。第三方 UI 插件想覆盖时注册更小的值即可
     /// ——这是《Slot 机制规格》§2 定的约定。
     /// </remarks>
-    private void RegisterBuiltInPlaceholders()
+    /// <summary>
+    /// 按 <see cref="BuiltInModules.All"/> 的**声明顺序**注册内置模块。
+    /// </summary>
+    /// <remarks>
+    /// 顺序来自清单，不是这里的代码顺序——加模块只改清单，不用找插入点。
+    /// <para>
+    /// 句柄统一收进 <c>_handles</c>：漏存会导致后来的注册删不掉旧的，
+    /// 而"同 priority 先注册者胜"会让界面永远停在占位内容（P3a 踩过）。
+    /// </para>
+    /// </remarks>
+    private void RegisterBuiltInModules()
     {
         const int BuiltIn = 100;
         const SlotOccupantOrigin Origin = SlotOccupantOrigin.BuiltIn;
 
-        // 每条都显式标 BuiltIn：conversation 这类保留 key 只接受内置来源，
-        // 而"是不是内置"必须由注册方声明，不能靠 priority 数值猜。
-        // 句柄必须保存：否则 UpdateSidebar 里的 Dispose 删不掉它，
-        // 而新注册的同 priority 占位者会被"先注册者胜"规则压住——
-        // 表现为界面永远显示占位内容（实测踩过）
-        _sidebarHandle = _slots.Register(ReservedSlots.Sidebar, new SlotOccupant(
-            "builtin.sidebar", BuiltIn,
-            MakeTemplate(() => Placeholder("侧边栏", "会话列表 · 工作区导航")))
+        foreach (var module in BuiltInModules.All)
         {
-            Origin = Origin,
-        });
-
-        _slots.Register(ReservedSlots.Main, new SlotOccupant(
-            "builtin.conversation", BuiltIn,
-            MakeTemplate(() => Placeholder("对话区", "消息流 · 工具卡片 · 审批")),
-            Key: ReservedSlots.Conversation)
-        {
-            Origin = Origin,
-        });
-
-        _slots.Register(ReservedSlots.Main, new SlotOccupant(
-            "builtin.plugins", BuiltIn,
-            MakeTemplate(() => Placeholder("插件", "插件管理 · 已安装列表")),
-            Key: "plugins")
-        {
-            Origin = Origin,
-        });
-
-        _slots.Register(ReservedSlots.Main, new SlotOccupant(
-            "builtin.settings", BuiltIn,
-            MakeTemplate(() => Placeholder("设置", "提供商 · 外观 · 诊断")),
-            Key: "settings")
-        {
-            Origin = Origin,
-        });
-
-        // 状态胶囊：常驻底部条，不可关——它回答"引擎还在动吗"
-        _capsuleHandle = _slots.Register(ReservedSlots.Bottom, new SlotOccupant(
-            "builtin.status", BuiltIn,
-            MakeTemplate(() => _capsule))
-        {
-            Origin = Origin,
-        });
-
-        _slots.Register(ReservedSlots.RightBar, new SlotOccupant(
-            "builtin.rightbar", BuiltIn,
-            MakeTemplate(() => Placeholder("右栏", "文件 · 改动 · 计划 · 上下文")))
-        {
-            Origin = Origin,
-        });
-    }
-
-    /// <summary>
-    /// 连接引擎，成功后就拉一次会话列表。
-    /// </summary>
-    /// <remarks>
-    /// <b>失败要可见</b>：连不上时在侧边栏显示原因，而不是留一个空白框让用户猜。
-    /// 这条是 P3a-5 的验收点——"连不上时明确提示"比"连上了能用"更容易被忽略。
-    /// </remarks>
-    private async Task ConnectEngineAsync()
-    {
-        _engine.StateChanged += (state, detail) =>
-        {
-            Console.Error.WriteLine($"[ui] 引擎状态 {state}{(detail is null ? "" : $"：{detail}")}");
-            _capsule.SetConnection(state, detail);
-        };
-
-        _engine.EventReceived += OnEngineEvent;
-
-        var ok = await _engine.ConnectAsync();
-        if (!ok)
-        {
-            Console.Error.WriteLine("[ui] 引擎连接失败，会话列表不可用");
-            return;
-        }
-
-        // 连上后立刻要一次会话列表（真实数据，不是占位）
-        await _engine.SendAsync(new ListSessionsCommand { RequestId = Guid.NewGuid().ToString("N") });
-    }
-
-    private void OnEngineEvent(ServerEvent evt)
-    {
-        switch (evt)
-        {
-            case SessionListedEvent listed:
-                Console.Error.WriteLine($"[ui] 会话列表：{listed.Sessions.Count} 条");
-                foreach (var s in listed.Sessions.Take(5))
-                    Console.Error.WriteLine($"[ui]   {s.Id} · {s.Title} · {s.ItemCount} 条目");
-                UpdateSidebar(listed.Sessions);
-                break;
-
-            case EngineStatusEvent status when status.Detail is { Length: > 0 }:
-                Console.Error.WriteLine($"[ui] 引擎：{status.State} · {status.Detail}");
-                break;
-
-            case TurnStartedEvent:
-                _capsule.OnTurnStarted();
-                break;
-
-            case ItemAddedEvent { Item: IpcToolCallItem }:
-                _capsule.OnToolRunning("工具");
-                break;
-
-            case ApprovalRequestedEvent approval:
-                _capsule.OnApprovalRequested(approval.Request.ToolName);
-                break;
-
-            case TurnCompletedEvent done:
-                _capsule.OnTurnCompleted(done.Status, done.Diagnostic);
-                break;
-        }
-    }
-
-    /// <summary>把真实会话列表填进侧边栏 slot。</summary>
-    private void UpdateSidebar(IReadOnlyList<SessionSummary>? sessions, string? detail = null)
-    {
-        _sidebarHandle?.Dispose();
-
-        _sidebarHandle = _slots.Register(ReservedSlots.Sidebar, new SlotOccupant(
-            "builtin.sidebar", 100,
-            MakeTemplate(() => SidebarView.Build(sessions, detail, _selectedSessionId, OnSidebarSelect)))
-        {
-            Origin = SlotOccupantOrigin.BuiltIn,
-        });
-
-        _currentSessions = sessions;
-    }
-
-    /// <summary>侧边栏选中回调。</summary>
-    private void OnSidebarSelect(string key)
-    {
-        switch (key)
-        {
-            case SidebarView.SettingsKey:
-                _vm.ActivePanel = "settings";
-                break;
-
-            case SidebarView.NewSessionKey:
-                // P4 接入新建会话；现在先记录，不做假动作
-                Console.Error.WriteLine("[ui] 新建会话（P4 接入）");
-                break;
-
-            case "__offline":
-            case "__empty":
-                break;   // 不可选中的提示行
-
-            default:
-                _selectedSessionId = key;
-                _vm.ActivePanel = ReservedSlots.Conversation;
-                _ = OpenSessionAsync(key);
-                break;
-        }
-    }
-
-    private async Task OpenSessionAsync(string sessionId)
-    {
-        try
-        {
-            await _engine.SendAsync(new OpenSessionCommand
+            var handle = _slots.Register(module.SlotKey, new SlotOccupant(
+                module.Id, BuiltIn, MakeTemplate(() => BuildModule(module)), module.Key)
             {
-                RequestId = Guid.NewGuid().ToString("N"),
-                SessionId = sessionId,
+                Origin = Origin,
             });
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[ui] 打开会话失败：{ex.Message}");
+
+            _handles[module.Id] = handle;
         }
     }
+
+    /// <summary>按模块声明构建控件。</summary>
+    private Control BuildModule(BuiltInModule module) => module.Kind switch
+    {
+        BuiltInModuleKind.Sidebar => SidebarView.Build(
+            _currentSessions, _connectionDetail, _selectedSessionId, OnSidebarSelect),
+
+        BuiltInModuleKind.StatusCapsule => _capsule,
+
+        BuiltInModuleKind.Placeholder => Placeholder(
+            module.Title ?? module.Id, module.Subtitle ?? ""),
+
+        _ => throw new ArgumentOutOfRangeException(nameof(module)),
+    };
 
     /// <summary>
     /// 加载 UI 插件。
@@ -276,6 +142,123 @@ public sealed class MainWindow : Window
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[ui-plugin] 加载目录失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>连接引擎，成功后就拉一次会话列表。</summary>
+    private async Task ConnectEngineAsync()
+    {
+        _engine.StateChanged += (state, detail) =>
+        {
+            Console.Error.WriteLine($"[ui] 引擎状态 {state}{(detail is null ? "" : "：" + detail)}");
+            _connectionDetail = detail;
+            _capsule.SetConnection(state, detail);
+        };
+
+        _engine.EventReceived += OnEngineEvent;
+
+        var ok = await _engine.ConnectAsync();
+        if (!ok)
+        {
+            Console.Error.WriteLine("[ui] 引擎连接失败，会话列表不可用");
+            RefreshSidebar();
+            return;
+        }
+
+        await _engine.SendAsync(new ListSessionsCommand { RequestId = Guid.NewGuid().ToString("N") });
+    }
+
+    private void OnEngineEvent(ServerEvent evt)
+    {
+        switch (evt)
+        {
+            case SessionListedEvent listed:
+                Console.Error.WriteLine($"[ui] 会话列表：{listed.Sessions.Count} 条");
+                _currentSessions = listed.Sessions;
+                RefreshSidebar();
+                break;
+
+            case EngineStatusEvent status when status.Detail is { Length: > 0 }:
+                Console.Error.WriteLine($"[ui] 引擎：{status.State} · {status.Detail}");
+                break;
+
+            case TurnStartedEvent:
+                _capsule.OnTurnStarted();
+                break;
+
+            case ItemAddedEvent { Item: IpcToolCallItem }:
+                _capsule.OnToolRunning("工具");
+                break;
+
+            case ApprovalRequestedEvent approval:
+                _capsule.OnApprovalRequested(approval.Request.ToolName);
+                break;
+
+            case TurnCompletedEvent done:
+                _capsule.OnTurnCompleted(done.Status, done.Diagnostic);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 侧边栏数据变化后重新注册。
+    /// </summary>
+    /// <remarks>
+    /// 先 Dispose 旧句柄再注册新的——否则同 priority 下"先注册者胜"
+    /// 会让界面停在旧内容（P3a 踩过）。句柄从 <c>_handles</c> 里取。
+    /// </remarks>
+    private void RefreshSidebar()
+    {
+        var module = BuiltInModules.Find("builtin.sidebar");
+        if (module is null) return;
+
+        if (_handles.TryGetValue(module.Id, out var old)) old.Dispose();
+
+        _handles[module.Id] = _slots.Register(module.SlotKey, new SlotOccupant(
+            module.Id, 100, MakeTemplate(() => BuildModule(module)), module.Key)
+        {
+            Origin = SlotOccupantOrigin.BuiltIn,
+        });
+    }
+
+    /// <summary>侧边栏选中回调。</summary>
+    private void OnSidebarSelect(string key)
+    {
+        switch (key)
+        {
+            case SidebarView.SettingsKey:
+                _vm.ActivePanel = "settings";
+                break;
+
+            case SidebarView.NewSessionKey:
+                Console.Error.WriteLine("[ui] 新建会话（P4 接入）");
+                break;
+
+            case "__offline":
+            case "__empty":
+                break;
+
+            default:
+                _selectedSessionId = key;
+                _vm.ActivePanel = ReservedSlots.Conversation;
+                _ = OpenSessionAsync(key);
+                break;
+        }
+    }
+
+    private async Task OpenSessionAsync(string sessionId)
+    {
+        try
+        {
+            await _engine.SendAsync(new OpenSessionCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                SessionId = sessionId,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 打开会话失败：{ex.Message}");
         }
     }
 

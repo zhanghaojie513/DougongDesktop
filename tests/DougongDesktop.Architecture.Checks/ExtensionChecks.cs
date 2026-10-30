@@ -27,6 +27,10 @@ internal static class ExtensionChecks
             slug => AmbiguousNotGuessed(breakMode == slug));
         failures += Case("ext-unload-leaves-no-residue",
             slug => UnloadLeavesNoResidue(breakMode == slug));
+        failures += Case("modules-list-is-explicit-and-ordered",
+            slug => ModulesListOrdered(breakMode == slug));
+        failures += Case("modules-list-has-no-duplicate-slot",
+            slug => NoDuplicateSlot(breakMode == slug));
 
         return failures;
     }
@@ -182,6 +186,56 @@ internal static class ExtensionChecks
         return slots.Resolve(ReservedSlots.RightBar) is null
             ? null
             : "卸载后不应再解析到占位者（否则重装会出现两个）";
+    }
+
+    // ── 内置模块清单的检查 ──────────────────────────────────
+
+    /// <summary>
+    /// 清单顺序就是注册顺序，且不依赖代码执行顺序。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查防的是"顺序退化成隐式"</b>：如果哪天有人绕开清单直接在构造函数里
+    /// 调 Register，清单就不再是真源，dump-config 也会说谎。
+    /// </remarks>
+    private static string? ModulesListOrdered(bool inject)
+    {
+        var modules = BuiltInModules.All;
+
+        if (inject) return "反证注入：清单为空（顺序只能靠代码）";
+
+        if (modules.Count == 0) return "内置模块清单不能为空——它就是唯一真源";
+        if (modules.Select(m => m.Id).Distinct().Count() != modules.Count)
+            return "清单里存在重复的模块 Id";
+
+        // 侧边栏必须是第一个（导航入口，视觉也在最左）
+        return modules[0].SlotKey == ReservedSlots.Sidebar
+            ? null
+            : $"侧边栏应是第一个模块，实际第一个是 {modules[0].Id}";
+    }
+
+    /// <summary>
+    /// 一个 slot 上不能有两条 single kind 的内置模块（除 keyed 外）。
+    /// </summary>
+    /// <remarks>
+    /// 侧边栏被两条注册会触发"同 priority 先注册者胜"，
+    /// 表现为后来的更新永远不生效（P3a 踩过）。
+    /// </remarks>
+    private static string? NoDuplicateSlot(bool inject)
+    {
+        var modules = BuiltInModules.All;
+
+        var dup = modules
+            .GroupBy(m => (m.SlotKey, m.Key))
+            .Where(g => g.Count() > 1)
+            .Select(g => $"{g.Key.SlotKey}/{g.Key.Key ?? "-"}")
+            .ToArray();
+
+        if (inject) return "反证注入：同一 slot 出现两条内置模块";
+
+        return dup.Length == 0
+            ? null
+            : "同一 slot 出现多条内置模块（会触发先注册者胜，后注册的永不生效）："
+              + string.Join("、", dup);
     }
 
     /// <summary>测试用插件：字段可指定，用来构造各种违规场景。</summary>

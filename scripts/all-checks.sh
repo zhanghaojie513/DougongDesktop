@@ -32,6 +32,7 @@ checks="$checks slot-undeclared-register-throws slot-origin-defaults-to-installe
 checks="$checks ext-origin-always-installed ext-rejects-reserved-key"
 checks="$checks ext-skips-non-plugin-dll ext-missing-dir-throws"
 checks="$checks ext-unload-leaves-no-residue"
+checks="$checks modules-list-is-explicit-and-ordered modules-list-has-no-duplicate-slot"
 
 for check in $checks; do
   printf '%-36s ' "$check"
