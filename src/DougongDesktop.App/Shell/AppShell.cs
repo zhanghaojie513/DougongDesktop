@@ -38,8 +38,12 @@ public sealed class AppShell : UserControl
         {
             if (_contentBySlot.TryGetValue(slotKey, out var content))
             {
-                var t = slots.Resolve(slotKey, content.Content as string);
-                content.ContentTemplate = t;
+                // 必须把 Content 清掉再设回：只换 ContentTemplate 时 Avalonia 会复用
+                // 已有的内容实例，模板压根不会重新 Build——实测 Sidebar 一直是 0 个就是这原因。
+                var key = content.Content;
+                content.Content = null;
+                content.ContentTemplate = slots.Resolve(slotKey, key as string);
+                content.Content = key;
             }
         };
     }

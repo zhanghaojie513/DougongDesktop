@@ -3,6 +3,7 @@ using Avalonia.VisualTree;
 using DougongDesktop.App.Services;
 using DougongDesktop.App.Shell;
 using DougongDesktop.Ipc;
+using IpcToolCallItem = DougongDesktop.Ipc.ToolCallItem;
 using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
@@ -23,6 +24,8 @@ public sealed class MainWindow : Window
     private IDisposable? _sidebarHandle;
     private string? _selectedSessionId;
     private IReadOnlyList<SessionSummary>? _currentSessions;
+    private readonly StatusCapsule _capsule = new();
+    private IDisposable? _capsuleHandle;
 
     public MainWindow()
     {
@@ -39,7 +42,20 @@ public sealed class MainWindow : Window
         Opened += async (_, _) =>
         {
             DumpLayout();
-            await ConnectEngineAsync();
+
+            try
+            {
+                await ConnectEngineAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[ui] 连接流程异常：" + ex);
+            }
+
+            // 连接后再 dump：第一次 dump 时侧边栏还是占位内容，
+            // 用它判断最终状态会误判（实测踩过）
+            await Task.Delay(1200);
+            DumpLayout();
         };
     }
 
@@ -57,7 +73,10 @@ public sealed class MainWindow : Window
 
         // 每条都显式标 BuiltIn：conversation 这类保留 key 只接受内置来源，
         // 而"是不是内置"必须由注册方声明，不能靠 priority 数值猜。
-        _slots.Register(ReservedSlots.Sidebar, new SlotOccupant(
+        // 句柄必须保存：否则 UpdateSidebar 里的 Dispose 删不掉它，
+        // 而新注册的同 priority 占位者会被"先注册者胜"规则压住——
+        // 表现为界面永远显示占位内容（实测踩过）
+        _sidebarHandle = _slots.Register(ReservedSlots.Sidebar, new SlotOccupant(
             "builtin.sidebar", BuiltIn,
             MakeTemplate(() => Placeholder("侧边栏", "会话列表 · 工作区导航")))
         {
@@ -88,6 +107,14 @@ public sealed class MainWindow : Window
             Origin = Origin,
         });
 
+        // 状态胶囊：常驻底部条，不可关——它回答"引擎还在动吗"
+        _capsuleHandle = _slots.Register(ReservedSlots.Bottom, new SlotOccupant(
+            "builtin.status", BuiltIn,
+            MakeTemplate(() => _capsule))
+        {
+            Origin = Origin,
+        });
+
         _slots.Register(ReservedSlots.RightBar, new SlotOccupant(
             "builtin.rightbar", BuiltIn,
             MakeTemplate(() => Placeholder("右栏", "文件 · 改动 · 计划 · 上下文")))
@@ -106,7 +133,10 @@ public sealed class MainWindow : Window
     private async Task ConnectEngineAsync()
     {
         _engine.StateChanged += (state, detail) =>
+        {
             Console.Error.WriteLine($"[ui] 引擎状态 {state}{(detail is null ? "" : $"：{detail}")}");
+            _capsule.SetConnection(state, detail);
+        };
 
         _engine.EventReceived += OnEngineEvent;
 
@@ -134,6 +164,22 @@ public sealed class MainWindow : Window
 
             case EngineStatusEvent status when status.Detail is { Length: > 0 }:
                 Console.Error.WriteLine($"[ui] 引擎：{status.State} · {status.Detail}");
+                break;
+
+            case TurnStartedEvent:
+                _capsule.OnTurnStarted();
+                break;
+
+            case ItemAddedEvent { Item: IpcToolCallItem }:
+                _capsule.OnToolRunning("工具");
+                break;
+
+            case ApprovalRequestedEvent approval:
+                _capsule.OnApprovalRequested(approval.Request.ToolName);
+                break;
+
+            case TurnCompletedEvent done:
+                _capsule.OnTurnCompleted(done.Status, done.Diagnostic);
                 break;
         }
     }
@@ -230,8 +276,32 @@ public sealed class MainWindow : Window
         },
     };
 
+    /// <summary>
+    /// 造一个 slot 模板。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须用 <c>FuncDataTemplate.Create</c>（无类型约束），不能用 <c>FuncDataTemplate&lt;object&gt;</c></b>。
+    /// 后者只在数据是 <c>object</c> 时才匹配；而 slot 的 <c>ContentControl.Content</c> 放的是
+    /// <c>string</c>（slot key），类型不匹配 → <c>ContentPresenter</c> 建了但里面是空的。
+    /// 实测表现就是 <c>Sidebar 0</c>：模板有、子节点有、但真正的控件没被构建。
+    /// </remarks>
+    /// <summary>
+    /// 造一个 slot 模板。
+    /// </summary>
+    /// <remarks>
+    /// <b>用带 <c>match</c> 的重载，不要用 <c>FuncDataTemplate&lt;object&gt;</c></b>。
+    /// 泛型版本只在"数据类型是 <c>object</c>"时匹配，而 slot 的
+    /// <c>ContentControl.Content</c> 放的是 <c>string</c>（slot key）——
+    /// 类型不匹配时 <c>ContentPresenter</c> 会建出来但里面是空的。
+    /// 实测表现：<c>Sidebar 0</c>（模板有、子节点有、真正的控件没构建）。
+    /// <para>
+    /// 传一个恒真的 <c>match</c> 让它对任意数据生效。
+    /// </para>
+    /// </remarks>
     private static Avalonia.Controls.Templates.IDataTemplate MakeTemplate(Func<Control> build) =>
-        new Avalonia.Controls.Templates.FuncDataTemplate<object>((_, _) => build());
+        new Avalonia.Controls.Templates.FuncDataTemplate(
+            match: _ => true,
+            build: (_, _) => build());
 
     /// <summary>
     /// 把布局实测结果打到 stderr。
@@ -261,6 +331,13 @@ public sealed class MainWindow : Window
         foreach (var p in panels)
             Report($"  panel:{p.Id}", p);
 
+        // 统计关键控件的真实实例数——截图可能受合成影响，控件树不会
+        var all = shell?.GetVisualDescendants().ToArray() ?? [];
+        Console.Error.WriteLine($"[shell] 视觉树节点数 {all.Length}");
+        Console.Error.WriteLine($"[shell] ContentControl {all.OfType<ContentControl>().Count()}");
+        Console.Error.WriteLine($"[shell] Sidebar {all.OfType<TKCode.Arc.Sidebar>().Count()}");
+        Console.Error.WriteLine($"[shell] AgentStatus {all.OfType<TKCode.Arc.AgentStatus>().Count()}");
+        Console.Error.WriteLine($"[shell] ItemsControl {all.OfType<ItemsControl>().Count()}");
         Console.Error.WriteLine("[shell] DUMP-END");
     }
 }
