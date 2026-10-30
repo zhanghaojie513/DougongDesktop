@@ -21,6 +21,7 @@ internal static class DockChecks
         failures += Case("fs-list-rejects-escape", slug => RejectsEscape(breakMode == slug));
         failures += Case("dock-unimplemented-tabs-are-labeled", slug => UnimplementedLabeled(breakMode == slug));
         failures += Case("fs-list-roundtrips", slug => RoundTrips(breakMode == slug));
+        failures += Case("ipc-every-message-is-registered", slug => EveryMessageRegistered(breakMode == slug));
         failures += Case("diff-detects-add-modify-delete", slug => DetectsAllThree(breakMode == slug));
         failures += Case("diff-ignores-same-content", slug => NoChangeOnSameContent(breakMode == slug));
 
@@ -310,6 +311,53 @@ internal static class DockChecks
         {
             try { Directory.Delete(root, true); } catch { }
         }
+    }
+
+    /// <summary>
+    /// 每个消息类型都必须在 <c>Protocol.cs</c> 登记判别器。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条抓的是一次真实事故</b>：按域拆分 <c>Protocol.cs</c> 时，
+    /// 我把 <c>ConversationItem</c> 的 6 条派生类型登记漏在了被覆盖的文件里。
+    /// 编译照样通过、构建零错误——因为漏的是<b>特性标注</b>，不是代码。
+    /// 后果是 6 种会话条目全部无法反序列化，而失败在运行期才发生。
+    /// <para>
+    /// <b>断言方式是"扫描程序集"而不是"读到某个数字"</b>：用反射列出所有
+    /// <see cref="ClientCommand"/> / <see cref="ServerEvent"/> / <see cref="ConversationItem"/>
+    /// 的具体派生类型，逐个检查是否带 <c>JsonDerivedType</c>。
+    /// 加了新消息忘了登记 → 立刻红。
+    /// </para>
+    /// </remarks>
+    private static string? EveryMessageRegistered(bool inject)
+    {
+        var unregistered = new List<string>();
+
+        void Check(Type root)
+        {
+            var declared = root
+                .GetCustomAttributes(typeof(System.Text.Json.Serialization.JsonDerivedTypeAttribute), inherit: false)
+                .Cast<System.Text.Json.Serialization.JsonDerivedTypeAttribute>()
+                .Select(a => a.DerivedType)
+                .ToHashSet();
+
+            var actual = root.Assembly.GetTypes()
+                .Where(t => !t.IsAbstract && t.IsSealed && root.IsAssignableFrom(t))
+                .ToArray();
+
+            foreach (var t in actual)
+            {
+                if (inject) { unregistered.Add(t.Name); continue; }
+                if (!declared.Contains(t)) unregistered.Add(t.Name);
+            }
+        }
+
+        Check(typeof(ClientCommand));
+        Check(typeof(ServerEvent));
+        Check(typeof(ConversationItem));
+
+        if (unregistered.Count == 0) return null;
+
+        return $"以下类型没有登记判别器（序列化时无法还原）：{string.Join("、", unregistered)}";
     }
 
     private static readonly string RepoRoot = FindRepoRoot();
