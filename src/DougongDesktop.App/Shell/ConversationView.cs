@@ -172,6 +172,53 @@ public sealed class ConversationView : UserControl
         Console.Error.WriteLine($"[ui] 自检数据已灌入：{_items.Count} 条");
     }
 
+    /// <summary>
+    /// 灌入压力数据，验证虚拟化。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么单独一个模式</b>：1000 条消息的滚动性能不能靠看——必须看
+    /// 视觉树里实际构建了多少个容器。虚拟化生效时，1000 条只该有
+    /// 十几到几十个可视化条目；没生效时会构建全部 1000 个。
+    /// <para>
+    /// 用 <c>DOUGONG_UI_STRESS=1000</c> 启用（数字为条数）。
+    /// </para>
+    /// </remarks>
+    public void LoadStressData(int count)
+    {
+        var started = DateTimeOffset.Now;
+
+        for (var i = 1; i <= count; i++)
+        {
+            // 混合条目类型，更接近真实负载
+            if (i % 10 == 0)
+            {
+                _items.Add(new IpcToolCallItem
+                {
+                    Id = $"stress-{i}",
+                    InvocationId = $"inv-{i}",
+                    ToolName = "read_file",
+                    ArgumentsJson = "{}",
+                    ResultText = $"第 {i} 条工具输出",
+                    Status = IpcToolCallStatus.Succeeded,
+                });
+            }
+            else
+            {
+                _items.Add(new AssistantMessageItem
+                {
+                    Id = $"stress-{i}",
+                    Text = $"第 {i} 条消息。用于验证虚拟化：如果 1000 条全部构建，"
+                         + "视觉树会膨胀到几千个节点，滚动明显发卡。",
+                });
+            }
+        }
+
+        Refresh();
+
+        var elapsed = DateTimeOffset.Now - started;
+        Console.Error.WriteLine($"[stress] 灌入 {count} 条，耗时 {elapsed.TotalMilliseconds:0}ms");
+    }
+
     /// <summary>清空（切换会话时）。</summary>
     public void Clear()
     {
@@ -275,24 +322,99 @@ public sealed class ConversationView : UserControl
         };
     }
 
+    /// <summary>工具输出超过这么多行就折叠。</summary>
+    /// <remarks>
+    /// <b>折叠而不是截断</b>：截断会丢信息，而排查问题往往要看完整输出。
+    /// 折叠让长输出不撑爆界面，同时保持可取回。
+    /// </remarks>
+    private const int CollapseAfterLines = 8;
+
+    private const char NewLineChar = '\n';
+    private const string NewLine = "\n";
+
     private static Control BuildToolCall(IpcToolCallItem item)
     {
-        // 用 Arc 的 ToolCall 卡片；状态由 ToolCallItem.Status 决定
+        // 用 Arc 的 ToolCall 卡片；状态由 ToolCallItem.Status 决定。
+        // Message 只放一行摘要（诊断原因），完整输出单独处理——
+        // 全塞进 Message 会让卡片被长输出撑开。
         var toolItem = new ArcToolCallItem
         {
             Id = item.InvocationId,
             ToolName = item.ToolName,
             Status = MapStatus(item.Status),
             Title = DescribeTitle(item),
-            Message = item.Diagnostic ?? item.ResultText,
+            Message = item.Diagnostic,
         };
+
+        var card = new ToolCall { Item = toolItem };
+
+        // 没有输出就没有折叠区
+        if (string.IsNullOrWhiteSpace(item.ResultText))
+            return new Border { Margin = new Thickness(12, 4), Child = card };
+
+        var output = BuildToolOutput(item.ResultText);
 
         return new Border
         {
             Margin = new Thickness(12, 4),
-            Child = new ToolCall { Item = toolItem },
+            Child = new StackPanel { Spacing = 4, Children = { card, output } },
         };
     }
+
+    /// <summary>
+    /// 构建工具输出：短的内联，长的折叠。
+    /// </summary>
+    /// <remarks>
+    /// 折叠用 <see cref="Expander"/>（Avalonia 原生），不自建：
+    /// 它有现成的键盘可达性与展开动画。
+    /// <para>
+    /// 折叠时显示前 <see cref="CollapseAfterLines"/> 行做预览——
+    /// 只显示"（已折叠）"会让用户必须展开才知道有没有用。
+    /// </para>
+    /// </remarks>
+    private static Control BuildToolOutput(string text)
+    {
+        var lines = text.Split(NewLineChar);
+        var needsCollapse = lines.Length > CollapseAfterLines;
+
+        if (!needsCollapse)
+            return OutputBlock(text);
+
+        var preview = string.Join(NewLine, lines.Take(CollapseAfterLines));
+        var hidden = lines.Length - CollapseAfterLines;
+
+        return new Expander
+        {
+            Margin = new Thickness(0, 2, 0, 0),
+            Header = new TextBlock
+            {
+                Text = $"输出（{lines.Length} 行，展开查看其余 {hidden} 行）",
+                FontSize = 11,
+                Opacity = 0.55,
+            },
+            IsExpanded = false,
+            Content = new StackPanel
+            {
+                Spacing = 4,
+                Children = { OutputBlock(preview), OutputBlock(string.Join(NewLine, lines.Skip(CollapseAfterLines))) },
+            },
+        };
+    }
+
+    private static Control OutputBlock(string text) => new Border
+    {
+        Padding = new Thickness(10, 6),
+        CornerRadius = new CornerRadius(4),
+        Background = new SolidColorBrush(Color.FromArgb(10, 0, 0, 0)),
+        Child = new TextBlock
+        {
+            Text = text,
+            FontFamily = new FontFamily("Geist Mono, Consolas, monospace"),
+            FontSize = 11,
+            TextWrapping = TextWrapping.NoWrap,
+            Opacity = 0.75,
+        },
+    };
 
     /// <summary>
     /// IPC 的 <see cref="ToolCallStatus"/> 映射到 Arc 的 <c>ToolCallStatus</c>。

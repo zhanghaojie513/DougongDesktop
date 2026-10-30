@@ -48,6 +48,10 @@ public sealed class MainWindow : Window
         if (Environment.GetEnvironmentVariable("DOUGONG_UI_SELFTEST") is "1")
             _conversation.LoadSelfTestData();
 
+        // 压力模式：验证虚拟化（1000 条只该构建少量容器）
+        if (int.TryParse(Environment.GetEnvironmentVariable("DOUGONG_UI_STRESS"), out var stress) && stress > 0)
+            _conversation.LoadStressData(stress);
+
         Opened += async (_, _) =>
         {
             DumpLayout();
