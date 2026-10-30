@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- slot 框架：UI 的装配机制本身，不涉及具体界面。
+       独立成库的理由：它要能被测试工程引用（守卫刻意不引用 App），
+       同时保证"UI 机制"与"UI 实现"分离——换布局、加插件都不动这里。 -->
+  <PropertyGroup>
+    <Description>Dougong Desktop UI 装配机制：slot 注册表与优先级路由</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 只依赖 Avalonia 的控件模板与集合抽象，不引 Arc：
+         slot 机制不该知道用了哪套组件库。 -->
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
+
+</Project>

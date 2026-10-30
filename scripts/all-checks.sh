@@ -21,7 +21,15 @@ echo "== 架构守卫（反证：每条都必须变红）=="
 # 从没红过的检查等于没有检查。这一节的价值不是"通过"，
 # 而是证明"破坏架构时它真的会失败"。
 failed=0
-for check in app-does-not-reference-sdk sdk-side-has-no-ui-dependencies ipc-depends-on-nothing-but-bcl; do
+# 架构守卫三条 + slot 框架九条。每一条都必须能被破坏后变红。
+checks="app-does-not-reference-sdk sdk-side-has-no-ui-dependencies ipc-depends-on-nothing-but-bcl"
+checks="$checks slot-priority-overrides-default slot-priority-tie-breaks-by-registration"
+checks="$checks slot-list-preserves-register-order slot-list-observable-updates"
+checks="$checks slot-keyed-dispatches-by-key slot-conversation-key-is-reserved"
+checks="$checks slot-unload-leaves-no-residue slot-select-panel-rejects-missing-key"
+checks="$checks slot-occupant-failure-is-isolated"
+
+for check in $checks; do
   printf '%-36s ' "$check"
   if "$DOTNET" run --project tests/DougongDesktop.Architecture.Checks \
         -c Release --no-build -- --break="$check" > /dev/null 2>&1; then

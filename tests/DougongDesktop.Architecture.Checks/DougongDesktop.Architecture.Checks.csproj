@@ -1,11 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- 架构守卫：读其他工程的 csproj 与编译产物，断言分层边界。
-       不引用被测工程（否则守卫本身会成为依赖链的一环）。 -->
+  <!-- 架构守卫 + slot 行为检查。
+
+       架构守卫部分**不引用**被测工程（读 csproj 与编译产物即可，
+       引用会让守卫自己成为依赖链的一环）。
+
+       但 slot 检查必须实例化 SlotRegistry，所以要引用 Ui.Core。
+       这是可接受的：Ui.Core 是**机制**不是**实现**，它没有具体界面，
+       引用它不会让守卫耦合到 UI 实现上。 -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <Description>Dougong Desktop 架构守卫：断言 UI 与 SDK 解耦</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 仅引用机制层：SlotRegistry 需要实例化才能测行为 -->
+    <ProjectReference Include="..\..\src\DougongDesktop.Ui.Core\DougongDesktop.Ui.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
 
 </Project>

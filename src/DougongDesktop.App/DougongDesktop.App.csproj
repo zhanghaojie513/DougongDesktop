@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DougongDesktop.Ipc\DougongDesktop.Ipc.csproj" />
+    <ProjectReference Include="..\DougongDesktop.Ui.Core\DougongDesktop.Ui.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -50,6 +50,10 @@ public static class Program
         failures += Check("sdk-side-has-no-ui-dependencies", () => SdkSideHasNoUiDependencies(breakMode == "sdk-side-has-no-ui-dependencies"));
         failures += Check("ipc-depends-on-nothing-but-bcl", () => IpcDependsOnNothingButBcl(breakMode == "ipc-depends-on-nothing-but-bcl"));
 
+        // slot 框架的行为检查（九条）。这些错误全是"出错时看起来正常"类型，
+        // 靠人工点击几乎不可能发现。
+        failures += SlotChecks.Run(breakMode);
+
         Console.WriteLine();
         Console.WriteLine(failures == 0
             ? "ARCHITECTURE: ALL PASS"

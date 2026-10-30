@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/DougongDesktop.Ui.Core/DougongDesktop.Ui.Core.csproj" />
     <Project Path="src/DougongDesktop.Ipc/DougongDesktop.Ipc.csproj" />
     <Project Path="src/DougongDesktop.Framework/DougongDesktop.Framework.csproj" />
     <Project Path="src/DougongDesktop.AgentHost/DougongDesktop.AgentHost.csproj" />
