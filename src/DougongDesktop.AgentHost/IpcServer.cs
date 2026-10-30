@@ -386,6 +386,10 @@ public sealed class IpcServer : IAsyncDisposable
         // 这与 SDK 修过的 "session/prompt 阻塞读循环导致 cancel 无效" 是同一个坑。
         _ = Task.Run(async () =>
         {
+            // 回合前后的文件版本快照：右栏"改动" tab 靠它给出真实差异。
+            // 在回合开始**之前**拍，因为工具执行期间文件就在变。
+            var before = CaptureWorkspace();
+
             try
             {
                 await runtime.RunTurnAsync(
@@ -395,11 +399,124 @@ public sealed class IpcServer : IAsyncDisposable
             }
             finally
             {
+                await PushWorkspaceChangesAsync(connection, before, cancellationToken)
+                    .ConfigureAwait(false);
                 await PushStatusAsync(EngineState.Ready, null).ConfigureAwait(false);
             }
         }, CancellationToken.None);
     }
 
+    /// <summary>
+    /// 工作区文件版本快照的扫描上限。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要有上限</b>：<c>FileVersionSet.Capture</c> 要对每个文件算内容哈希，
+    /// 几十万文件的工作区会卡住整个回合结束流程——而用户等的是"回合结束"，
+    /// 不是"统计变了哪些文件"。超限时如实告知，不静默漏掉。
+    /// </remarks>
+    private const int MaxSnapshotFiles = 20_000;
+
+    /// <summary>
+    /// 一个回合开始时的文件版本快照 + 路径清单。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么需要保存路径清单</b>：<c>Capture</c> 只对**传入的路径**取快照，
+    /// 它不会自己去发现新文件。所以回合中新建的文件如果不在开始时的清单里，
+    /// 结束时根本比不到——<b>新增文件会被完全漏报</b>。
+    /// 结束时必须用"开始清单 ∪ 结束扫描"的并集去 Capture。
+    /// </remarks>
+    private sealed record WorkspaceSnapshot(FileVersionSet Versions, string[] Paths);
+
+    /// <summary>
+    /// 拍一次工作区文件版本快照。
+    /// </summary>
+    /// <remarks>
+    /// <b>跳过 <c>bin</c> / <c>obj</c> / <c>.git</c> / <c>node_modules</c></b>：
+    /// 构建产物每个回合都在变，报出来的"改动"全是噪音，会把真正的
+    /// 源码改动淹没。
+    /// </remarks>
+    private WorkspaceSnapshot CaptureWorkspace()
+    {
+        try
+        {
+            var skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".git", "bin", "obj", "node_modules", ".vs", ".idea",
+            };
+
+            var paths = Directory
+                .EnumerateFiles(_workspace, "*", SearchOption.AllDirectories)
+                .Where(path => !Path
+                    .GetRelativePath(_workspace, path)
+                    .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .Any(seg => skipped.Contains(seg)))
+                .Take(MaxSnapshotFiles)
+                .ToArray();
+
+            return new WorkspaceSnapshot(FileVersionSet.Capture(paths), paths);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[host] 文件快照失败：{ex.GetType().Name}: {ex.Message}");
+            return new WorkspaceSnapshot(FileVersionSet.Empty, []);
+        }
+    }
+
+    /// <summary>
+    /// 对比快照，把真实差异推给客户端。
+    /// </summary>
+    /// <remarks>
+    /// <b>三处必须写对，否则会静默漏报</b>：
+    /// <list type="number">
+    /// <item><b>用两份路径的并集重新 Capture</b>：只 Capture 结束时的扫描结果，
+    /// 新增文件没有"之前"可比；只 Capture 开始时的清单，新增文件根本不在里面。
+    /// 两个方向都漏，所以必须取并集。</item>
+    /// <item><b>调用方向是 <c>before.Diff(after)</c></b>：实测反过来会把新增文件
+    /// 报成"从审批时存在变为不可见"，方向反了。SDK 的 Diff 语义是
+    /// "以调用者为基准，看参数有什么变化"。</item>
+    /// <item><b>删除的文件长度会显示 -1</b>：<c>FileVersion.Exists=false</c> 时
+    /// 长度是 -1，SDK 的文案会写成"文件长度变化：X（1 → -1）"。
+    /// 界面上要能读懂，别让用户以为文件变成 -1 字节。</item>
+    /// </list>
+    /// <para>
+    /// <b>Diff 返回的是变更描述而不是行级差异</b>：<c>FileVersion</c> 只存长度、
+    /// 时间、内容哈希，不存原内容——做不到"第几行改成什么"。界面上必须说清。
+    /// </para>
+    /// </remarks>
+    private async Task PushWorkspaceChangesAsync(
+        IpcConnection connection, WorkspaceSnapshot before, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var after = CaptureWorkspace();
+
+            // 并集：删掉的文件只在 before 里，新建的只在 after 里，
+            // 只取一边都会漏
+            var union = before.Paths
+                .Union(after.Paths, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            // 用并集重新取一次"现在"的快照：删除的文件只在 before 里，
+            // 不重新 Capture 就完全看不到它
+            var nowSet = FileVersionSet.Capture(union);
+
+            var changes = WorkspaceDiff.Compare(before.Versions.Files, nowSet.Files);
+            var diff = WorkspaceDiff.Describe(changes);
+
+            await connection.SendAsync(new WorkspaceChangedEvent
+            {
+                Sequence = NextStatusSequence(),
+                Diff = diff,
+                HasChanges = diff.Length > 0,
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[host] 推送文件改动失败：{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// <summary>
     /// 建审批器。
     /// </summary>

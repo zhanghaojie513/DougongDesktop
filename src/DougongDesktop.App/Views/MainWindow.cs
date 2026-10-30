@@ -59,15 +59,6 @@ public sealed class MainWindow : Window
     /// <summary>右栏 dock（P7）。</summary>
     private readonly RightDock _rightDock = new();
 
-    /// <summary>
-    /// 本回合的工具调用记录。
-    /// </summary>
-    /// <remarks>
-    /// <b>为什么自己记一份而不是从 <c>ConversationView</c> 里捞</b>：那个列表
-    /// 是界面投影、按渲染需要排序，而"改动" tab 要的是按调用顺序的原始记录。
-    /// 从渲染结果反推业务记录是多绕一层。
-    /// </remarks>
-    private readonly List<IpcToolCallItem> _turnTools = [];
     private readonly UiExtensionLoader _uiPlugins;
 
     public MainWindow()
@@ -313,6 +304,14 @@ public sealed class MainWindow : Window
                 Shell.StatusBar.SetEngineState(status.State, status.ModelName, status.Detail);
                 break;
 
+            case WorkspaceChangedEvent changed:
+                Console.Error.WriteLine(
+                    changed.HasChanges
+                        ? $"[ui] 本回合改动：{changed.Diff}"
+                        : "[ui] 本回合没有文件改动");
+                _rightDock.ApplyWorkspaceChanges(changed);
+                break;
+
             case DirectoryListedEvent listed:
                 Console.Error.WriteLine(
                     $"[ui] 目录 '{listed.Path}'：{listed.Entries.Count} 项" +
@@ -325,24 +324,19 @@ public sealed class MainWindow : Window
                 // 生成中：发送键变停止键（Arc 的 AiComposer 自带这个切换）
                 _conversation.Composer.SetGenerating(true);
 
-                // 新回合：工具记录归零。"改动" tab 的语义是"本回合"，
-                // 不清会把上一回合的写操作也算进来
-                _turnTools.Clear();
-                _rightDock.ApplyToolActivity(_turnTools);
                 break;
 
             case ItemAddedEvent added:
                 _conversation.Add(added.Item);
 
-                // 右栏的两个 tab 跟着消息流更新：
-                // 计划全量替换，工具记录累积（"改动" tab 靠它推路径）
+                // 右栏的计划 tab 跟着消息流更新（全量替换）。
+                // "改动" tab 不靠这里——它用宿主推来的 FileVersionSet 比对结果
                 if (added.Item is PlanItem plan)
                 {
                     _rightDock.ApplyPlan(plan);
                 }
                 else if (added.Item is IpcToolCallItem tool)
                 {
-                    _turnTools.Add(tool);
                     _capsule.OnToolRunning(tool.ToolName);
                 }
 
@@ -350,15 +344,6 @@ public sealed class MainWindow : Window
 
             case ItemUpdatedEvent updated:
                 _conversation.Update(updated.Item);
-
-                if (updated.Item is IpcToolCallItem updatedTool)
-                {
-                    var index = _turnTools.FindIndex(t => t.Id == updatedTool.Id);
-                    if (index >= 0) _turnTools[index] = updatedTool;
-                    else _turnTools.Add(updatedTool);
-
-                    _rightDock.ApplyToolActivity(_turnTools);
-                }
 
                 // 工具终态 → 回切到"思考中"。不回切的话胶囊会永远停在
                 // "执行 xxx"，看起来像卡住（P5 判据：Working/NeedsInput/Done 随事件变化）

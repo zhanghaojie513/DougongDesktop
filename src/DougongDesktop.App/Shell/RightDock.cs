@@ -133,16 +133,7 @@ public sealed class RightDock : UserControl
             item.Content = BuildPlanTab();
     }
 
-    /// <summary>把本回合的工具调用记录填进改动 tab。</summary>
-    public void ApplyToolActivity(IReadOnlyList<ToolCallItem> tools)
-    {
-        _latestTools = tools;
-        if (_tabItems.TryGetValue(Keys.Changes, out var item))
-            item.Content = BuildChangesTab();
-    }
-
     private PlanItem? _latestPlan;
-    private IReadOnlyList<ToolCallItem> _latestTools = [];
 
     private Control BuildFilesTab(DirectoryListedEvent? listed = null)
     {
@@ -212,70 +203,78 @@ public sealed class RightDock : UserControl
     }
 
     /// <summary>
-    /// 改动 tab：从工具调用记录里推出现在哪些文件被动过。
+    /// 改动 tab：显示回合前后由 SDK 版本比对得出的真实差异。
     /// </summary>
     /// <remarks>
-    /// <b>不是真的 diff</b>：SDK 没有给出改动前的原文，所以这里只能列出
-    /// "哪些路径被写操作碰过"。方案文档写的是"需 SDK 提供 diff 或自行比对"，
-    /// 自行比对需要保存每个文件的读前快照——那是 P8 持久化的工作量。
+    /// <b>这里原来是自己猜"哪些工具碰过哪些路径"</b>——绕路了。
+    /// SDK 有 <c>FileVersionSet.Capture</c> / <c>Diff</c>，按内容哈希比对，
+    /// 比"猜"可靠得多：猜的方法会把"工具尝试写但失败"也算成改动，
+    /// 而漏掉工具之外的变化（比如编辑器的外部修改）。
     /// <para>
-    /// <b>标注清楚"只有路径没有差异"</b>：只显示路径却让人以为是 diff 视图，
-    /// 用户点开发现没有差异说明，会认为功能坏了。
+    /// <b>显示的是变更描述，不是行级 diff</b>：SDK 的 <c>FileVersion</c> 只存
+    /// 长度、时间、内容哈希，<b>不存原内容</b>——做不到"第几行改成什么"。
+    /// 这一点在界面上写明，否则用户会以为 diff 视图坏了。
     /// </para>
     /// </remarks>
     private Control BuildChangesTab()
     {
-        // 写类工具：只有这些会改文件。读类工具碰过的文件不算"改动"
-        var writeTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        if (_latestDiff is null)
         {
-            "write_file", "edit_file", "create_file", "delete_file",
-            "apply_patch", "shell", "shell_command",
-        };
-
-        var touched = new List<(string Tool, string Path)>();
-
-        foreach (var tool in _latestTools)
-        {
-            if (!writeTools.Contains(tool.ToolName)) continue;
-
-            foreach (var (key, value) in ParseArgs(tool.ArgumentsJson))
-            {
-                if (key is "path" or "file" or "filename" or "target")
-                    touched.Add((tool.ToolName, value));
-            }
+            return Hint("还没有运行过回合。\n\n" +
+                        "回合结束后这里会显示本回合的文件改动。");
         }
 
-        if (touched.Count == 0)
+        if (!_latestDiff.HasChanges)
         {
-            return Hint("本回合还没有改动文件。\n\n" +
-                        "（这里只统计写类工具调用过的路径，不提供行级差异——" +
-                        "差异需要保存文件改动前的原文，属于持久化的范围。）");
+            return Hint("本回合没有改动文件。\n\n" +
+                        "（比对的是文件内容哈希，改动后又改回去不会被误报。）");
         }
 
-        var list = new StackPanel { Spacing = 6, Margin = new Thickness(9, 6) };
-        foreach (var (tool, path) in touched.Distinct())
+        var list = new StackPanel { Spacing = 6, Margin = new Thickness(9, 8) };
+
+        // SDK 的 Diff 是多行文本，一行一个文件。按行拆开展示，
+        // 让长路径能换行而不是横向撑爆右栏。
+        var lines = _latestDiff.Diff.Split(
+            new[] { '\r', '\n' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var line in lines)
         {
             list.Children.Add(new TextBlock
             {
-                Text = $"{path}",
-                FontSize = 12,
+                Text = line,
+                FontSize = 11,
                 FontFamily = new FontFamily("Geist Mono, Consolas, monospace"),
                 TextWrapping = TextWrapping.Wrap,
-            });
-            list.Children.Add(new TextBlock
-            {
-                Text = $"由 {tool} 写入",
-                FontSize = 10,
-                Opacity = 0.5,
-                Margin = new Thickness(0, 0, 0, 2),
+                LineHeight = 17,
             });
         }
+
+        list.Children.Add(new TextBlock
+        {
+            Text = "只显示变更描述（长度/存在性变化），没有行级差异——" +
+                   "SDK 的文件版本只保存内容哈希，不保存原文。",
+            FontSize = 10,
+            Opacity = 0.45,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+        });
 
         return new ScrollViewer
         {
             Content = list,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };
+    }
+
+    private WorkspaceChangedEvent? _latestDiff;
+
+    /// <summary>把回合结束时的改动填进改动 tab。</summary>
+    public void ApplyWorkspaceChanges(WorkspaceChangedEvent changed)
+    {
+        _latestDiff = changed;
+        if (_tabItems.TryGetValue(Keys.Changes, out var item))
+            item.Content = BuildChangesTab();
     }
 
     private static IEnumerable<(string Key, string Value)> ParseArgs(string? json)

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DougongDesktop.Framework;
 using DougongDesktop.Ipc;
 
 namespace DougongDesktop.Architecture.Checks;
@@ -20,6 +21,8 @@ internal static class DockChecks
         failures += Case("fs-list-rejects-escape", slug => RejectsEscape(breakMode == slug));
         failures += Case("dock-unimplemented-tabs-are-labeled", slug => UnimplementedLabeled(breakMode == slug));
         failures += Case("fs-list-roundtrips", slug => RoundTrips(breakMode == slug));
+        failures += Case("diff-detects-add-modify-delete", slug => DetectsAllThree(breakMode == slug));
+        failures += Case("diff-ignores-same-content", slug => NoChangeOnSameContent(breakMode == slug));
 
         return failures;
     }
@@ -160,6 +163,153 @@ internal static class DockChecks
         return rdecoded.Entries[0] is { Name: "a.txt", IsDirectory: false, Size: 12 }
             ? null
             : "条目字段没有原样还原";
+    }
+
+    /// <summary>
+    /// 新增 / 修改 / 删除三种改动都必须被检测到。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条抓的是 SDK 的真实缺陷</b>：<c>FileVersionSet.Diff</c>
+    /// <b>只报告第一个变化</b>。实测（0.1.9-alpha.1）：
+    /// <code>
+    /// 改 5 个文件 → Diff 输出 1 行
+    /// 改 f0 + 删 f1 → Diff 只报 f0，f1 的删除被吞掉
+    /// </code>
+    /// 所以不能依赖它，必须自己比 <see cref="FileVersion"/> 的字段。
+    /// <para>
+    /// <b>用真文件系统而不是造假数据</b>：这条验证的是
+    /// "Capture → 并集重取 → 自己比对"的整条协作链。造假 FileVersion 会绕过
+    /// Capture 的真实行为，而那正是"删除的文件看不到"的地方。
+    /// </para>
+    /// </remarks>
+    private static string? DetectsAllThree(bool inject)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"diff-check-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modify = Path.Combine(root, "modify.txt");
+            var remove = Path.Combine(root, "remove.txt");
+            var added = Path.Combine(root, "added.txt");
+
+            File.WriteAllText(modify, "before");
+            File.WriteAllText(remove, "will be gone");
+
+            string[] Scan() => Directory
+                .EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .ToArray();
+
+            var beforePaths = Scan();
+            var beforeSet = Dougong.Agent.FileVersionSet.Capture(beforePaths);
+
+            // 回合中的三种改动
+            File.WriteAllText(modify, "after — longer content");
+            File.Delete(remove);
+            File.WriteAllText(added, "brand new");
+
+            var afterPaths = Scan();
+
+            if (inject)
+            {
+                // 反证：改用 SDK 的 Diff（实测它只报第一个变化）。
+                // 期望这里**真的漏掉**某些改动，从而让检查判红——那才证明
+                // "不用 SDK Diff"这个决定是有必要的。
+                var sdkUnion = beforePaths.Union(afterPaths, StringComparer.OrdinalIgnoreCase).ToArray();
+                var sdkNow = Dougong.Agent.FileVersionSet.Capture(sdkUnion);
+                var sdkDiff = beforeSet.Diff(sdkNow) ?? "";
+
+                if (!sdkDiff.Contains("modify.txt", StringComparison.Ordinal))
+                    return "反证注入失败：SDK Diff 连修改都没报出来";
+
+                // 用 SDK Diff 的结果走同一套断言：它漏了删除 → 这里返回错误 → 判红
+                if (!sdkDiff.Contains("remove.txt", StringComparison.Ordinal))
+                    return "（反证）SDK 的 FileVersionSet.Diff 漏掉了删除 —— 必须自己比对";
+
+                return "反证注入失败：SDK Diff 居然报全了";
+            }
+
+            var union = beforePaths.Union(afterPaths, StringComparer.OrdinalIgnoreCase).ToArray();
+            var nowSet = Dougong.Agent.FileVersionSet.Capture(union);
+
+            var changes = WorkspaceDiff.Compare(beforeSet.Files, nowSet.Files);
+            var described = WorkspaceDiff.Describe(changes);
+
+            if (!described.Contains("modify.txt", StringComparison.Ordinal))
+                return "修改的文件必须出现在改动里";
+
+            if (!described.Contains("remove.txt", StringComparison.Ordinal))
+                return "删除的文件必须出现在改动里（Capture 并集没做，或比对漏了 Exists”）";
+
+            if (!described.Contains("added.txt", StringComparison.Ordinal))
+                return "新增的文件必须出现在改动里";
+
+            // 三种类型都要对
+            var kinds = changes.ToDictionary(
+                c => Path.GetFileName(c.Path), c => c.Kind, StringComparer.OrdinalIgnoreCase);
+
+            if (kinds.GetValueOrDefault("modify.txt") != WorkspaceDiff.ChangeKind.Modified)
+                return $"modify.txt 应判为 Modified，实际 {kinds.GetValueOrDefault("modify.txt")}";
+
+            if (kinds.GetValueOrDefault("remove.txt") != WorkspaceDiff.ChangeKind.Deleted)
+                return $"remove.txt 应判为 Deleted，实际 {kinds.GetValueOrDefault("remove.txt")}";
+
+            return kinds.GetValueOrDefault("added.txt") == WorkspaceDiff.ChangeKind.Added
+                ? null
+                : $"added.txt 应判为 Added，实际 {kinds.GetValueOrDefault("added.txt")}";
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// 内容一样的文件不能被报成改动。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条守的是"用内容哈希而不是时间戳"</b>：重写一个内容完全相同的文件，
+    /// <c>LastWriteUtc</c> 会变而哈希不变。用时间戳判会误报，而误报会让
+    /// "改动" tab 全是噪音，用户就不看了。
+    /// </remarks>
+    private static string? NoChangeOnSameContent(bool inject)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"same-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var file = Path.Combine(root, "same.txt");
+            File.WriteAllText(file, "identical");
+
+            var before = Dougong.Agent.FileVersionSet.Capture([file]);
+
+            // 重写同样内容：时间戳变了，哈希没变
+            Thread.Sleep(20);
+            File.WriteAllText(file, "identical");
+
+            var after = Dougong.Agent.FileVersionSet.Capture([file]);
+
+            if (inject)
+            {
+                // 反证：按时间戳判 —— 时间戳确实变了，于是"误报有改动"，检查应判红
+                var timeChanged = before.Files[0].LastWriteUtc != after.Files[0].LastWriteUtc;
+
+                return timeChanged
+                    ? "（反证）按时间戳判会误报：内容没变却被算成改动"
+                    : "反证注入失败：重写后时间戳没变，无法演示误报";
+            }
+
+            var changes = WorkspaceDiff.Compare(before.Files, after.Files);
+
+            return changes.Count == 0
+                ? null
+                : $"内容未变不应报告改动（报了 {changes.Count} 条）—— 比对必须用内容哈希，不能用时间戳";
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
     }
 
     private static readonly string RepoRoot = FindRepoRoot();

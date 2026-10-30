@@ -308,6 +308,7 @@ public sealed record ResyncCommand : ClientCommand
 [JsonDerivedType(typeof(ApprovalRequestedEvent), "approval/requested")]
 [JsonDerivedType(typeof(EngineStatusEvent), "engine/status")]
 [JsonDerivedType(typeof(DirectoryListedEvent), "fs/listed")]
+[JsonDerivedType(typeof(WorkspaceChangedEvent), "fs/changed")]
 public abstract record ServerEvent
 {
     public required long Sequence { get; init; }
@@ -358,6 +359,27 @@ public sealed record ApprovalRequestedEvent : ServerEvent
 }
 
 /// <summary>引擎健康状态。用于状态栏，不属于任何会话。</summary>
+/// <summary>
+/// 回合结束时的文件改动（来自 SDK 的 <c>FileVersionSet.Diff</c>）。
+/// </summary>
+/// <remarks>
+/// <b>这里是"变更描述"而不是行级差异</b>：SDK 的 <c>FileVersion</c> 只保存
+/// 长度、修改时间与内容哈希，<b>不保存文件原内容</b>，所以做不到
+/// "第几行改成什么"。界面必须说清这一点，否则用户会以为 diff 视图坏了。
+/// <para>
+/// <b>比的是内容哈希而不是时间戳</b>：改了又改回去不会被误报，
+/// 而 <c>LastWriteUtc</c> 会因精度与时钟漂移漏判。
+/// </para>
+/// </remarks>
+public sealed record WorkspaceChangedEvent : ServerEvent
+{
+    /// <summary>变更描述。空串表示本回合没有改动。</summary>
+    public required string Diff { get; init; }
+
+    /// <summary>是否有改动。由 <see cref="Diff"/> 是否为空推得，单独给出便于界面判断。</summary>
+    public required bool HasChanges { get; init; }
+}
+
 /// <summary>目录内容（响应 <see cref="ListDirectoryCommand"/>）。</summary>
 public sealed record DirectoryListedEvent : ServerEvent
 {

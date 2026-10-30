@@ -226,13 +226,19 @@ public static class Program
     /// </remarks>
     private static string? SdkFilesStayContained(bool inject)
     {
-        // 当前预算：Framework 5 个文件（实测值）。
+        // 当前预算：Framework 6 个文件（实测值）。
         //
         // 2026-10-30 从 4 调到 5：新增 EventProjection.cs（事件投影纯映射层），
         // 它就是"认识 SDK 事件类型"的那一层，必须引用 SDK。
         // 这次调高经过了确认——这正是这个预算存在的意义：
         // 每次扩散都要显式做一次"要不要这么做"的判断。
-        const int budget = 5;
+        //
+        // 2026-10-30 从 5 调到 6：新增 WorkspaceDiff.cs（文件改动比对）。
+        // 复审结论：**该引用**。理由是 SDK 的 FileVersionSet.Diff 只报第一个
+        // 变化（实测：改 5 个文件只输出 1 行），必须自己比 FileVersion 的字段；
+        // 而那段比对逻辑需要被检查工程断言，检查工程只引用 Framework 不引用
+        // 宿主。放到宿主里就无法被测——"不可测的正确"等于没有保证。
+        const int budget = 6;
 
         var violations = new List<string>();
 
