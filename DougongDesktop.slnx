@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DougongDesktop.Ipc/DougongDesktop.Ipc.csproj" />
+    <Project Path="src/DougongDesktop.Framework/DougongDesktop.Framework.csproj" />
+    <Project Path="src/DougongDesktop.AgentHost/DougongDesktop.AgentHost.csproj" />
+    <Project Path="src/DougongDesktop.App/DougongDesktop.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DougongDesktop.Architecture.Checks/DougongDesktop.Architecture.Checks.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 架构守卫：读其他工程的 csproj 与编译产物，断言分层边界。
+       不引用被测工程（否则守卫本身会成为依赖链的一环）。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <Description>Dougong Desktop 架构守卫：断言 UI 与 SDK 解耦</Description>
+  </PropertyGroup>
+
+</Project>
