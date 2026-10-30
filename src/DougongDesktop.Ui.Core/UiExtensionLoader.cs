@@ -27,11 +27,21 @@ public sealed class UiExtensionLoader : IDisposable
     private readonly Action<string> _log;
     private readonly List<LoadedExtension> _loaded = [];
 
-    public UiExtensionLoader(SlotRegistry slots, Action<string>? log = null)
+    public UiExtensionLoader(SlotRegistry slots, Action<string>? log = null, DiagnosticsLog? diagnostics = null)
     {
         _slots = slots;
         _log = log ?? (_ => { });
+        _diagnostics = diagnostics;
     }
+
+    /// <summary>
+    /// 诊断日志。null 表示不记录（检查工程与单元场景不需要写文件）。
+    /// </summary>
+    /// <remarks>
+    /// <b>可空而不是默认写文件</b>：测试会构造几百个加载器，
+    /// 让它们全都往用户的 <c>diagnostics.jsonl</c> 里写是污染。
+    /// </remarks>
+    private readonly DiagnosticsLog? _diagnostics;
 
     /// <summary>已加载的插件概要，供插件管理页展示。</summary>
     public IReadOnlyList<LoadedExtension> Loaded => _loaded;
@@ -163,13 +173,18 @@ public sealed class UiExtensionLoader : IDisposable
                 fileName, $"{extension.Id} 试图占用保留 key conversation");
         }
 
+        const int priority = 500;   // 第三方默认层，比内置(100) 低
+
         IDisposable handle;
+        var registerStarted = DateTimeOffset.UtcNow;
         try
         {
             handle = _slots.Register(extension.SlotKey, new SlotOccupant(
                 extension.Id,
-                Priority: 500,   // 第三方默认层，比内置(100) 低
-                new FuncTemplate(extension.Build),
+                priority,
+                // 包一层计时：build/render 两个阶段只有在这里才能观测到。
+                // 直接传 extension.Build 就永远不知道插件的构建耗时。
+                new FuncTemplate(() => BuildInstrumented(extension, priority)),
                 extension.SlotKeyValue)
             {
                 Origin = origin,
@@ -180,6 +195,13 @@ public sealed class UiExtensionLoader : IDisposable
             if (ownsContext) context.Unload();
             return ExtensionLoadResult.Failed(fileName, $"注册失败：{ex.Message}");
         }
+
+        RecordDiag(extension, "register", registerStarted, new Dictionary<string, object?>
+        {
+            ["outcome"] = "Succeeded",
+            ["slotKey"] = extension.SlotKey,
+            ["priority"] = priority,
+        });
 
         var loaded = new LoadedExtension(extension, context, handle, fileName, origin);
         _loaded.Add(loaded);
@@ -268,6 +290,100 @@ public sealed class UiExtensionLoader : IDisposable
     }
 
     /// <summary>把一个 <c>Func&lt;Control&gt;</c> 包成 <c>IDataTemplate</c>。</summary>
+    /// <summary>
+    /// 构建插件控件，并记录 build 与 render 两个阶段。
+    /// </summary>
+    /// <remarks>
+    /// <b>两个阶段分开记</b>：build 是插件自己的构造代码（它写得慢就是它的责任），
+    /// render 是控件树首次参与布局（慢通常说明层级过深或用了非虚拟化的长列表）。
+    /// 合成一个数会让"插件写得差"和"框架接得不好"分不开。
+    /// <para>
+    /// <b>render 用布局完成时刻近似</b>：Avalonia 没有"渲染完成"的公开回调，
+    /// 用 <c>LayoutUpdated</c> 一次即视为完成。它比真实首帧略早，
+    /// 但足以区分数量级——诊断要的是"这个插件是不是慢了两个数量级"，
+    /// 不是微秒级精确值。
+    /// </para>
+    /// <para>
+    /// <b>构建抛异常时也要记</b>：坏插件的构建耗时同样是诊断数据，
+    /// 而且失败原因比成功耗时更有用。
+    /// </para>
+    /// </remarks>
+    private Control BuildInstrumented(IDesktopUiExtension extension, int priority)
+    {
+        var started = DateTimeOffset.UtcNow;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        Control built;
+        string outcome;
+        try
+        {
+            built = extension.Build();
+            outcome = "Succeeded";
+        }
+        catch (Exception ex)
+        {
+            clock.Stop();
+            RecordDiag(extension, "build", started, new Dictionary<string, object?>
+            {
+                ["outcome"] = "Failed",
+                ["slotKey"] = extension.SlotKey,
+                ["priority"] = priority,
+                ["failure"] = $"{ex.GetType().Name}: {ex.Message}",
+            }, clock.Elapsed.TotalMilliseconds);
+            throw;
+        }
+
+        clock.Stop();
+        RecordDiag(extension, "build", started, new Dictionary<string, object?>
+        {
+            ["outcome"] = outcome,
+            ["slotKey"] = extension.SlotKey,
+            ["priority"] = priority,
+        }, clock.Elapsed.TotalMilliseconds);
+
+        // render：等一次布局完成再记
+        var renderStarted = DateTimeOffset.UtcNow;
+        void OnLayoutUpdated(object? sender, EventArgs e)
+        {
+            built.LayoutUpdated -= OnLayoutUpdated;
+            RecordDiag(extension, "render", renderStarted, new Dictionary<string, object?>
+            {
+                ["outcome"] = "Succeeded",
+                ["slotKey"] = extension.SlotKey,
+                ["priority"] = priority,
+            });
+        }
+
+        built.LayoutUpdated += OnLayoutUpdated;
+        return built;
+    }
+
+    /// <summary>
+    /// 写一条 <c>uiPlugin</c> 诊断。
+    /// </summary>
+    /// <remarks>
+    /// <b>attributes 必须是扁平对象</b>：嵌套后改平是破坏性变更（§7.5.7）。
+    /// 所以失败原因也是拍平成字符串而不是另起一个对象。
+    /// </remarks>
+    private void RecordDiag(
+        IDesktopUiExtension extension,
+        string phase,
+        DateTimeOffset startedAt,
+        Dictionary<string, object?> attributes,
+        double? durationMs = null)
+    {
+        // 没配诊断就不写：测试与"只想看界面"的场景不该产生文件
+        if (_diagnostics is null) return;
+
+        attributes["phase"] = phase;
+        _diagnostics.Record(
+            kind: "uiPlugin",
+            name: extension.Id,
+            startedAt: startedAt,
+            durationMs: durationMs ?? (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
+            attributes: attributes);
+    }
+
     private sealed class FuncTemplate(Func<Control> build) : Avalonia.Controls.Templates.IDataTemplate
     {
         /// <summary>

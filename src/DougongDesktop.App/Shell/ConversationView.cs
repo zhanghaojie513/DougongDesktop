@@ -1,8 +1,10 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using DougongDesktop.Ipc;
 using TKCode.Arc;
 using IpcToolCallItem = DougongDesktop.Ipc.ToolCallItem;
@@ -35,6 +37,17 @@ public sealed class ConversationView : UserControl
 
     /// <summary>当前条目数。</summary>
     public int Count => _items.Count;
+
+    /// <summary>
+    /// 已实例化的条目容器数。
+    /// </summary>
+    /// <remarks>
+    /// <b>存在的理由是区分两种失败</b>：条目数对但容器数为 0，说明数据进来了、
+    /// 模板没匹配上（P3a 的 <c>FuncDataTemplate&lt;object&gt;</c> 踩过，ContentPresenter
+    /// 建了但里面是空的）；两者都不为 0 且容器数远小于条目数，才是虚拟化生效。
+    /// </remarks>
+    public int RenderedContainerCount =>
+        _list.GetVisualDescendants().OfType<ContentPresenter>().Count();
     private readonly ScrollViewer _scroll;
     private readonly TextBlock _emptyHint;
 

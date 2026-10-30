@@ -20,6 +20,15 @@ public sealed class MainWindow : Window
 {
     private readonly SlotRegistry _slots = new();
     private readonly AppShellViewModel _vm = new();
+
+    /// <summary>命令面板的占位者 Id（不进 <see cref="BuiltInModules.All"/>，见注册处注释）。</summary>
+    private const string CommandPaletteSlug = "builtin.command-palette";
+
+    /// <summary>当前命令面板实例，供诊断确认它真的建出来了。</summary>
+    private TKCode.Arc.CommandPaletteDialog? _commandPalette;
+
+    /// <summary>外壳实例。构造后不为 null。</summary>
+    private AppShell Shell { get; }
     private readonly EngineClient _engine = new(msg => Console.Error.WriteLine($"[ui] {msg}"));
     private readonly Dictionary<string, IDisposable> _handles = new(StringComparer.Ordinal);
     private string? _connectionDetail;
@@ -37,10 +46,16 @@ public sealed class MainWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         AppShell.DeclareSlots(_slots);
-        _uiPlugins = new UiExtensionLoader(_slots, msg => Console.Error.WriteLine(msg));
+        // 带诊断日志：uiPlugin 的 register/build/render 三段耗时写 diagnostics.jsonl。
+        // P3b 台账 #5 要求的埋点——第三方插件涌入前才拿得到这份数据。
+        _uiPlugins = new UiExtensionLoader(
+            _slots,
+            msg => Console.Error.WriteLine(msg),
+            new DiagnosticsLog());
         RegisterBuiltInModules();
 
         Content = new AppShell(_slots, _vm);
+        Shell = (AppShell)Content;
 
         LoadUiPlugins();
 
@@ -110,6 +125,43 @@ public sealed class MainWindow : Window
 
             _handles[module.Id] = handle;
         }
+
+        RegisterCommandPalette();
+    }
+
+    /// <summary>
+    /// 把命令面板注册进 overlay slot。
+    /// </summary>
+    /// <remarks>
+    /// <b>它不在 <see cref="BuiltInModules.All"/> 里</b>：那张表描述的是"占据某个固定位置的
+    /// 内容块"，而命令面板是浮层。放进 overlay 的额外好处是第三方 UI 插件可以注册
+    /// 自己的命令面板顶掉它。
+    /// <para>
+    /// <b>会话列表变化时要重建命令项</b>：命令面板里的会话条目是构建时快照的，
+    /// 不重建会表现为"新建的会话在 Cmd+K 里搜不到"。
+    /// </para>
+    /// </remarks>
+    private void RegisterCommandPalette()
+    {
+        RebuildCommandPalette();
+    }
+
+    /// <summary>重建命令面板的占位者（会话列表变了就调一次）。</summary>
+    private void RebuildCommandPalette()
+    {
+        if (_handles.Remove(CommandPaletteSlug, out var old)) old.Dispose();
+
+        _handles[CommandPaletteSlug] = _slots.Register(ReservedSlots.Overlay, new SlotOccupant(
+            CommandPaletteSlug,
+            Priority: 100,      // 内置层：插件想替换给更小值
+            Template: MakeTemplate(() =>
+            {
+                _commandPalette = CommandPaletteModule.Build(_currentSessions, RunCommand);
+                return CommandPaletteModule.AsOverlay(_commandPalette);
+            }))
+        {
+            Origin = SlotOccupantOrigin.BuiltIn,
+        });
     }
 
     /// <summary>按模块声明构建控件。</summary>
@@ -171,6 +223,7 @@ public sealed class MainWindow : Window
             Console.Error.WriteLine($"[ui] 引擎状态 {state}{(detail is null ? "" : "：" + detail)}");
             _connectionDetail = detail;
             _capsule.SetConnection(state, detail);
+            Shell.StatusBar.SetConnection(state, detail);
         };
 
         _engine.EventReceived += OnEngineEvent;
@@ -196,8 +249,9 @@ public sealed class MainWindow : Window
                 RefreshSidebar();
                 break;
 
-            case EngineStatusEvent status when status.Detail is { Length: > 0 }:
+            case EngineStatusEvent status:
                 Console.Error.WriteLine($"[ui] 引擎：{status.State} · {status.Detail}");
+                Shell.StatusBar.SetEngineState(status.State, status.ModelName, status.Detail);
                 break;
 
             case TurnStartedEvent:
@@ -251,6 +305,54 @@ public sealed class MainWindow : Window
         {
             Origin = SlotOccupantOrigin.BuiltIn,
         });
+
+        // 命令面板里的会话条目是构建时快照，会话列表变了必须重建，
+        // 否则新建的会话在 Cmd+K 里搜不到——这不是崩溃，是"新东西搜不到"，
+        // 用户只会以为功能坏了。
+        RebuildCommandPalette();
+    }
+
+    /// <summary>
+    /// 执行命令面板选中的命令。
+    /// </summary>
+    /// <remarks>
+    /// <b>会话命令走 <c>session:</c> 前缀</b>而不是另开一个字段：命令 Id 是
+    /// 字符串，加前缀就等于在同一个平面里分了类，不需要给 <c>CommandPaletteItem</c>
+    /// 额外挂枚举——将来插件注册的命令也照这个约定加前缀即可。
+    /// </remarks>
+    private void RunCommand(string commandId)
+    {
+        if (commandId.StartsWith("session:", StringComparison.Ordinal))
+        {
+            OnSidebarSelect(commandId["session:".Length..]);
+            return;
+        }
+
+        switch (commandId)
+        {
+            case CommandPaletteModule.NewSession:
+                _conversation.Clear();
+                _vm.ActivePanel = ReservedSlots.Conversation;
+                _selectedSessionId = null;
+                RefreshSidebar();
+                break;
+
+            case CommandPaletteModule.OpenSettings:
+                _vm.ActivePanel = "settings";
+                break;
+
+            case CommandPaletteModule.OpenPlugins:
+                _vm.ActivePanel = "plugins";
+                break;
+
+            case CommandPaletteModule.ToggleSidebar:
+                Shell.ToggleSidebar();
+                break;
+
+            default:
+                Console.Error.WriteLine($"[ui] 未实现的命令：{commandId}");
+                break;
+        }
     }
 
     /// <summary>侧边栏选中回调。</summary>
@@ -282,6 +384,9 @@ public sealed class MainWindow : Window
     {
         try
         {
+            // 告诉客户端"现在附着在这个会话上"：番号缺口时它要靠这个知道重拉哪个
+            _engine.AttachedSessionId = sessionId;
+
             await _engine.SendAsync(new OpenSessionCommand
             {
                 RequestId = Guid.NewGuid().ToString("N"),
@@ -382,6 +487,7 @@ public sealed class MainWindow : Window
         if (shell is AppShell appShell)
         {
             Report("Bottom(list)", appShell.BottomBar);
+            Report("EngineStatusBar", appShell.StatusBar);
             Report("Conversation.List", _conversation.List);
             Console.Error.WriteLine($"[shell] 消息条目数 {_conversation.Count}");
         }
@@ -395,8 +501,35 @@ public sealed class MainWindow : Window
         var all = shell?.GetVisualDescendants().ToArray() ?? [];
         Console.Error.WriteLine($"[shell] 视觉树节点数 {all.Length}");
         Console.Error.WriteLine($"[shell] ContentControl {all.OfType<ContentControl>().Count()}");
-        Console.Error.WriteLine($"[shell] Sidebar {all.OfType<TKCode.Arc.Sidebar>().Count()}");
         Console.Error.WriteLine($"[shell] AgentStatus {all.OfType<TKCode.Arc.AgentStatus>().Count()}");
+
+        // Sidebar 光有实例和有尺寸不算数。P3a-3 踩过：Bounds 是 404x780 全对，
+        // 但 visualChildren=0——UseArcBlocks() 漏了，ControlTheme 没应用。
+        // 所以这里要报**内部渲染**，否则"实例在"会被当成"渲染出来了"。
+        foreach (var sidebar in all.OfType<TKCode.Arc.Sidebar>())
+        {
+            var kids = sidebar.GetVisualChildren().Count();
+            Console.Error.WriteLine(
+                $"[shell] Sidebar 内部 {(kids > 0 ? "OK" : "空壳")} visualChildren={kids}");
+        }
+
+        // 消息条目同理：条目数对但容器数为 0，说明模板没匹配上（P3a 踩过）。
+        Console.Error.WriteLine(
+            $"[shell] 消息容器 {_conversation.RenderedContainerCount} / 条目 {_conversation.Count}");
+
+        // 命令面板：光有实例不算数，要确认命令列表真的装上去了
+        // （P3a 踩过的坑：控件在、尺寸对、里面是空的）
+        if (_commandPalette is null)
+        {
+            Console.Error.WriteLine("[shell] CommandPalette        MISSING");
+        }
+        else
+        {
+            var count = _commandPalette.ItemsSource?.Count() ?? 0;
+            Console.Error.WriteLine(
+                $"[shell] CommandPalette        命令 {count} 条 {(count > 0 ? "OK" : "空列表")} " +
+                $"shortcut={_commandPalette.IsShortcutEnabled}");
+        }
 
         Console.Error.WriteLine("[shell] DUMP-END");
     }

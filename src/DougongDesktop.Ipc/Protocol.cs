@@ -184,6 +184,7 @@ public sealed record ApprovalResponse(string RequestId, ApprovalDecision Decisio
 [JsonDerivedType(typeof(StartTurnCommand), "turn/start")]
 [JsonDerivedType(typeof(CancelTurnCommand), "turn/cancel")]
 [JsonDerivedType(typeof(RespondApprovalCommand), "approval/respond")]
+[JsonDerivedType(typeof(ResyncCommand), "session/resync")]
 public abstract record ClientCommand
 {
     /// <summary>请求 ID。响应带同一个 ID 回来，用于配对。</summary>
@@ -218,6 +219,23 @@ public sealed record CancelTurnCommand : ClientCommand
 public sealed record RespondApprovalCommand : ClientCommand
 {
     public required ApprovalResponse Response { get; init; }
+}
+
+/// <summary>
+/// 请求重新同步：客户端发现事件序号缺口后，用这条命令要一份当前状态。
+/// </summary>
+/// <remarks>
+/// <b>为什么需要单独一条命令，而不是让客户端"等下一个事件"</b>：缺口意味着中间
+/// 有事件丢了，丢的可能正是"回合结束"或"工具完成"。等下去会一直停在错误状态。
+/// <para>
+/// <b>为什么要 <see cref="SessionId"/></b>：重同步的目标是"把某个会话的界面状态
+/// 拉回正确"。只回一个全局序号没有意义——用户看的是会话内容。
+/// </para>
+/// </remarks>
+public sealed record ResyncCommand : ClientCommand
+{
+    /// <summary>要重同步的会话。null 表示只需要一个基准序号（比如还没打开会话时）。</summary>
+    public string? SessionId { get; init; }
 }
 
 // ─────────────────────────────────────────────────────────────

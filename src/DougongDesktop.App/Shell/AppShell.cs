@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
+using DougongDesktop.App.Services;
 using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
@@ -23,6 +24,9 @@ public sealed class AppShell : UserControl
 {
     private readonly SlotRegistry _slots;
     private readonly AppShellViewModel _vm;
+
+    /// <summary>界面偏好。构造时读一次，拖拽结束后整份写回。</summary>
+    private AppSettings _settings = AppSettings.Load();
 
     public AppShell(SlotRegistry slots, AppShellViewModel vm)
     {
@@ -55,14 +59,33 @@ public sealed class AppShell : UserControl
     /// <summary>single/keyed slot 的 ContentControl，用于响应注册表变化。</summary>
     private readonly Dictionary<string, ContentControl> _contentBySlot = new(StringComparer.Ordinal);
 
-    /// <summary>底部条容器，供诊断读取实际尺寸。</summary>
+    /// <summary>底部行容器，供诊断读取实际尺寸。</summary>
     public Control? BottomBar { get; private set; }
+
+    /// <summary>引擎状态条（进程级状态 + 模型名）。</summary>
+    public EngineStatusBar StatusBar { get; } = new();
 
     /// <summary>消息流列表，供诊断读取实际尺寸。</summary>
     public Control? ConversationList { get; private set; }
 
     /// <summary>右栏面板，用于"有内容时自动展开"。</summary>
     private ResizablePanel? _rightBarPanel;
+
+    /// <summary>侧边栏面板，用于命令面板的折叠/展开。</summary>
+    private ResizablePanel? _sidebarPanel;
+
+    /// <summary>
+    /// 折叠/展开侧边栏。
+    /// </summary>
+    /// <remarks>
+    /// <b>只切 <see cref="ResizablePanel.IsCollapsed"/>，不销毁内容</b>：侧边栏里
+    /// 有筛选词和滚动位置，销毁重建会让用户每折叠一次就丢掉当前浏览位置。
+    /// </remarks>
+    public void ToggleSidebar()
+    {
+        if (_sidebarPanel is null || !_sidebarPanel.IsCollapsible) return;
+        _sidebarPanel.IsCollapsed = !_sidebarPanel.IsCollapsed;
+    }
 
     /// <summary>声明五个 slot。必须在任何注册之前调用。</summary>
     public static void DeclareSlots(SlotRegistry slots)
@@ -94,6 +117,7 @@ public sealed class AppShell : UserControl
             IsCollapsible = true,
             Content = SlotSingle(ReservedSlots.Sidebar),
         });
+        _sidebarPanel = panels.Panels[^1];
 
         panels.Panels.Add(new ResizablePanel
         {
@@ -119,6 +143,25 @@ public sealed class AppShell : UserControl
             Content = SlotSingle(ReservedSlots.RightBar),
         });
         _rightBarPanel = panels.Panels[^1];
+
+        // 还原上次的栏宽。Sizes 是"每栏占比百分比"，双向属性——
+        // 在这里设初值就等于还原布局，拖拽结束后 LayoutChanged 再存回去。
+        if (_settings.PaneSizes is { Length: 3 } savedSizes)
+            panels.Sizes = savedSizes;
+
+        // 只在拖拽**结束**时触发，不是每一帧。所以这里可以直接落盘，
+        // 不需要防抖；每帧写文件才是需要防抖的场景。
+        panels.LayoutChanged += (_, e) =>
+        {
+            // 折叠的栏占比是 0，那也是合法状态——只过滤掉 NaN/负数和长度不对的情况。
+            // 把 0 当成坏数据丢掉，会表现为"折叠后布局存不下来"。
+            var sizes = e.Sizes;
+            if (sizes is { Count: 3 } && sizes.All(s => s >= 0 && !double.IsNaN(s)))
+            {
+                _settings = new AppSettings { PaneSizes = [.. sizes] };
+                _settings.Save();
+            }
+        };
 
         // 底部条：list kind，空内容不占位
         var bottom = new ItemsControl
@@ -150,14 +193,29 @@ public sealed class AppShell : UserControl
             changed.CollectionChanged += (_, _) => SyncBottomVisibility();
 
         // 两层 Grid：
-        //   stack  —— 面板在上、底部条在下
-        //   root   —— stack + 覆盖层（overlay 浮在最上层，不参与布局）
+        //   bottomRow —— 左侧 slot 内容（胶囊），右侧引擎状态条
+        //   stack     —— 面板在上、底部行在下
+        //   root      —— stack + 覆盖层（overlay 浮在最上层，不参与布局）
+        //
+        // 状态条不放进 list slot：它是框架级信息（进程活没活、连的哪个模型），
+        // 不该由插件注册，也不该被插件顶掉。
+        var bottomRow = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+        };
+        Grid.SetColumn(bottom, 0);
+        bottomRow.Children.Add(bottom);
+
+        StatusBar.Margin = new Thickness(0, 0, 12, 0);
+        Grid.SetColumn(StatusBar, 1);
+        bottomRow.Children.Add(StatusBar);
+
         var stack = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
         Grid.SetRow(panels, 0);
         stack.Children.Add(panels);
-        Grid.SetRow(bottom, 1);
-        stack.Children.Add(bottom);
-        BottomBar = bottom;
+        Grid.SetRow(bottomRow, 1);
+        stack.Children.Add(bottomRow);
+        BottomBar = bottomRow;
 
         var root = new Grid();
         root.Children.Add(stack);

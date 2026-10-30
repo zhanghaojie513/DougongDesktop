@@ -53,9 +53,14 @@ public static class ConfigDump
         var index = 1;
         foreach (var m in BuiltInModules.All)
         {
-            var note = m.Kind == BuiltInModuleKind.Placeholder
-                ? $"{m.Title} — {m.Subtitle}"
-                : m.Kind.ToString();
+            // 对话区在清单里标的是 Placeholder（占位者角色），但它实际装的是
+            // 真实消息流。照着枚举印会让人以为它还是个空框——dump 的意义就是
+            // 反映"实际跑的"，所以这里如实标注。
+            var note = m.Id == "builtin.conversation"
+                ? "真实消息流（已实现）"
+                : m.Kind == BuiltInModuleKind.Placeholder
+                    ? $"{m.Title} — {m.Subtitle}（占位）"
+                    : m.Kind.ToString();
 
             sb.AppendLine(
                 $"| {index++} | `{m.Id}` | `{m.SlotKey}` | {Fmt(m.Key)} | {m.Kind} | {note} |");

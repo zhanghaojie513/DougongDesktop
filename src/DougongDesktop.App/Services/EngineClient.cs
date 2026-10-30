@@ -81,6 +81,67 @@ public sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>发命令。未连接时抛错，不排队假装成功。</summary>
+    /// <summary>
+    /// 当前附着的会话。重同步要知道"重拉哪个会话"。
+    /// </summary>
+    /// <remarks>
+    /// 由 UI 在打开/新建会话时设置。放在客户端而不是 UI 层，是因为重同步由读循环
+    /// 触发——那里拿不到 UI 的状态。
+    /// </remarks>
+    public string? AttachedSessionId { get; set; }
+
+    /// <summary>已请求重同步的次数（诊断用：能看出是不是一直在丢事件）。</summary>
+    public int ResyncCount => Volatile.Read(ref _resyncCount);
+
+    private int _resyncCount;
+
+    /// <summary>重同步进行中的标志，避免缺口期间每来一条事件就发一次。</summary>
+    private int _resyncing;
+
+    /// <summary>
+    /// 请求重同步。
+    /// </summary>
+    /// <remarks>
+    /// <b>用 <see cref="Interlocked.CompareExchange(ref int, int, int)"/> 做单飞</b>：
+    /// 缺口通常会连着来一串（丢了一条后面全错位），不加锁会瞬间发出几十条请求，
+    /// 而每条都会回一份全量快照——比缺口本身更糟。
+    /// <para>
+    /// <b>失败不改连接状态</b>：重同步失败说明命令发不出去，那是连接问题，
+    /// 由读循环自己的异常路径处理。这里只记日志，让状态栏如实反映连接状态。
+    /// </para>
+    /// </remarks>
+    private async Task RequestResyncAsync(long expected, long received)
+    {
+        if (Interlocked.CompareExchange(ref _resyncing, 1, 0) != 0) return;
+
+        try
+        {
+            Interlocked.Increment(ref _resyncCount);
+
+            var connection = _connection;
+            if (connection is null) return;
+
+            await connection.SendAsync(new ResyncCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                SessionId = AttachedSessionId,
+            }).ConfigureAwait(false);
+
+            _log($"[重同步] 已请求（缺口 {expected}→{received}，" +
+                 $"会话 {AttachedSessionId ?? "(无)"}）");
+        }
+        catch (Exception ex)
+        {
+            _log($"[重同步] 请求失败：{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            // 留一点时间让快照回来并对齐序号，再允许下一次重同步
+            await Task.Delay(500).ConfigureAwait(false);
+            Volatile.Write(ref _resyncing, 0);
+        }
+    }
+
     public async Task SendAsync(ClientCommand command, CancellationToken ct = default)
     {
         var connection = _connection
@@ -139,15 +200,21 @@ public sealed class EngineClient : IAsyncDisposable
                 {
                     if (json.Deserialize<ServerEvent>(IpcProtocol.Json) is not { } evt) return Task.CompletedTask;
 
-                    // 序号缺口检测：不假装完整，明确要求重同步
+                    // 序号缺口检测：不假装完整，明确要求重同步。
+                    //
+                    // 修过的一处：原来只把状态改成 Failed 就没了下文——客户端停在
+                    // "需要重新同步"却不发任何请求，用户看到的是引擎"挂了"，
+                    // 实际连接是好的。缺口是**数据**问题，不是连接问题。
                     var expected = Interlocked.Read(ref _lastSequence) + 1;
                     if (evt.Sequence > 0 && evt.Sequence != expected && _lastSequence > 0)
                     {
-                        _log($"[序号缺口] 期望 {expected}，收到 {evt.Sequence}");
-                        SetState(EngineConnectionState.Failed,
-                            $"事件序号缺口（期望 {expected}，收到 {evt.Sequence}），需要重新同步。");
+                        _log($"[序号缺口] 期望 {expected}，收到 {evt.Sequence}，请求重同步");
+                        _ = RequestResyncAsync(expected, evt.Sequence);
                     }
 
+                    // 序号基准以事件自带的 Sequence 为准。重同步返回的快照会带一个
+                    // 大于等于当前序号的值，所以这里不需要专门"重置"——
+                    // 显式重置反而会把并发到达的更新事件算成倒退。
                     if (evt.Sequence > 0) Interlocked.Exchange(ref _lastSequence, evt.Sequence);
 
                     // 必须回到 UI 线程：读循环跑在线程池上，而订阅者会碰控件。

@@ -159,6 +159,27 @@ public sealed class IpcServer : IAsyncDisposable
                     await OpenSessionAsync(open, connection, cancellationToken).ConfigureAwait(false);
                     break;
 
+                case ResyncCommand resync:
+                    // 重同步就是"再开一次会话"：回一份带当前序号的全量快照。
+                    // 复用 OpenSessionAsync 而不是另写一份，避免两条路径的快照
+                    // 字段不一致——那种不一致只有在丢事件后才会暴露。
+                    if (resync.SessionId is { Length: > 0 } resyncId)
+                    {
+                        await OpenSessionAsync(
+                            new OpenSessionCommand { RequestId = resync.RequestId, SessionId = resyncId },
+                            connection, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // 还没打开会话：回一个基准序号，客户端据此继续判定缺口。
+                        await connection.SendAsync(new EngineStatusEvent
+                        {
+                            Sequence = NextStatusSequence(),
+                            State = EngineState.Ready,
+                        }, cancellationToken).ConfigureAwait(false);
+                    }
+                    break;
+
                 case StartTurnCommand start:
                     await StartTurnAsync(start, connection, cancellationToken).ConfigureAwait(false);
                     break;

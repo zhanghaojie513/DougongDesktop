@@ -58,6 +58,9 @@ public static class Program
         // UI 插件加载器的行为检查
         failures += ExtensionChecks.Run(breakMode);
 
+        // 序号缺口 → 重同步。P3 复检补的：原来只有检测没有处置。
+        failures += ResyncChecks.Run(breakMode);
+
         // 事件投影（纯映射层，表驱动）
         failures += ProjectionChecks.Run(breakMode);
 

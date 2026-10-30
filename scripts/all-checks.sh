@@ -36,6 +36,7 @@ checks="$checks modules-list-is-explicit-and-ordered modules-list-has-no-duplica
 checks="$checks placeholder-yields-to-plugin"
 checks="$checks proj-text-delta proj-tool-requested-new-item proj-tool-id-is-deterministic"
 checks="$checks proj-unknown-outcome-preserved proj-unknown-event-ignored proj-outcome-mapping"
+checks="$checks resync-command-roundtrips resync-request-carries-session diag-uiplugin-has-phase"
 checks="$checks sdk-files-stay-contained"
 
 for check in $checks; do
