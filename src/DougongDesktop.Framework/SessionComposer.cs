@@ -41,8 +41,9 @@ public sealed record EngineOptions
     /// 给固定默认值必然错一半，而且两个方向的代价不对称——
     /// 填小了会过早压缩（静默浪费可用上下文），填大了压缩永不触发（真溢出报错）。
     /// <para>
-    /// 从模型名推断的值放在 <see cref="InferContextWindow"/>，但那只用于预填，
-    /// 用户必须能看到并可以覆盖。推断不出来时返回 0 = 不压缩。
+    /// 取值走 <see cref="ReadContextWindow"/> 的三层：显式配置 → SDK 能力表
+    /// → SDK 的估算回退（262144）。<b>不再有手写的按名推断表</b>——
+    /// 它曾把 deepseek 一律判成 128k，而真实值是 1M，差 8 倍。
     /// </para>
     /// </remarks>
     public int ContextWindowTokens { get; init; }
@@ -57,33 +58,120 @@ public sealed record EngineOptions
     public int MaxOutputTokens { get; init; } = 4096;
 
     /// <summary>
-    /// 按模型名推断上下文窗口。**只是预填提示，不是权威。**
+    /// 上下文窗口的取值顺序：显式配置 → SDK 能力表 → SDK 的估算回退。
     /// </summary>
     /// <remarks>
-    /// 这张表一定会过时（模型迭代快），所以返回 0 时不要偷偷用一个默认值——
-    /// 那会让"不知道模型多大"这件事被掩盖成"用了某个错的值"。
+    /// <b>这里原来有一张手写的按名推断表（claude→200k、deepseek→128k…），已删除。</b>
+    /// 它错得很具体：对 <c>deepseek</c> 一律给 128k，而 SDK 能力表里
+    /// <c>deepseek-flash</c> 是 <b>1M</b>——差 8 倍。压缩会在 128k 就触发，
+    /// 白白摘掉四分之三的历史，而用户完全看不出是这里的问题。
+    /// <para>
+    /// <b>为什么删而不是修数字</b>：改对一家还会有下一家错。这张表的本质问题是
+    /// "拿猜测冒充事实"，而 SDK 0.1.8 起有 models.dev 生成的 662 个模型的真实能力表，
+    /// 0.1.9 又补了第三层回退（<see cref="ProviderCatalog.FallbackContextWindow"/>，262144）。
+    /// 三层都覆盖不到时才真的未知——那时用 SDK 的中位数估算，也比手写档位强：
+    /// <list type="bullet">
+    /// <item>显式配置：用户说了算</item>
+    /// <item>能力表查询到：事实，且 SDK 的生成脚本会跟着上游更新</item>
+    /// <item>回退估算：明确标注"这是估计值"，界面上与事实区分开</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>取中位数而不是最大值</b>（SDK 的理由）：填大的代价更糟——压缩永不触发，
+    /// 直到撞上 provider 真上限才失败；填小只是多压几次，有代价但可恢复。
+    /// </para>
     /// </remarks>
-    public static int InferContextWindow(string model)
+    public static int ReadContextWindow(string model)
     {
-        if (string.IsNullOrWhiteSpace(model)) return 0;
+        var raw = Environment.GetEnvironmentVariable("DOUGONG_CONTEXT_WINDOW");
+        if (int.TryParse(raw, out var explicitValue) && explicitValue > 0)
+            return explicitValue;
 
-        var m = model.ToLowerInvariant();
+        var caps = LookupCapabilities(model);
+        if (caps is { ContextWindow: > 0 }) return caps.ContextWindow;
 
-        // 1M 档
-        if (m.Contains("gemini-1.5") || m.Contains("gemini-2")) return 1_000_000;
+        // 第三层：能力表没收录。用 SDK 的估算值，但要让调用方知道这是估计——
+        // 返回 0 会让压缩永不启用，长会话撞上真上限时报的是 provider 原始错误，
+        // 完全看不出是"配置缺失"。
+        return ProviderCatalog.FallbackContextWindow;
+    }
 
-        // 200k 档（Claude 全线）
-        if (m.Contains("claude")) return 200_000;
+    /// <summary>
+    /// 输出上限的取值顺序：显式配置 → SDK 能力表 → SDK 的估算回退。
+    /// </summary>
+    /// <remarks>
+    /// 输出上限必须与实际请求用的值一致，否则压缩预留的空间与实际不符，
+    /// 算出来的预算就是错的。
+    /// </remarks>
+    public static int ReadMaxOutput(string model)
+    {
+        var raw = Environment.GetEnvironmentVariable("DOUGONG_MAX_OUTPUT");
+        var explicitValue = int.TryParse(raw, out var value) && value > 0 ? value : 0;
 
-        // 128k 档
-        if (m.Contains("gpt-4") || m.Contains("gpt-5")) return 128_000;
-        if (m.Contains("deepseek")) return 128_000;
-        if (m.Contains("qwen")) return 128_000;
-        if (m.Contains("glm") || m.Contains("zhipu")) return 128_000;
-        if (m.Contains("kimi") || m.Contains("moonshot")) return 128_000;
+        if (explicitValue > 0) return explicitValue;
 
-        // 推断不出：返回 0，由调用方决定（不猜）
-        return 0;
+        var caps = LookupCapabilities(model);
+        var fromTable = caps is { MaxOutputTokens: > 0 } ? caps.MaxOutputTokens : 0;
+
+        return fromTable > 0 ? fromTable : ProviderCatalog.FallbackMaxOutputTokens;
+    }
+
+    /// <summary>
+    /// 把输出上限夹到"不挤占上下文"的范围内。
+    /// </summary>
+    /// <remarks>
+    /// <b>这是被上游数据逼出来的兜底，不是设计</b>：models.dev 里有若干条目
+    /// 的输出上限等于甚至大于上下文窗口——<c>qwen/kimi-k3</c> 是
+    /// <c>out=ctx=1048576</c>，<c>xai/grok-4.5</c> 同样如此，
+    /// openrouter 的聚合条目普遍报 90%。
+    /// <para>
+    /// 不夹的话，<see cref="Validate"/> 会抛异常让**应用起不来**——
+    /// 用户配了一个上游数据有误的模型，看到的是"上下文窗口配置不可行"，
+    /// 而问题根本不在他那里。
+    /// </para>
+    /// <para>
+    /// <b>上限取窗口的一半</b>：留出输入空间才有意义，输出占满窗口等于
+    /// 没法对话。这也符合 SDK 回退值的设计意图（262144 / 32768 ≈ 1/8）。
+    /// </para>
+    /// </remarks>
+    public static int ClampMaxOutput(int contextWindow, int maxOutput)
+    {
+        if (contextWindow <= 0) return maxOutput;
+
+        // 至少留一半给输入 + 预留
+        var ceiling = contextWindow / 2;
+        return maxOutput > ceiling ? ceiling : maxOutput;
+    }
+
+    /// <summary>
+    /// 按模型名查 SDK 的能力表（models.dev 生成，662 个模型）。
+    /// </summary>
+    /// <remarks>
+    /// <b>遍历 22 家预设找第一个命中的</b>：模型 id 在全表里基本唯一，
+    /// 实测单次查询 ≤ 4ms（命中越大越快，未收录要扫完全表）。
+    /// <para>
+    /// <b>查不到返回 null 而不是抛错</b>：自定义模型、私有部署、刚发布的型号
+    /// 都可能不在表里，那是正常情况，由调用方走第三层回退。
+    /// </para>
+    /// </remarks>
+    public static ModelCapabilities? LookupCapabilities(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return null;
+
+        try
+        {
+            foreach (var (providerName, _) in ProviderCatalog.AllPresets)
+            {
+                var caps = ProviderCatalog.FindModelCapabilities(providerName, model);
+                if (caps is not null) return caps;
+            }
+        }
+        catch
+        {
+            // 能力表是锦上添花：查不到不能挡住启动
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -114,6 +202,8 @@ public sealed record EngineOptions
             _ => ChatProtocol.OpenAiChatCompletions,
         };
 
+        var window = ReadContextWindow(model);
+
         return new EngineOptions
         {
             BaseUrl = baseUrl,
@@ -121,33 +211,16 @@ public sealed record EngineOptions
             ApiKey = key,
             Protocol = protocol,
             MessagesPath = Environment.GetEnvironmentVariable("DOUGONG_ANTHROPIC_PATH"),
-            ContextWindowTokens = ReadContextWindow(model),
-            MaxOutputTokens = ReadMaxOutput(model),
+            ContextWindowTokens = window,
+            // 夹到不挤占上下文——上游数据里有 out == ctx 的条目，
+            // 不夹会让 Validate 抛错、应用起不来
+            MaxOutputTokens = ClampMaxOutput(window, ReadMaxOutput(model)),
             Workspace = Environment.GetEnvironmentVariable("DOUGONG_WORKSPACE") ?? Environment.CurrentDirectory,
             SessionDirectory = Environment.GetEnvironmentVariable("DOUGONG_SESSION_DIR")
                 ?? Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                     ".dougong-desktop", "sessions"),
         };
-    }
-
-    /// <summary>
-    /// 上下文窗口的取值顺序：显式配置 → 按模型名推断 → 0（不压缩）。
-    /// </summary>
-    private static int ReadContextWindow(string model)
-    {
-        var raw = Environment.GetEnvironmentVariable("DOUGONG_CONTEXT_WINDOW");
-        if (int.TryParse(raw, out var explicitValue) && explicitValue > 0)
-            return explicitValue;
-
-        return InferContextWindow(model);
-    }
-
-    private static int ReadMaxOutput(string model)
-    {
-        _ = model;
-        var raw = Environment.GetEnvironmentVariable("DOUGONG_MAX_OUTPUT");
-        return int.TryParse(raw, out var value) && value > 0 ? value : 4096;
     }
 
     /// <summary>

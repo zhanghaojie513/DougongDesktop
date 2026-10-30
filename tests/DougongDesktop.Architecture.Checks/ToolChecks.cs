@@ -27,6 +27,8 @@ internal static class ToolChecks
         failures += Case("reasoning-separate-from-text", slug => ReasoningSeparate(breakMode == slug));
         failures += Case("plan-replaces-wholesale", slug => PlanReplacesWholesale(breakMode == slug));
         failures += Case("plan-tool-comes-from-sdk", slug => PlanToolFromSdk(breakMode == slug));
+        failures += Case("caps-table-beats-guess", slug => CapsBeatsGuess(breakMode == slug));
+        failures += Case("max-output-never-eats-context", slug => MaxOutputNeverEatsContext(breakMode == slug));
 
         return failures;
     }
@@ -194,6 +196,71 @@ internal static class ToolChecks
         return tool.Descriptor.Id == "todo_write"
             ? null
             : $"工具 Id 应为 todo_write，实际 {tool.Descriptor.Id}";
+    }
+
+    /// <summary>
+    /// 能力表必须优先于（已删除的）按名推断。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条守的是一个具体错误</b>：手写表曾对 <c>deepseek</c> 一律给 128k，
+    /// 而能力表里 <c>deepseek-flash</c> 是 1M。差 8 倍意味着压缩在 128k 就触发，
+    /// 白摘掉四分之三历史，而用户完全看不出原因。
+    /// <para>
+    /// 所以断言两件事：能查到就用查到的值（不是 128k），查不到才走回退。
+    /// </para>
+    /// </remarks>
+    private static string? CapsBeatsGuess(bool inject)
+    {
+        var caps = EngineOptions.LookupCapabilities("deepseek-flash");
+        if (caps is null) return "能力表应能查到 deepseek-flash（否则这条检查本身失效了）";
+
+        var actual = EngineOptions.ReadContextWindow("deepseek-flash");
+
+        if (inject) return "反证注入：能力表查到了却不用";
+
+        // 128000 是已删除的那张表会给的值，出现它说明回退了
+        if (actual == 128_000)
+            return $"读到了旧推断表的 128k，而能力表是 {caps.ContextWindow}";
+
+        if (actual != caps.ContextWindow)
+            return $"应取能力表的 {caps.ContextWindow}，实际 {actual}";
+
+        // 查不到的模型必须走回退，且回退值不是 0（0 会让压缩永不启用）
+        var unknown = EngineOptions.ReadContextWindow("definitely-not-a-real-model-xyz");
+        return unknown > 0
+            ? null
+            : "查不到的模型应走回退估算（>0），返回 0 会让压缩永不启用";
+    }
+
+    /// <summary>
+    /// 输出上限不能挤占上下文窗口。
+    /// </summary>
+    /// <remarks>
+    /// <b>上游数据确实有这种条目</b>：<c>qwen/kimi-k3</c> 报
+    /// <c>out=ctx=1048576</c>，<c>xai/grok-4.5</c> 同样，openrouter 聚合条目普遍 90%。
+    /// <para>
+    /// 不夹的话 <c>Validate()</c> 抛异常让应用起不来——用户看到"上下文窗口配置不可行"，
+    /// 而问题根本不在他那里。这条检查守的就是"上游数据有误不能让本地崩"。
+    /// </para>
+    /// </remarks>
+    private static string? MaxOutputNeverEatsContext(bool inject)
+    {
+        // 取一个真实存在的病态条目形状
+        var clamped = EngineOptions.ClampMaxOutput(1_048_576, 1_048_576);
+        var okValue = EngineOptions.ClampMaxOutput(200_000, 64_000);
+
+        if (inject) return "反证注入：输出上限可以等于上下文窗口";
+
+        if (clamped >= 1_048_576)
+            return $"out == ctx 时必须夹到窗口之内，实际 {clamped}";
+
+        // 夹完必须能通过预算校验（否则应用仍然起不来）
+        var effective = 1_048_576 - clamped - 512;
+        if (effective <= 0) return $"夹取后预算仍为 {effective}，Validate 会抛错";
+
+        return okValue == 64_000
+            ? null
+            : $"正常值不该被改动：200k 窗口下 64k 输出应保持 64000，实际 {okValue}";
     }
 
     private static int Case(string slug, Func<string, string?> body)
