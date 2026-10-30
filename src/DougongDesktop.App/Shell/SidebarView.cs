@@ -52,7 +52,9 @@ public static class SidebarView
         {
             IsFilterVisible = true,
             FilterPlaceholder = "筛选会话",
-            IsCollapseButtonVisible = true,
+            // 折叠入口只在标题栏那一个：dsh 的侧栏里没有折叠按钮，
+            // 它在 Windows caption row 的左侧。两处都有会让用户以为是两个功能。
+            IsCollapseButtonVisible = false,
             SelectedKey = selectedKey,
 
             // 宽度不在这里设：OpenWidth 是主题层属性（Arc 注释写 "from the theme"），

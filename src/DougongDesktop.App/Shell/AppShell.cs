@@ -416,18 +416,23 @@ public sealed class AppShell : UserControl
     {
         Titlebar.Height = Columns.TitlebarHeight;
         Titlebar.Background = DshTheme.Brush(DshTheme.SidebarFill);
-        Titlebar.Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.SizeAll);
 
-        // 左侧：logo + 标题；右侧：窗口按钮
+        // 形态照 dsh 的 Windows caption：左侧「收起侧栏图标 + 应用 + 编辑」，
+        // 右侧窗口按钮。不显示项目名——dsh 那里也没有，标题信息在侧栏品牌行。
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
 
         var left = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 6,
+            Spacing = 0,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(Columns.SidebarInlinePadding + 4, 0, 0, 0),
-            Children = { BuildTitleIcon(), BuildTitleText() },
+            Margin = new Thickness(8, 0, 0, 0),
+            Children =
+            {
+                BuildSidebarToggleButton(),
+                BuildMenuButton("应用"),
+                BuildMenuButton("编辑"),
+            },
         };
         Grid.SetColumn(left, 0);
         row.Children.Add(left);
@@ -437,47 +442,102 @@ public sealed class AppShell : UserControl
         row.Children.Add(buttons);
 
         Titlebar.Child = row;
-
-        // 拖拽：对应 CSS 的 -webkit-app-region: drag。
-        // 按钮区要吃掉点击，所以拖拽判断放在 Titlebar 上、按钮自己 StopPropagation。
-        Titlebar.PointerPressed += (_, e) =>
-        {
-            if (e.GetCurrentPoint(Titlebar).Properties.IsLeftButtonPressed
-                && TopLevel.GetTopLevel(this) is Window window)
-            {
-                window.BeginMoveDrag(e);
-            }
-        };
     }
 
     /// <summary>
-    /// 标题栏的 logo。
+    /// 标题栏左侧的收起/展开侧栏按钮。
     /// </summary>
     /// <remarks>
-    /// <b>用真实品牌资源，不用图标占位</b>：品牌规范是"纯黑白、无渐变、
-    /// 不引入有彩色"。Lucide 的 Layers 只是个形状相近的占位，不是品牌符号。
+    /// <b>dsh 的标题栏最左就是这个</b>：面板图标，点击折叠侧栏。
+    /// 它不是装饰——侧栏收起后，这个按钮是唯一的恢复入口
+    /// （收起态只剩 56px 轨道，轨道顶部的按钮也在，但标题栏这个永远可见）。
+    /// </remarks>
+    private Control BuildSidebarToggleButton()
+    {
+        var button = TitleBarIconButton(
+            TKCode.Arc.Icons.Lucide.LucideIconKind.PanelLeft, 28);
+
+        button.Click += (_, e) =>
+        {
+            e.Handled = true;
+            ToggleSidebar();
+        };
+
+        return button;
+    }
+
+    /// <summary>
+    /// 标题栏的菜单按钮（应用 / 编辑）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么自绘而不是用系统菜单栏</b>：dsh 桌面端用的是 Electron 原生菜单，
+    /// 位置在标题栏左侧且与自绘 caption 同色。Avalonia 的系统菜单栏（Windows 上是
+    /// 窗口下方独立一行）会多出一条，视觉上完全不是 dsh 的样子。
     /// <para>
-    /// 深色主题用 <c>symbol-white.png</c>（反色版），浅色用 <c>symbol.png</c>。
+    /// 当前只放两个入口，菜单内容是后续（P9 设置域）接的活。
+    /// 先让位置与形态对上——空菜单比没有按钮更早暴露问题。
     /// </para>
     /// </remarks>
-    private static Control BuildTitleIcon() => new Image
+    private static Control BuildMenuButton(string label)
     {
-        Source = BrandAssets.Symbol(DshTheme.IsDark),
-        Width = 16,
-        Height = 16,
-        Stretch = Stretch.Uniform,
-        VerticalAlignment = VerticalAlignment.Center,
-        Margin = new Thickness(2, 0, 0, 0),
-    };
+        var button = new Avalonia.Controls.Button
+        {
+            Content = new TextBlock
+            {
+                Text = label,
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+            Height = 28,
+            Padding = new Thickness(8, 0),
+            Margin = new Thickness(0, 0, 2, 0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(Columns.RadiusSm),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
 
-    private static Control BuildTitleText() => new TextBlock
+        button.PointerEntered += (_, _) => button.Background = DshTheme.Brush(DshTheme.Layer3);
+        button.PointerExited += (_, _) => button.Background = Brushes.Transparent;
+
+        // 菜单内容待接（P9）。先给出可见反馈，不让点击像坏了
+        button.Click += (_, e) =>
+        {
+            e.Handled = true;
+            Console.Error.WriteLine($"[ui] 菜单「{label}」尚未实现（P9 设置域）");
+        };
+
+        return button;
+    }
+
+    /// <summary>标题栏的纯图标按钮。</summary>
+    private static Avalonia.Controls.Button TitleBarIconButton(
+        TKCode.Arc.Icons.Lucide.LucideIconKind kind, double size)
     {
-        Text = "Dougong Desktop",
-        FontSize = 12,
-        Foreground = DshTheme.Brush(DshTheme.LabelPrimary),
-        Opacity = 0.72,
-        VerticalAlignment = VerticalAlignment.Center,
-    };
+        var button = new Avalonia.Controls.Button
+        {
+            Content = new TKCode.Arc.Icons.Lucide.LucideIcon
+            {
+                Kind = kind,
+                Size = 16,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+            Width = Columns.SidebarControlRowHeight,
+            Height = Columns.SidebarControlRowHeight,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0, 0, 4, 0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(Columns.RadiusSm),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
+
+        button.PointerEntered += (_, _) => button.Background = DshTheme.Brush(DshTheme.Layer3);
+        button.PointerExited += (_, _) => button.Background = Brushes.Transparent;
+
+        return button;
+    }
 
     /// <summary>
     /// 自绘窗口按钮：最小化 / 最大化 / 关闭。
