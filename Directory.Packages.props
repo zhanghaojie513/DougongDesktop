@@ -15,6 +15,9 @@
          Sidebar/CommandPalette/ModelPicker 在 Blocks。见 docs/arc-integration.md -->
     <PackageVersion Include="TKCode.Arc.Special" Version="0.3.2-preview.2" />
     <PackageVersion Include="TKCode.Arc.Blocks" Version="0.3.2-preview.2" />
+    <PackageVersion Include="TKCode.Arc.Terminal" Version="0.3.2-preview.2" />
+    <PackageVersion Include="TKCode.Arc.Workflow" Version="0.3.2-preview.2" />
+    <PackageVersion Include="TKCode.Arc.Icons.Lucide" Version="0.3.2-preview.2" />
 
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
 

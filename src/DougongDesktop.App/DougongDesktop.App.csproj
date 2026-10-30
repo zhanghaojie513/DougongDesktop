@@ -29,6 +29,12 @@
     <PackageReference Include="TKCode.Arc.Fonts" />
     <PackageReference Include="TKCode.Arc.Special" />
     <PackageReference Include="TKCode.Arc.Blocks" />
+    <!-- 终端：Ghostty 内核 + PTY + IME，P8f 的终端直接用 TerminalView。
+         Workflow：画布/节点/连线，对应 dsh 的 ui-dockkit。
+         Icons.Lucide：图标集，不必自己画。 -->
+    <PackageReference Include="TKCode.Arc.Terminal" />
+    <PackageReference Include="TKCode.Arc.Workflow" />
+    <PackageReference Include="TKCode.Arc.Icons.Lucide" />
   </ItemGroup>
 
 </Project>

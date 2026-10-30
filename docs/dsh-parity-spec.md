@@ -253,7 +253,7 @@ dsh 的 `shell.bottom` 是**横跨整行的单一 slot**，且默认组合**不�
 | `ui-user-questions` | `ask_user_question` 卡片 + 计时等待 | 中 |
 | `ui-deliverables` | 改动文件卡片、交付文件卡片、review tab | 中 |
 | `ui-trajectory` | 按轮次的事件记录表 + 时间概览 | 大 |
-| `ui-dockkit` | 可分裂的标签格树（引线布局套件） | 大 |
+| `ui-dockkit` | 可分裂的标签格树 | 🟡 部分：`WorkflowCanvas` 可做画布部分，分裂树仍需自建 |
 | `ui-sidebar-right` | 每会话一个停靠面 + tab 类型注册表 | 大 |
 | `ui-sidebar-files` | 工作区文件树（逐层列出） | 中（部分已有） |
 | `ui-sidebar-documentpreview` | Markdown/代码/图片/PDF/Office 预览 | 大 |
@@ -262,7 +262,7 @@ dsh 的 `shell.bottom` 是**横跨整行的单一 slot**，且默认组合**不�
 | `ui-jobs` | 后台任务列表 + 流式输出面板 | 中 |
 | `ui-schedule` | 自动化任务与会话提醒 | 大 |
 | `ui-subagent` | subagent 目录与 `@` 引用 | 大 |
-| `ui-workflow-run` | 工作流运行节点 | 大 |
+| `ui-workflow-run` | 工作流运行节点 | ✅ **已有载体**：`TKCode.Arc.Workflow` 的 `WorkflowCanvas`。见 §11 |
 | `ui-permission-presets` | 默认权限行 + `/permission` 选择器 | 中 |
 | `ui-agent-preset` | Agent preset 选择与说明 | 中 |
 | `ui-secret-mask` | 已发送文本里的凭据遮挡 | 小 |
@@ -275,7 +275,7 @@ dsh 的 `shell.bottom` 是**横跨整行的单一 slot**，且默认组合**不�
 
 | dsh 包 | 功能 | 障碍 |
 |---|---|---|
-| `ui-sidebar-terminal` | 交互式 shell 标签页 | **PTY 独立进程**，SDK 不做，工作量约一个阶段 |
+| `ui-sidebar-terminal` | 交互式 shell 标签页 | ✅ **已有载体**：`TKCode.Arc.Terminal` 的 `TerminalView`（Ghostty 内核）。见 §11 |
 | `ui-sidebar-browser` | 沙箱内浏览 HTTP(S) 页面 | 需要内嵌浏览器内核（WebView2），Avalonia 需额外集成 |
 | `ui-settings-account` | DeepSeek 账号登录 | **用户已明确不做账户登录** |
 | `ui-settings-web-search` | 网页搜索 API 设置 | 依赖 DeepSeek 侧 API，我们没有 |
@@ -427,6 +427,67 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 | 折叠动画 | CSS 过渡 | Arc 的 morph spring | 视觉接近，时长不同 |
 | 会话行圆角 | 12px（`radius-md`） | Arc Section 内建 | 待核 |
 | 品牌行高 | 52px | Arc `Header` | 待核 |
+
+---
+
+## 11. 三个曾被漏掉的 Arc 包（2026-10-31 实测）
+
+> **为什么漏了**：此前只用 `Directory.Packages.props` 里已有的 4 个 Arc 包
+> （Arc / Fonts / Special / Blocks），没有检索整个仓库。实际有 **17 个包**。
+
+### 11.1 `TKCode.Arc.Terminal` —— 终端不用自建
+
+**命名空间是 `TKCode.Terminal.*`，不是 `TKCode.Arc.*`**（容易找错）。
+
+| 项 | 实测结果 |
+|---|---|
+| `TerminalView` | `TKCode.Terminal.Avalonia.TerminalView : Control` |
+| 自有属性 | `Snapshot` / `FontFamily` / `FontSize` / `Padding` / `Metrics` / `Preedit` / `CursorRectangle` |
+| 输入事件 | `KeyPressed` / `TextEntered` / `PointerChanged` |
+| 内核 | `TerminalCore.Create(options, effects)` —— 构造函数是 internal |
+| 原生库 | `libghostty-vt.{so,dylib,dll}`，随包生成到 `runtimes/*/native/` |
+
+**实测通过的链路**：
+
+```csharp
+var size    = new TerminalSize(24, 80, 10, 20);
+var options = new TerminalCoreOptions(size);
+var core    = TerminalCore.Create(options, new NullTerminalEffects());
+
+core.Write(Encoding.UTF8.GetBytes("hello world
+second line"));
+core.FormatPlainText()  // → "hello world
+second line"
+core.Write(Encoding.UTF8.GetBytes("[31mRED[0m normal"));  // ANSI 正常
+core.CaptureFrame(false) // → FrameSnapshot
+```
+
+**结论**：VT 解析、ANSI 颜色、帧捕获全部工作。**P8f 的终端只需接 PTY 进程 + `TerminalView`**，不用自建渲染。
+此前估"需 ConPTY 自建约一阶段工作量"是错的。
+
+**剩余工作**：接 PTY（Windows 用 ConPTY，Unix 用 forkpty）+ 双向字节流。
+渲染、输入编码、IME、选择、剪贴板都在包里。
+
+### 11.2 `TKCode.Arc.Workflow` —— 画布可用
+
+`WorkflowCanvas` 属性（37 个）包含：`Graph` / `Zoom` / `Offset` / `MinZoom` / `MaxZoom`
+/ `AutoFit` / `NodeTemplates` / `EdgeStyle` / `LayoutDirection` / `SnapToGrid`
+/ `Virtualizing` / `UndoCommand` / `RedoCommand` / `DeleteSelectionCommand`
+/ `SelectedNodes` / `SelectedEdges` / `IsEditable` / `ShowGrid`。
+
+`WorkflowGraph` 有无参构造。
+
+**用途**：dsh 的 `ui-workflow-run`（工作流运行节点）可直接用它。
+`ui-dockkit`（分裂标签树）只能部分覆盖——画布有了，分裂树仍要自建。
+
+### 11.3 `TKCode.Arc.Icons.Lucide` —— 2155 个图标
+
+```csharp
+Lucide.Geometry(LucideIconKind.X)   // → Geometry
+Enum.GetValues<LucideIconKind>().Length == 2155
+```
+
+图标不用自己画。
 
 ---
 
