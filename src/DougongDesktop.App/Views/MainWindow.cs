@@ -43,34 +43,47 @@ public sealed class MainWindow : Window
     private void RegisterBuiltInPlaceholders()
     {
         const int BuiltIn = 100;
+        const SlotOccupantOrigin Origin = SlotOccupantOrigin.BuiltIn;
 
+        // 每条都显式标 BuiltIn：conversation 这类保留 key 只接受内置来源，
+        // 而"是不是内置"必须由注册方声明，不能靠 priority 数值猜。
         _slots.Register(ReservedSlots.Sidebar, new SlotOccupant(
-            "builtin.sidebar", BuiltIn, MakeTemplate(() =>
-                Placeholder("侧边栏", "会话列表 · 工作区导航")))
-        );
+            "builtin.sidebar", BuiltIn,
+            MakeTemplate(() => Placeholder("侧边栏", "会话列表 · 工作区导航")))
+        {
+            Origin = Origin,
+        });
 
         _slots.Register(ReservedSlots.Main, new SlotOccupant(
             "builtin.conversation", BuiltIn,
             MakeTemplate(() => Placeholder("对话区", "消息流 · 工具卡片 · 审批")),
             Key: ReservedSlots.Conversation)
-        );
+        {
+            Origin = Origin,
+        });
 
         _slots.Register(ReservedSlots.Main, new SlotOccupant(
             "builtin.plugins", BuiltIn,
             MakeTemplate(() => Placeholder("插件", "插件管理 · 已安装列表")),
             Key: "plugins")
-        );
+        {
+            Origin = Origin,
+        });
 
         _slots.Register(ReservedSlots.Main, new SlotOccupant(
             "builtin.settings", BuiltIn,
             MakeTemplate(() => Placeholder("设置", "提供商 · 外观 · 诊断")),
             Key: "settings")
-        );
+        {
+            Origin = Origin,
+        });
 
         _slots.Register(ReservedSlots.RightBar, new SlotOccupant(
-            "builtin.rightbar", BuiltIn, MakeTemplate(() =>
-                Placeholder("右栏", "文件 · 改动 · 计划 · 上下文"))
-        ));
+            "builtin.rightbar", BuiltIn,
+            MakeTemplate(() => Placeholder("右栏", "文件 · 改动 · 计划 · 上下文")))
+        {
+            Origin = Origin,
+        });
     }
 
     private static Control Placeholder(string title, string subtitle) => new Border

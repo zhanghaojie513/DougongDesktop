@@ -28,7 +28,7 @@ checks="$checks slot-list-preserves-register-order slot-list-observable-updates"
 checks="$checks slot-keyed-dispatches-by-key slot-conversation-key-is-reserved"
 checks="$checks slot-unload-leaves-no-residue slot-select-panel-rejects-missing-key"
 checks="$checks slot-occupant-failure-is-isolated slot-any-name-works-for-list"
-checks="$checks slot-undeclared-register-throws"
+checks="$checks slot-undeclared-register-throws slot-origin-defaults-to-installed"
 
 for check in $checks; do
   printf '%-36s ' "$check"

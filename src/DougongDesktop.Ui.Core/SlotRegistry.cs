@@ -26,6 +26,28 @@ public enum SlotKind
 }
 
 /// <summary>
+/// 占位者的来源。
+/// </summary>
+/// <remarks>
+/// <b>为什么用"来源"而不是"标记"区分内置与第三方</b>：优先级数值（100 段 = 内置）
+/// 只是约定，任何代码都能写 100 冒充内置。来源是注册时由调用方声明的结构信息，
+/// 保留 key 的访问控制才有依据。
+/// <para>
+/// 参考 dsh：它的内置组合包不是"特殊类型"，而是**从安装目录解析**的普通包——
+/// 用解析位置区分来源，而不是给包打标记。我们这里对应地由加载器声明来源：
+/// 内置模块由 App 注册时标 <see cref="BuiltIn"/>，P3b 的外部程序集标 <see cref="Installed"/>。
+/// </para>
+/// </remarks>
+public enum SlotOccupantOrigin
+{
+    /// <summary>随产品发布的内置模块。</summary>
+    BuiltIn,
+
+    /// <summary>第三方安装的 UI 插件。</summary>
+    Installed,
+}
+
+/// <summary>
 /// 一个占位者。
 /// </summary>
 /// <param name="Id">标识，用于诊断与冲突报告。</param>
@@ -43,6 +65,12 @@ public sealed record SlotOccupant(
     IDataTemplate Template,
     string? Key = null)
 {
+    /// <summary>
+    /// 来源。默认 <see cref="SlotOccupantOrigin.Installed"/>——**保守默认**：
+    /// 忘记标注时按外部插件对待（受限），而不是意外获得内置权限。
+    /// </summary>
+    public SlotOccupantOrigin Origin { get; init; } = SlotOccupantOrigin.Installed;
+
     /// <summary>注册顺序。由注册表赋值，用于同 priority 时稳定排序。</summary>
     internal int RegistrationIndex { get; init; }
 }
@@ -153,6 +181,18 @@ public sealed class SlotRegistry
     /// <exception cref="SlotConflictException">占用保留 key，或 keyed 同 key 重复。</exception>
     public IDisposable Register(string slotKey, SlotOccupant occupant)
     {
+
+        // 保留 key：只接受内置实现的注册，外部插件不行。
+        // 第一版写成"一律拒绝"，结果内置自己都注册不进，App 启动抛异常——
+        // 语义是"内置专用"，不是"谁都别用"。
+        if (slotKey == ReservedSlots.Main
+            && occupant.Key == ReservedSlots.Conversation
+            && occupant.Origin != SlotOccupantOrigin.BuiltIn)
+        {
+            throw new SlotConflictException(
+                slotKey, ReservedSlots.Conversation,
+                $"{occupant.Id}（来源 {occupant.Origin}，该 key 仅限内置实现）");
+        }
 
         // 未声明的 slot 直接拒绝：静默接受会让"注册了但界面空着"变成无解的问题
         if (!_kinds.TryGetValue(slotKey, out var kind))

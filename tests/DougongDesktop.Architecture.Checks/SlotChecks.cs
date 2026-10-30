@@ -44,6 +44,8 @@ internal static class SlotChecks
             slug => AnyNameWorksForList(breakMode == slug), breakMode);
         failures += Case("slot-undeclared-register-throws",
             slug => UndeclaredRegisterThrows(breakMode == slug), breakMode);
+        failures += Case("slot-origin-defaults-to-installed",
+            slug => OriginDefaultsToInstalled(breakMode == slug), breakMode);
 
         return failures;
     }
@@ -172,18 +174,34 @@ internal static class SlotChecks
         var r = new SlotRegistry();
         r.Declare(ReservedSlots.Main, SlotKind.Keyed);
 
-        // 内置实现注册 conversation 必须成功
+        // ① 内置实现注册 conversation 必须**成功**
         var builtin = Template("builtin");
-        r.Register(ReservedSlots.Main,
-            new SlotOccupant("builtin.conversation", 100, builtin, Key: ReservedSlots.Conversation));
-
-        if (inject) return "反证注入：内置注册 conversation 后解析不到";
+        r.Register(ReservedSlots.Main, new SlotOccupant(
+            "builtin.conversation", 100, builtin, Key: ReservedSlots.Conversation)
+        {
+            Origin = SlotOccupantOrigin.BuiltIn,
+        });
 
         var resolved = r.Resolve(ReservedSlots.Main, ReservedSlots.Conversation);
         if (!ReferenceEquals(resolved, builtin))
             return "内置实现应该能注册并解析到 conversation（第一版错在连内置都拒了，App 起不来）";
 
-        return null;
+        // ② 外部插件注册 conversation 必须**被拒**
+        if (inject) return "反证注入：外部插件也能占 conversation";
+
+        try
+        {
+            r.Register(ReservedSlots.Main, new SlotOccupant(
+                "evil.plugin", 1, Template("evil"), Key: ReservedSlots.Conversation)
+            {
+                Origin = SlotOccupantOrigin.Installed,
+            });
+            return "外部插件不该能占 conversation——它会让用户切走后丢会话上下文";
+        }
+        catch (SlotConflictException)
+        {
+            return null;
+        }
     }
 
     // ── 7. 卸载不留残留 ────────────────────────────────────────
@@ -294,6 +312,22 @@ internal static class SlotChecks
         {
             return null;
         }
+    }
+
+    // ── 12. 来源默认是 Installed（保守默认） ──────────────────
+
+    /// <remarks>
+    /// 忘记标注来源时应按"外部插件"对待（受限），而不是意外获得内置权限。
+    /// 反过来（默认 BuiltIn）会让任何疏忽都变成提权。
+    /// </remarks>
+    private static string? OriginDefaultsToInstalled(bool inject)
+    {
+        var occupant = new SlotOccupant("x", 100, Template("x"));
+        var actual = inject ? SlotOccupantOrigin.BuiltIn : occupant.Origin;
+
+        return actual == SlotOccupantOrigin.Installed
+            ? null
+            : "来源应默认 Installed——默认 BuiltIn 会让任何疏忽都变成提权";
     }
 
     private static IDataTemplate Template(string tag) =>
