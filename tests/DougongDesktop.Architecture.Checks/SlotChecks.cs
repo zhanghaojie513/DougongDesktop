@@ -40,6 +40,10 @@ internal static class SlotChecks
             slug => SelectPanelRejectsMissing(breakMode == slug), breakMode);
         failures += Case("slot-occupant-failure-is-isolated",
             slug => OccupantFailureIsolated(breakMode == slug), breakMode);
+        failures += Case("slot-any-name-works-for-list",
+            slug => AnyNameWorksForList(breakMode == slug), breakMode);
+        failures += Case("slot-undeclared-register-throws",
+            slug => UndeclaredRegisterThrows(breakMode == slug), breakMode);
 
         return failures;
     }
@@ -49,6 +53,7 @@ internal static class SlotChecks
     private static string? PriorityOverridesDefault(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare("x", SlotKind.Single);
         var builtin = Template("builtin");
         var third = Template("third");
 
@@ -58,7 +63,7 @@ internal static class SlotChecks
         r.Register("x", new SlotOccupant("builtin", 100, builtin));
         r.Register("x", new SlotOccupant("third", inject ? 100 : 50, third));
 
-        var winner = r.Resolve("x", SlotKind.Single);
+        var winner = r.Resolve("x");
         return ReferenceEquals(winner, third)
             ? null
             : "priority 小的应胜出（第三方覆盖内置），但选了另一个";
@@ -69,6 +74,7 @@ internal static class SlotChecks
     private static string? TieBreaksByRegistration(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare("x", SlotKind.Single);
         var first = Template("first");
         var second = Template("second");
 
@@ -76,7 +82,7 @@ internal static class SlotChecks
         r.Register("x", new SlotOccupant("first", 100, first));
         r.Register("x", new SlotOccupant("second", inject ? 99 : 100, second));
 
-        var winner = r.Resolve("x", SlotKind.Single);
+        var winner = r.Resolve("x");
         return ReferenceEquals(winner, first)
             ? null
             : "同 priority 应先注册者胜";
@@ -87,6 +93,7 @@ internal static class SlotChecks
     private static string? ListPreservesOrder(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare(ReservedSlots.Bottom, SlotKind.List);
         var a = Template("a");
         var b = Template("b");
         var c = Template("c");
@@ -109,6 +116,7 @@ internal static class SlotChecks
     private static string? ListObservableUpdates(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare(ReservedSlots.Overlay, SlotKind.List);
         var list = r.GetList(ReservedSlots.Overlay);
 
         var changes = 0;
@@ -132,14 +140,15 @@ internal static class SlotChecks
     private static string? KeyedDispatches(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare(ReservedSlots.Main, SlotKind.Keyed);
         var plugins = Template("plugins");
         var settings = Template("settings");
 
         r.Register(ReservedSlots.Main, new SlotOccupant("p", 100, plugins, Key: "plugins"));
         r.Register(ReservedSlots.Main, new SlotOccupant("s", 100, settings, Key: "settings"));
 
-        var hit = r.Resolve(ReservedSlots.Main, SlotKind.Keyed, "plugins");
-        var miss = r.Resolve(ReservedSlots.Main, SlotKind.Keyed, "nonexistent");
+        var hit = r.Resolve(ReservedSlots.Main, "plugins");
+        var miss = r.Resolve(ReservedSlots.Main, "nonexistent");
 
         if (inject) return "反证注入：未命中时静默回落到第一个";
 
@@ -153,6 +162,7 @@ internal static class SlotChecks
     private static string? ConversationKeyReserved(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare(ReservedSlots.Main, SlotKind.Keyed);
 
         if (inject) return "反证注入：允许插件占用 conversation";
 
@@ -173,15 +183,16 @@ internal static class SlotChecks
     private static string? UnloadLeavesNoResidue(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare("x", SlotKind.Single);
         var handle = r.Register("x", new SlotOccupant("a", 100, Template("a")));
 
         if (inject) return "反证注入：卸载后仍能解析到";
 
-        if (r.Resolve("x", SlotKind.Single) is null) return "注册后应能解析";
+        if (r.Resolve("x") is null) return "注册后应能解析";
 
         handle.Dispose();
 
-        return r.Resolve("x", SlotKind.Single) is null
+        return r.Resolve("x") is null
             ? null
             : "释放句柄后不应再解析到占位者（否则重装会出现两个同一插件）";
     }
@@ -191,6 +202,7 @@ internal static class SlotChecks
     private static string? SelectPanelRejectsMissing(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare(ReservedSlots.Main, SlotKind.Keyed);
         r.Register(ReservedSlots.Main, new SlotOccupant("p", 100, Template("p"), Key: "plugins"));
 
         if (inject) return "反证注入：缺失 key 静默成功";
@@ -206,6 +218,7 @@ internal static class SlotChecks
     private static string? OccupantFailureIsolated(bool inject)
     {
         var r = new SlotRegistry();
+        r.Declare("x", SlotKind.Single);
 
         // 一个会抛异常的模板 + 一个正常模板
         var throwing = new FuncDataTemplate<object>((_, _) => throw new InvalidOperationException("占位者炸了"));
@@ -228,6 +241,51 @@ internal static class SlotChecks
         if (good is null) return "正常模板应能构建";
 
         return null;
+    }
+
+    // ── 10. 任意 slot 名的 list 都能工作（回归：曾因硬编码名字而静默失效） ──
+
+    /// <remarks>
+    /// <b>这条检查来自一个真实缺陷</b>：第一版 <c>Register</c> 用
+    /// <c>slotKey is ReservedSlots.Bottom or ReservedSlots.Overlay</c>
+    /// 判断要不要进可观察集合。新增一个 list slot（如 <c>sidebar.footer</c>）时
+    /// 注册不进集合、<c>GetList</c> 返回空、**UI 静默空白且无任何报错**。
+    /// 实测确认后改成"kind 由 Declare 定死"。
+    /// </remarks>
+    private static string? AnyNameWorksForList(bool inject)
+    {
+        var r = new SlotRegistry();
+
+        if (inject) return "反证注入：非白名单 slot 名注册后集合为空";
+
+        // 一个不在任何硬编码名单里的 list slot
+        r.Declare("sidebar.footer", SlotKind.List);
+        r.Register("sidebar.footer", new SlotOccupant("a", 100, Template("a")));
+        r.Register("sidebar.footer", new SlotOccupant("b", 100, Template("b")));
+
+        var list = r.GetList("sidebar.footer");
+        return list.Count == 2
+            ? null
+            : $"任意 slot 名的 list 都应工作，实际 GetList 返回 {list.Count} 条（期望 2）";
+    }
+
+    // ── 11. 未声明的 slot 注册应抛错，不静默接受 ──────────────────
+
+    private static string? UndeclaredRegisterThrows(bool inject)
+    {
+        var r = new SlotRegistry();
+
+        if (inject) return "反证注入：未声明也接受";
+
+        try
+        {
+            r.Register("never.declared", new SlotOccupant("x", 100, Template("x")));
+            return "注册未声明的 slot 应抛 InvalidOperationException——静默接受会让'注册了但界面空着'变成无解问题";
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static IDataTemplate Template(string tag) =>

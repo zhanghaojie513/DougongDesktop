@@ -92,7 +92,45 @@ public sealed class SlotRegistry
 {
     private readonly Dictionary<string, List<SlotOccupant>> _registrations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ObservableCollection<SlotOccupant>> _lists = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 已声明的 slot 及其 kind。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要声明而不是用 <c>Resolve</c> 时传 kind</b>：第一版把 kind 交给调用方在
+    /// <c>Resolve</c> 时传，而 <c>Register</c> 靠**硬编码的 slot 名字**判断要不要进可观察集合。
+    /// 后果：新增一个 list 类型的 slot（如 <c>sidebar.footer</c>）时，注册不会进集合，
+    /// <c>GetList</c> 返回空，**UI 静默空白且没有任何报错**。实测确认过这个缺陷。
+    /// <para>
+    /// 现在 kind 在 <see cref="Declare"/> 时定死，注册与解析都按它走，不可能对不上。
+    /// 未声明的 slot 注册时抛错，而不是静默降级。
+    /// </para>
+    /// </remarks>
+    private readonly Dictionary<string, SlotKind> _kinds = new(StringComparer.Ordinal);
+
     private int _nextIndex;
+
+    /// <summary>声明一个 slot。必须在注册前调用。</summary>
+    /// <exception cref="InvalidOperationException">同一 key 被声明为不同 kind。</exception>
+    public void Declare(string slotKey, SlotKind kind)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(slotKey);
+
+        if (_kinds.TryGetValue(slotKey, out var existing))
+        {
+            if (existing != kind)
+                throw new InvalidOperationException(
+                    $"slot '{slotKey}' 已声明为 {existing}，不能再声明为 {kind}。");
+            return;
+        }
+
+        _kinds[slotKey] = kind;
+        if (kind == SlotKind.List) _lists[slotKey] = [];
+    }
+
+    /// <summary>已声明的 kind；未声明返回 null。</summary>
+    public SlotKind? KindOf(string slotKey) =>
+        _kinds.TryGetValue(slotKey, out var kind) ? kind : null;
 
     /// <summary>
     /// 注册一个占位者。返回句柄，释放即注销。
@@ -104,6 +142,11 @@ public sealed class SlotRegistry
         if (slotKey == ReservedSlots.Main && occupant.Key == ReservedSlots.Conversation)
             throw new SlotConflictException(slotKey, ReservedSlots.Conversation, occupant.Id);
 
+        // 未声明的 slot 直接拒绝：静默接受会让"注册了但界面空着"变成无解的问题
+        if (!_kinds.TryGetValue(slotKey, out var kind))
+            throw new InvalidOperationException(
+                $"slot '{slotKey}' 未声明，先调用 Declare('{slotKey}', SlotKind.???)。");
+
         var stamped = occupant with { RegistrationIndex = _nextIndex++ };
 
         if (!_registrations.TryGetValue(slotKey, out var list))
@@ -114,17 +157,8 @@ public sealed class SlotRegistry
 
         _registrations[slotKey] = list = [.. list, stamped];
 
-        // list kind 直接进可观察集合，ItemsControl 会自动跟踪增删
-        if (slotKey is ReservedSlots.Bottom or ReservedSlots.Overlay)
-        {
-            if (!_lists.TryGetValue(slotKey, out var observable))
-            {
-                observable = [];
-                _lists[slotKey] = observable;
-            }
-
-            observable.Add(stamped);
-        }
+        // list kind 才进可观察集合；kind 来自声明，不再靠硬编码名字
+        if (kind == SlotKind.List) _lists[slotKey].Add(stamped);
 
         return new Registration(this, slotKey, stamped);
     }
@@ -134,8 +168,11 @@ public sealed class SlotRegistry
     /// </summary>
     /// <param name="key">仅 <see cref="SlotKind.Keyed"/> 使用。</param>
     /// <returns>没有占位者时返回 null，由调用方的 Fallback 决定显示什么。</returns>
-    public IDataTemplate? Resolve(string slotKey, SlotKind kind, string? key = null)
+    public IDataTemplate? Resolve(string slotKey, string? key = null)
     {
+        if (!_kinds.TryGetValue(slotKey, out var kind))
+            throw new InvalidOperationException($"slot '{slotKey}' 未声明。");
+
         if (!_registrations.TryGetValue(slotKey, out var list) || list.Count == 0)
             return null;
 
@@ -187,13 +224,15 @@ public sealed class SlotRegistry
     /// <summary>取 list kind 的可观察集合，直接绑到 <c>ItemsControl.ItemsSource</c>。</summary>
     public ObservableCollection<SlotOccupant> GetList(string slotKey)
     {
-        if (!_lists.TryGetValue(slotKey, out var observable))
-        {
-            observable = [];
-            _lists[slotKey] = observable;
-        }
+        if (!_kinds.TryGetValue(slotKey, out var kind))
+            throw new InvalidOperationException($"slot '{slotKey}' 未声明。");
 
-        return observable;
+        // 对 single/keyed 调 GetList 是编程错误，不能返回一个空集合假装没事
+        if (kind != SlotKind.List)
+            throw new InvalidOperationException(
+                $"slot '{slotKey}' 是 {kind}，不是 list；请用 Resolve。");
+
+        return _lists[slotKey];
     }
 
     /// <summary>
