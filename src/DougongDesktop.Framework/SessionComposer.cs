@@ -49,13 +49,38 @@ public sealed record EngineOptions
     public int ContextWindowTokens { get; init; }
 
     /// <summary>
-    /// 单次回复的最大输出 token。
+    /// 请求预留：本次请求期望的最大输出长度。
     /// </summary>
     /// <remarks>
-    /// 必须与实际请求用的值一致——否则压缩预留的空间与实际不符，
-    /// 算出来的预算就是错的。见 <see cref="SessionComposer"/> 里传给 <c>ChatOptions</c> 的那处。
+    /// <b>这是压缩预算的输入，不是模型容量。</b>两者必须分清：
+    /// <list type="bullet">
+    /// <item>本值（固定 <see cref="RequestOutputReserveTokens"/> 或环境变量覆盖）：
+    /// "我这次最多让模型输出多少"，用来从窗口里扣出可用输入空间</item>
+    /// <item>能力表的 <c>ModelCapabilities.MaxOutputTokens</c>：
+    /// "这个模型最多能输出多少"，实测占窗口 32%–38%</item>
+    /// </list>
+    /// <para>
+    /// <b>用后者当预留的后果</b>：预算被吃掉三分之一，压缩过早触发——
+    /// 200k 窗口按 64k 预留只剩 135k 可用输入，白扔三分之二的历史。
+    /// 而 SDK 0.1.10 起把这个参数正式改名成 <c>RequestOutputReserve</c>，
+    /// 就是在强调这个区分。
+    /// </para>
     /// </remarks>
-    public int MaxOutputTokens { get; init; } = 4096;
+    public int MaxOutputTokens { get; init; } = RequestOutputReserveTokens;
+
+    /// <summary>
+    /// 请求预留的默认值。
+    /// </summary>
+    /// <remarks>
+    /// <b>4096 的理由</b>：绝大多数对话回复远短于此；真正需要长输出的场景
+    /// （生成大文件）可以显式调高。取一个偏小的值让更多窗口留给输入——
+    /// 输入不够会丢历史，输出不够只是这次回复短一些。
+    /// <para>
+    /// 这与 SDK 回退值的设计意图一致（<c>FallbackMaxOutputTokens = 32768</c>
+    /// 是容量估计，不是预留）。要调时用 <c>DOUGONG_MAX_OUTPUT</c>。
+    /// </para>
+    /// </remarks>
+    public const int RequestOutputReserveTokens = 4096;
 
     /// <summary>
     /// 上下文窗口的取值顺序：显式配置 → SDK 能力表 → SDK 的估算回退。
@@ -97,50 +122,25 @@ public sealed record EngineOptions
     }
 
     /// <summary>
-    /// 输出上限的取值顺序：显式配置 → SDK 能力表 → SDK 的估算回退。
+    /// 请求预留的取值：显式配置 → 默认 <see cref="RequestOutputReserveTokens"/>。
     /// </summary>
     /// <remarks>
-    /// 输出上限必须与实际请求用的值一致，否则压缩预留的空间与实际不符，
-    /// 算出来的预算就是错的。
+    /// <b>不再查能力表</b>：能力表的 <c>MaxOutputTokens</c> 是模型的输出容量上限
+    /// （实测占窗口 32%–38%），不是"这次请求期望多少"。用容量当预留会让
+    /// 压缩过早触发——200k 窗口按 64k 预留只剩 135k 可用输入，
+    /// 白扔三分之二的历史。
+    /// <para>
+    /// <b>也不需要夹取了</b>：容量退出预算后，就不存在"输出上限吃掉上下文"
+    /// 这个问题。原来那条 <c>ClampMaxOutput</c> 是被上游数据逼出来的兜底，
+    /// 现在没有存在的理由——留着它只是多一处需要维护的规则。
+    /// </para>
     /// </remarks>
-    public static int ReadMaxOutput(string model)
+    public static int ReadRequestReserve()
     {
         var raw = Environment.GetEnvironmentVariable("DOUGONG_MAX_OUTPUT");
-        var explicitValue = int.TryParse(raw, out var value) && value > 0 ? value : 0;
-
-        if (explicitValue > 0) return explicitValue;
-
-        var caps = LookupCapabilities(model);
-        var fromTable = caps is { MaxOutputTokens: > 0 } ? caps.MaxOutputTokens : 0;
-
-        return fromTable > 0 ? fromTable : ProviderCatalog.FallbackMaxOutputTokens;
-    }
-
-    /// <summary>
-    /// 把输出上限夹到"不挤占上下文"的范围内。
-    /// </summary>
-    /// <remarks>
-    /// <b>这是被上游数据逼出来的兜底，不是设计</b>：models.dev 里有若干条目
-    /// 的输出上限等于甚至大于上下文窗口——<c>qwen/kimi-k3</c> 是
-    /// <c>out=ctx=1048576</c>，<c>xai/grok-4.5</c> 同样如此，
-    /// openrouter 的聚合条目普遍报 90%。
-    /// <para>
-    /// 不夹的话，<see cref="Validate"/> 会抛异常让**应用起不来**——
-    /// 用户配了一个上游数据有误的模型，看到的是"上下文窗口配置不可行"，
-    /// 而问题根本不在他那里。
-    /// </para>
-    /// <para>
-    /// <b>上限取窗口的一半</b>：留出输入空间才有意义，输出占满窗口等于
-    /// 没法对话。这也符合 SDK 回退值的设计意图（262144 / 32768 ≈ 1/8）。
-    /// </para>
-    /// </remarks>
-    public static int ClampMaxOutput(int contextWindow, int maxOutput)
-    {
-        if (contextWindow <= 0) return maxOutput;
-
-        // 至少留一半给输入 + 预留
-        var ceiling = contextWindow / 2;
-        return maxOutput > ceiling ? ceiling : maxOutput;
+        return int.TryParse(raw, out var value) && value > 0
+            ? value
+            : RequestOutputReserveTokens;
     }
 
     /// <summary>
@@ -214,7 +214,7 @@ public sealed record EngineOptions
             ContextWindowTokens = window,
             // 夹到不挤占上下文——上游数据里有 out == ctx 的条目，
             // 不夹会让 Validate 抛错、应用起不来
-            MaxOutputTokens = ClampMaxOutput(window, ReadMaxOutput(model)),
+            MaxOutputTokens = ReadRequestReserve(),
             Workspace = Environment.GetEnvironmentVariable("DOUGONG_WORKSPACE") ?? Environment.CurrentDirectory,
             SessionDirectory = Environment.GetEnvironmentVariable("DOUGONG_SESSION_DIR")
                 ?? Path.Combine(
@@ -248,6 +248,8 @@ public sealed record EngineOptions
     /// </remarks>
     public void Validate()
     {
+        // 校验的是**实例上实际的预留值**，不是默认常量——
+        // 用常量会让 MaxOutputTokens 被覆盖时校验形同虚设
         var verdict = ContextBudgetValidation.Check(
             ContextWindowTokens,
             MaxOutputTokens,
@@ -344,7 +346,7 @@ public sealed class SessionComposer : IDisposable
         Func<ServerEvent, Task> emitEngineEvent,
         Func<long> nextSequence,
         int contextWindowTokens,
-        int maxOutputTokens,
+        int requestOutputReserve,
         CancellationToken cancellationToken = default)
     {
         // 未配置时在建会话这一步失败，而不是在构造时抛——
@@ -420,7 +422,12 @@ public sealed class SessionComposer : IDisposable
                     new ContextLimits
                     {
                         ContextWindowTokens = contextWindowTokens,
-                        MaxOutputTokens = maxOutputTokens,
+
+                        // 请求预留 = 这次请求期望的最大输出长度，是**固定值**，
+                        // 与模型能力表里的 MaxOutputTokens 无关。
+                        // 后者是"模型最多能输出多少"（实测占窗口 32%–38%），
+                        // 拿它当预留会把预算吃掉三分之一——压缩因此过早触发。
+                        RequestOutputReserve = requestOutputReserve,
                     },
                     new SlidingWindowCompactor(preservedHead: 2, preservedTail: 6),
                     (transcript, ct) => SummarizeAsync(client, transcript, ct));

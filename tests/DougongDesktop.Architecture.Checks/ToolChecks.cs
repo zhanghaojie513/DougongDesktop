@@ -246,34 +246,40 @@ internal static class ToolChecks
     }
 
     /// <summary>
-    /// 输出上限不能挤占上下文窗口。
+    /// 模型输出容量不能进压缩预算。
     /// </summary>
     /// <remarks>
-    /// <b>上游数据确实有这种条目</b>：<c>qwen/kimi-k3</c> 报
-    /// <c>out=ctx=1048576</c>，<c>xai/grok-4.5</c> 同样，openrouter 聚合条目普遍 90%。
+    /// <b>这条守的是一个升级陷阱</b>：能力表的 <c>MaxOutputTokens</c> 是
+    /// "模型最多能输出多少"（实测占窗口 32%–38%），我们早先拿它当压缩预算里的
+    /// 请求预留。后果是预算被吃掉三分之一，压缩过早触发——200k 窗口按 64k 预留
+    /// 只剩 135k 可用输入，白扔三分之二的历史。
     /// <para>
-    /// 不夹的话 <c>Validate()</c> 抛异常让应用起不来——用户看到"上下文窗口配置不可行"，
-    /// 而问题根本不在他那里。这条检查守的就是"上游数据有误不能让本地崩"。
+    /// SDK 0.1.10 把 <c>ContextLimits</c> 的这个参数正式改名成
+    /// <c>RequestOutputReserve</c>，就是在强调这个区分。改名会强制调用方改代码，
+    /// 但改完仍可能"用错值"——所以这条断言数值，不靠类型检查。
     /// </para>
     /// </remarks>
     private static string? MaxOutputNeverEatsContext(bool inject)
     {
-        // 取一个真实存在的病态条目形状
-        var clamped = EngineOptions.ClampMaxOutput(1_048_576, 1_048_576);
-        var okValue = EngineOptions.ClampMaxOutput(200_000, 64_000);
+        var reserve = EngineOptions.ReadRequestReserve();
 
-        if (inject) return "反证注入：输出上限可以等于上下文窗口";
+        if (inject) return "反证注入：请求预留跟着模型容量走";
 
-        if (clamped >= 1_048_576)
-            return $"out == ctx 时必须夹到窗口之内，实际 {clamped}";
+        if (reserve != EngineOptions.RequestOutputReserveTokens)
+            return $"请求预留应是固定 {EngineOptions.RequestOutputReserveTokens}，实际 {reserve}";
 
-        // 夹完必须能通过预算校验（否则应用仍然起不来）
-        var effective = 1_048_576 - clamped - 512;
-        if (effective <= 0) return $"夹取后预算仍为 {effective}，Validate 会抛错";
+        var caps = EngineOptions.LookupCapabilities("claude-sonnet-4-5");
+        if (caps is null) return "能力表应能查到 claude-sonnet-4-5（否则这条检查失效）";
 
-        return okValue == 64_000
+        if (caps.MaxOutputTokens <= reserve)
+            return $"该模型的输出容量 {caps.MaxOutputTokens} 不应小于等于请求预留 {reserve}";
+
+        var capacityShare = (double)caps.MaxOutputTokens / caps.ContextWindow;
+        var reserveShare = (double)reserve / caps.ContextWindow;
+
+        return capacityShare > reserveShare * 2
             ? null
-            : $"正常值不该被改动：200k 窗口下 64k 输出应保持 64000，实际 {okValue}";
+            : $"容量占比 {capacityShare:P0} 与预留占比 {reserveShare:P0} 太接近，无法区分二者";
     }
 
     /// <summary>
@@ -346,27 +352,28 @@ internal static class ToolChecks
     /// <summary>逐组对比桌面端与 SDK 的可用性判定。</summary>
     private static string? CompareVerdicts(int overhead)
     {
-        var cases = new (int Window, int Output)[]
+        // 这些是**请求预留**的边界，不是模型容量。
+        // 容量（能力表 MaxOutputTokens）不参与预算，所以它不该出现在这里。
+        var cases = new (int Window, int Reserve)[]
         {
             (200_000, 8_192),
-            (1_048_576, 1_048_576),    // 病态：out == ctx
-            (1_048_576, 524_288),      // 夹取后
+            (200_000, EngineOptions.RequestOutputReserveTokens),  // 默认预留
             (8_000, 8_192),            // 用户填小了
-            (0, 8_192),                // 未配置窗口
-            (overhead + 8_192, 8_192), // 边界：恰为 0
-            (overhead + 8_193, 8_192), // 边界：恰为 1
+            (0, 8_192),                // 未配置窗口（合法但不启用）
+            (overhead + 8_192, 8_192), // 边界：有效预算恰为 0
+            (overhead + 8_193, 8_192), // 边界：有效预算恰为 1
         };
 
-        foreach (var (window, output) in cases)
+        foreach (var (window, reserve) in cases)
         {
-            var sdkVerdict = ContextBudgetValidation.Check(window, output, overhead);
+            var sdkVerdict = ContextBudgetValidation.Check(window, reserve, overhead);
 
             var options = new EngineOptions
             {
                 BaseUrl = "https://example.invalid",
                 Model = "test-model",
                 ContextWindowTokens = window,
-                MaxOutputTokens = output,
+                MaxOutputTokens = reserve,
             };
 
             bool threw;
@@ -382,7 +389,7 @@ internal static class ToolChecks
 
             if (threw != !sdkVerdict.IsUsable)
             {
-                return $"窗口 {window} / 输出 {output}：桌面端 {(threw ? "拒绝" : "通过")}，" +
+                return $"窗口 {window} / 预留 {reserve}：桌面端 {(threw ? "拒绝" : "通过")}，" +
                        $"SDK {(sdkVerdict.IsUsable ? "通过" : "拒绝")} —— 两套判据已分叉";
             }
         }
