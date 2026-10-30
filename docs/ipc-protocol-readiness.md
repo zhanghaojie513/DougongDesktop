@@ -138,3 +138,84 @@ pi.net 的 `Pi.Protocol` 更简单，但它服务的是「远端执行环境」�
 
 但**不要因为"将来可能会抽"就去补现在不需要的东西**。
 单人单连接下，这三处缺口一个都不会暴露。提前补齐等于为想象中的需求付维护成本。
+
+---
+
+## 六、附：抽包后的目标形状（草案，不在当前工作范围）
+
+> **这份清单不是待办，是设计目标。** 记录于 2026-10-31，
+> 用途是将来真到触发条件时不必从零想名字。
+>
+> **现在不要按它写代码**——§四 列的三件事（版本协商、序号回放、鉴权）
+> 一件都还没补，按未稳定的契约抽包等于把不确定性固化成公开 API。
+
+### 6.1 目标包名
+
+`Dougong.HostProtocol`
+
+命名理由：它描述的是「宿主与 agent 运行时之间的会话协议」，
+不是「字节怎么分帧」。dsh 的 `dsh-sdk-protocol` 与 `dsh-acp` 是同一层的东西，
+而我们这个比纯分帧更贴业务（有会话、条目、审批这些概念）。
+
+### 6.2 类型清单
+
+**信封**
+
+| 类型 | 职责 |
+|---|---|
+| `ClientCommand` | 客户端 → 服务端的命令基类 |
+| `ServerEvent` | 服务端 → 客户端的事件基类 |
+| `IpcProtocol` | 版本号 + 序列化配置 + 判别字段约定 |
+
+**会话**
+
+`SessionSummary` · `SessionSnapshot` · `TurnSnapshot` ·
+`SessionListedEvent` · `SessionOpenedEvent` ·
+`ListSessionsCommand` · `CreateSessionCommand` · `OpenSessionCommand` · `ResyncCommand`
+
+**回合**
+
+`TurnStatus` · `StartTurnCommand` · `CancelTurnCommand` ·
+`TurnStartedEvent` · `TurnCompletedEvent`
+
+**条目**
+
+`ConversationItem` 基类 + 六种：
+
+| 类型 | 说明 |
+|---|---|
+| `UserItem` | 用户输入 |
+| `AssistantItem` | 模型正文 |
+| `ReasoningItem` | 推理内容（与正文分开，见 SDK `ReasoningDelta` 的理由） |
+| `ToolCallItem` | 工具调用 + `ToolCallStatus` |
+| `PlanItem` | 计划 + `PlanStep` |
+| `NoticeItem` | 通知 + `NoticeLevel` |
+
+事件：`ItemAddedEvent` · `ItemUpdatedEvent`
+
+**审批**
+
+`ApprovalRequest` · `ApprovalDecision` · `ApprovalResponse` ·
+`ApprovalRequestedEvent` · `RespondApprovalCommand`
+
+**引擎**
+
+`EngineStatusEvent` · `EngineState`
+
+### 6.3 与当前 `DougongDesktop.Ipc` 的关系
+
+现有 8 个 `ClientCommand` + 8 个 `ServerEvent` 是**这套的雏形**。
+抽包时不是重写，是把它们按上面的分类重组、补上前置能力、再把
+`DougongDesktop` 前缀去掉。
+
+### 6.4 清单里刻意没有的东西
+
+| 没有 | 理由 |
+|---|---|
+| **鉴权类型**（token / session cookie / 权限范围） | §2.2 说了它工程量最大，且要连带决定"谁能看哪些会话"。**等真要非回环客户端时再设计** |
+| **版本协商流程**（只列了 `IpcProtocol` 的版本字段） | 协商是 Flow 不是 Type：谁先发、不兼容时怎么拒绝、降级到什么程度——这些要对着真实客户端设计 |
+| **多租户 / 账户模型** | 那是 dsh 作为完整产品的需求，不是 SDK 的（§四 已有记录） |
+| **传输绑定** | 契约只定义消息形状；TCP / 管道 / WebSocket 由宿主选 |
+
+**三个"没有"正是 §四 列的三个前置能力。** 清单里补不进去，
+因为它们是**行为**而不是**类型**——类型可以先想好，行为只能对着真实场景设计。

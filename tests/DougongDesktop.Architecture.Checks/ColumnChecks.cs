@@ -24,6 +24,8 @@ internal static class ColumnChecks
         failures += Case("cols-rightbar-yields-first", slug => RightbarYieldsFirst(breakMode == slug));
         failures += Case("cols-rightbar-drops-before-center", slug => RightbarDropsBeforeCenter(breakMode == slug));
         failures += Case("cols-rightbar-default-45pct", slug => RightbarDefaultRatio(breakMode == slug));
+        failures += Case("cols-responsive-breakpoints", slug => Breakpoints(breakMode == slug));
+        failures += Case("color-mix-matches-css", slug => ColorMix(breakMode == slug));
 
         return failures;
     }
@@ -134,6 +136,77 @@ internal static class ColumnChecks
         return sol.Center >= Columns.CenterMin && Math.Abs(sol.Rightbar - 576) < 0.5
             ? null
             : $"1280 展开右栏后应得 280/424/576，实际 {sol.Sidebar:0}/{sol.Center:0}/{sol.Rightbar:0}";
+    }
+
+    /// <summary>
+    /// 响应式断点：1024 自动收起、768 切抽屉。
+    /// </summary>
+    /// <remarks>
+    /// <b>这两个数字来自 dsh 的 <c>SIDEBAR_AUTO_COLLAPSE</c> / <c>SIDEBAR_DRAWER_BREAKPOINT</c></b>。
+    /// 断言的是求解器的输入如何被解释——宽 1023 时应得到收起轨道，
+    /// 宽 767 时应完全不占列宽。
+    /// </remarks>
+    private static string? Breakpoints(bool inject)
+    {
+        // 1023 宽：窄屏，侧栏收起 → 应得 56 轨道
+        var narrow = Columns.Compute(1023, 0, 0);
+        var expectedNarrow = inject ? 280 : Columns.SidebarCollapsed;
+
+        if (Math.Abs(narrow.Sidebar - expectedNarrow) > 0.5)
+            return $"1023 宽下侧栏应为 {expectedNarrow}（收起轨道），实际 {narrow.Sidebar}";
+
+        // 1025 宽：不窄，280 正常
+        var wide = Columns.Compute(1025, Columns.SidebarDefault, 0);
+        if (Math.Abs(wide.Sidebar - 280) > 0.5)
+            return $"1025 宽下侧栏应为 280，实际 {wide.Sidebar}";
+
+        // 767 宽：抽屉，不占列宽（collapsedWidth 传 0）
+        var drawer = Columns.Compute(767, 0, 0, collapsedWidth: 0);
+        return drawer.Sidebar == 0
+            ? null
+            : $"767 宽（抽屉态）下侧栏不应占列宽，实际 {drawer.Sidebar}";
+    }
+
+    /// <summary>
+    /// 混色必须与 CSS <c>color-mix(in srgb, ...)</c> 一致。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要断言这个</b>：dsh 的 token 里有 <c>color-mix</c>，
+    /// 我们必须在 Avalonia 里算出同样的值。算错的后果不是崩溃，
+    /// 而是整套配色偏移一点——那种偏差肉眼说不清，只能靠数值。
+    /// <para>
+    /// <b>同时断言 HSL 混色的色相最短弧</b>：直接插值 350° 与 10° 会得到 180°（青色），
+    /// 预期是 0°（红）。这个错误在灰度上看不出来。
+    /// </para>
+    /// </remarks>
+    private static string? ColorMix(bool inject)
+    {
+        var white = Avalonia.Media.Color.Parse("#FFFFFF");
+        var black = Avalonia.Media.Color.Parse("#000000");
+
+        // 50% 白 + 50% 黑 = 中灰 #808080（127 或 128 都可能，取决于取整）
+        var gray = DougongDesktop.Ui.Core.ColorMath.MixSrgb(white, black, 0.5);
+        var expected = inject ? 200 : 128;
+
+        if (Math.Abs(gray.R - expected) > 1)
+            return $"白黑各半应得中灰（≈128），实际 R={gray.R}";
+
+        // 透明度也要一起插值：60% 不透明 + 100% 不透明，取 a=0.8 → 204
+        var semi = Avalonia.Media.Color.FromArgb(153, 255, 0, 0);
+        var opaque = Avalonia.Media.Color.FromArgb(255, 0, 0, 255);
+        var mixed = DougongDesktop.Ui.Core.ColorMath.MixSrgb(semi, opaque, 0.5);
+
+        if (Math.Abs(mixed.A - 204) > 2)
+            return $"alpha 应随比例插值（期望≈204），实际 {mixed.A}";
+
+        // HSL 色相最短弧：红 0° 与 350° 混色应接近红，不是青
+        var red = Avalonia.Media.Color.Parse("#FF0000");
+        var crimson = Avalonia.Media.Color.Parse("#FF00AA");
+        var hsl = DougongDesktop.Ui.Core.ColorMath.MixHsl(red, crimson, 0.5);
+
+        return hsl.R > 200
+            ? null
+            : $"HSL 混色偏离红区（R={hsl.R}）—— 色相可能没走最短弧";
     }
 
     private static int Case(string slug, Func<string, string?> body)
