@@ -450,11 +450,22 @@ public sealed class AppShell : UserControl
         };
     }
 
-    private static Control BuildTitleIcon() => new TKCode.Arc.Icons.Lucide.LucideIcon
+    /// <summary>
+    /// 标题栏的 logo。
+    /// </summary>
+    /// <remarks>
+    /// <b>用真实品牌资源，不用图标占位</b>：品牌规范是"纯黑白、无渐变、
+    /// 不引入有彩色"。Lucide 的 Layers 只是个形状相近的占位，不是品牌符号。
+    /// <para>
+    /// 深色主题用 <c>symbol-white.png</c>（反色版），浅色用 <c>symbol.png</c>。
+    /// </para>
+    /// </remarks>
+    private static Control BuildTitleIcon() => new Image
     {
-        Kind = TKCode.Arc.Icons.Lucide.LucideIconKind.Layers,
-        Size = 14,
-        Foreground = DshTheme.Brush(DshTheme.LabelPrimary),
+        Source = BrandAssets.Symbol(DshTheme.IsDark),
+        Width = 16,
+        Height = 16,
+        Stretch = Stretch.Uniform,
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(2, 0, 0, 0),
     };

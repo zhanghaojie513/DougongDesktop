@@ -37,4 +37,14 @@
     <PackageReference Include="TKCode.Arc.Icons.Lucide" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 品牌资源：logo 与图标。用 AvaloniaResource 而不是 None，
+         这样能通过 avares:// 在运行期加载（窗口图标、标题栏 logo 都要）。 -->
+    <AvaloniaResource Include="../../assets/brand/png/symbol.png" Link="Assets/symbol.png" />
+    <AvaloniaResource Include="../../assets/brand/png/symbol-white.png" Link="Assets/symbol-white.png" />
+    <AvaloniaResource Include="../../assets/brand/png/horizontal.png" Link="Assets/horizontal.png" />
+    <AvaloniaResource Include="../../assets/brand/png/horizontal-white.png" Link="Assets/horizontal-white.png" />
+    <AvaloniaResource Include="../../assets/brand/icons/dougong.ico" Link="Assets/dougong.ico" />
+  </ItemGroup>
+
 </Project>

@@ -78,6 +78,10 @@ public sealed class MainWindow : Window
         ExtendClientAreaToDecorationsHint = true;
         ExtendClientAreaTitleBarHeightHint = Ui.Core.Columns.TitlebarHeight;
 
+        // 窗口图标用真实品牌资源（品牌规格：纯黑白，无渐变）
+        Icon = new Avalonia.Controls.WindowIcon(
+            Avalonia.Platform.AssetLoader.Open(new Uri("avares://DougongDesktop.App/Assets/dougong.ico")));
+
         // 页面底色用 dsh 的 bg-base，不用 Arc 默认。
         // 这是"看起来像不像 dsh"最直接的一块：Arc 的默认底色与 dsh 差一档明度，
         // 而侧边栏/主区都是从它上面叠出来的。

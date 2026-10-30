@@ -76,19 +76,21 @@ public static class SidebarView
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 Children =
                 {
-                    // 品牌标记：dsh 用鱼形；我们用 Lucide 的拱形（Dougong = 斗拱）
-                    new TKCode.Arc.Icons.Lucide.LucideIcon
+                    // 品牌符号：真实资源（斗拱形体），不是图标占位
+                    new Image
                     {
-                        Kind = TKCode.Arc.Icons.Lucide.LucideIconKind.Layers,
-                        Size = 18,
-                        Foreground = DshTheme.Brush(DshTheme.LabelPrimary),
+                        Source = BrandAssets.Symbol(DshTheme.IsDark),
+                        Width = 20,
+                        Height = 20,
+                        Stretch = Avalonia.Media.Stretch.Uniform,
                         VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                     },
                     new TextBlock
                     {
-                        Text = "Dougong",
-                        FontSize = 14,
-                        FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                        Text = "DOUGONG",
+                        FontSize = 13,
+                        FontWeight = Avalonia.Media.FontWeight.Bold,
+                        LetterSpacing = 0.5,
                         VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                     },
                     // dsh 的品牌名是"deepseek + HARNESS"双色；我们的对应是
