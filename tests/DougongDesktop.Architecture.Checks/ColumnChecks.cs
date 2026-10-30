@@ -26,6 +26,8 @@ internal static class ColumnChecks
         failures += Case("cols-rightbar-default-45pct", slug => RightbarDefaultRatio(breakMode == slug));
         failures += Case("cols-responsive-breakpoints", slug => Breakpoints(breakMode == slug));
         failures += Case("color-mix-matches-css", slug => ColorMix(breakMode == slug));
+        failures += Case("dsh-tokens-complete", slug => TokensComplete(breakMode == slug));
+        failures += Case("dsh-tokens-themes-differ", slug => ThemesDiffer(breakMode == slug));
 
         return failures;
     }
@@ -207,6 +209,53 @@ internal static class ColumnChecks
         return hsl.R > 200
             ? null
             : $"HSL 混色偏离红区（R={hsl.R}）—— 色相可能没走最短弧";
+    }
+
+    /// <summary>
+    /// 两套主题各有 108 个 token，一个不少。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条守的是"生成物完整性"</b>：dsh 的 alias token 数是 108（实测），
+    /// 少一个就说明生成脚本漏了解析（比如 <c>color-mix</c> 的两种语法只处理了一种），
+    /// 而漏掉的那个 token 只在用到它的组件上才看得出颜色不对。
+    /// </remarks>
+    private static string? TokensComplete(bool inject)
+    {
+        var light = typeof(DougongDesktop.Ui.Core.Theme.DshTokens.Light)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Length;
+        var dark = typeof(DougongDesktop.Ui.Core.Theme.DshTokens.Dark)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Length;
+
+        var expected = inject ? 107 : 108;
+
+        if (light != expected) return $"light 应有 {expected} 个 token，实际 {light}";
+        return dark == expected ? null : $"dark 应有 {expected} 个 token，实际 {dark}";
+    }
+
+    /// <summary>
+    /// 两套主题的底色必须不同，否则切换主题不会有任何视觉变化。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条抓的是"生成时取错块"</b>：design-platform.css 里有四个 body 块，
+    /// 如果 light 与 dark 抓到同一个块，两套值会完全一样——而编译、构建、
+    /// 甚至"108 个 token 齐全"这条检查都会通过，只有肉眼看界面时才发现切主题没用。
+    /// </remarks>
+    private static string? ThemesDiffer(bool inject)
+    {
+        var lightBase = DougongDesktop.Ui.Core.Theme.DshTokens.Light.DswAliasBgBase;
+        var darkBase = DougongDesktop.Ui.Core.Theme.DshTokens.Dark.DswAliasBgBase;
+
+        if (inject) return "反证注入：两套主题底色相同";
+
+        if (lightBase == darkBase)
+            return $"light 与 dark 的底色相同（{lightBase}）—— 生成时可能取到了同一个 CSS 块";
+
+        // light 底色应比 dark 亮
+        return lightBase.R > darkBase.R
+            ? null
+            : $"light 底色应比 dark 亮，实际 light={lightBase} dark={darkBase}";
     }
 
     private static int Case(string slug, Func<string, string?> body)

@@ -18,6 +18,9 @@ public sealed class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        // 先初始化主题：MainWindow 构造时就要读 dsh 的底色
+        Shell.DshTheme.Initialize(this);
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = new Views.MainWindow();

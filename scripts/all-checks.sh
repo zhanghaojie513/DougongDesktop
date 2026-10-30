@@ -49,6 +49,7 @@ checks="$checks diff-detects-add-modify-delete diff-ignores-same-content"
 checks="$checks cols-match-dsh-constants cols-sidebar-default-280 cols-rightbar-yields-first"
 checks="$checks cols-rightbar-drops-before-center cols-rightbar-default-45pct"
 checks="$checks cols-responsive-breakpoints color-mix-matches-css"
+checks="$checks dsh-tokens-complete dsh-tokens-themes-differ"
 checks="$checks sdk-files-stay-contained"
 
 for check in $checks; do

@@ -67,6 +67,11 @@ public sealed class MainWindow : Window
         Width = 1280;
         Height = 820;
 
+        // 页面底色用 dsh 的 bg-base，不用 Arc 默认。
+        // 这是"看起来像不像 dsh"最直接的一块：Arc 的默认底色与 dsh 差一档明度，
+        // 而侧边栏/主区都是从它上面叠出来的。
+        Background = DshTheme.Brush(DshTheme.PageBackground);
+
         // 毛玻璃：dsh 的 macOS 侧边栏是半透明叠加窗口 vibrancy。
         // Avalonia 12 有 AcrylicBlur（Windows）/Blur/Mica，先按能力降级声明；
         // 实际生效的级别在 Opened 里读 TransparencyLevel 确认，
@@ -775,6 +780,13 @@ public sealed class MainWindow : Window
         }
 
         Report("AppShell", shell);
+
+        // dsh 配色是否真的应用：读实际 Background，不看代码写了什么
+        var bg = Background as Avalonia.Media.ISolidColorBrush;
+        Console.Error.WriteLine(
+            $"[shell] 底色 {bg?.Color.ToString() ?? "(无)"} 深色={DshTheme.IsDark} " +
+            $"（dsh light={Ui.Core.Theme.DshTokens.Light.DswAliasBgBase} " +
+            $"dark={Ui.Core.Theme.DshTokens.Dark.DswAliasBgBase}）");
 
         // dsh 对照：三栏宽度必须等于求解器结果（不是"看起来差不多"）
         if (shell is AppShell host)

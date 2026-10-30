@@ -396,7 +396,7 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 | A8 | 毛玻璃 | 🚧 | `MainWindow` 声明 `TransparencyLevelHint = [AcrylicBlur, Blur, None]` | 待补：读实际 `TransparencyLevel` 确认生效级别 |
 | A9 | 侧边栏 280 / 52 品牌行 / 36 会话行 | ⬜ | 需设 `Sidebar.OpenWidth = 280`（**当前未设**，用的是列宽）；行高需覆盖 Arc Section 模板 | 待做 |
 | A10 | 侧边栏收起 56px 轨道 | ⏳ | **Arc 写死 64px**，见 §9.1。接受 8px 差异 | — |
-| A11 | 108 个 `--dsw-alias-*` 映射 | ⬜ | 从 `design-platform.css` 提取 light/dark 两套，写入 Avalonia `ResourceDictionary` | 逐 token 比对色值 |
+| A11 | 108 个 `--dsw-alias-*` 映射 | ✅ | `scripts/sync-dsh-tokens.py` 生成 `Theme/DshTokens.g.cs`（light/dark 各 108）；`DshTheme` 提供按主题取色 | `dsh-tokens-complete`（216 常量）、`dsh-tokens-themes-differ`（两套底色必须不同）；dump 底色 = White 与 dsh light 一致 |
 | A12 | `color-mix` 求值 | ✅ | `Ui.Core/ColorMath.cs`：`MixSrgb`（对齐 CSS）+ `MixHsl`（色相走最短弧） | `color-mix-matches-css`：黑白各半得中灰、alpha 随比例、HSL 不走反方向 |
 
 ### 7.2 P8b 会话与输入
@@ -477,13 +477,13 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 | 阶段 | 总项 | ✅ | 🚧 | ⬜ | ⏳ |
 |---|---|---|---|---|---|
-| P8a 布局骨架 | 12 | 8 | 1 | 2 | 1 |
+| P8a 布局骨架 | 12 | 9 | 1 | 1 | 1 |
 | P8b 会话与输入 | 6 | 0 | 0 | 6 | 0 |
 | P8c 设置域 | 8 | 0 | 0 | 7 | 1 |
 | P8d 会话增强 | 7 | 0 | 0 | 7 | 0 |
 | P8e 插件体系 | 8 | 1 | 0 | 7 | 0 |
 | P8f 终端与浏览器 | 5 | 2 | 0 | 3 | 0 |
-| **合计** | **46** | **11** | **1** | **32** | **2** |
+| **合计** | **46** | **12** | **1** | **31** | **2** |
 
 > 表格由脚本统计生成，不是手数——手数过一次，错了 3 处（P8a 的 ✅ 写成 7、
 > P8c 的分项相加不等于总数）。**核对方式**：按 `| A1 |` 这类行首模式逐行取状态列。
