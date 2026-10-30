@@ -258,8 +258,8 @@ dsh 的 `shell.bottom` 是**横跨整行的单一 slot**，且默认组合**不�
 | `ui-sidebar-browser` | 沙箱内浏览 HTTP(S) 页面 | 需要内嵌浏览器内核（WebView2），Avalonia 需额外集成 |
 | `ui-settings-account` | DeepSeek 账号登录 | **用户已明确不做账户登录** |
 | `ui-settings-web-search` | 网页搜索 API 设置 | 依赖 DeepSeek 侧 API，我们没有 |
-| `ui-settings-subagent` | 子智能体委派深度/并行 | 依赖 SDK 的 subagent 能力 |
-| `ui-settings-agent-loop` | 并行工具调用上限 | 依赖 SDK 暴露该配置 |
+| `ui-settings-subagent` | 子智能体委派深度/并行 | **等 SDK**：`dsh-capability-gap.md` P2 #15 列为缺口，SDK 正在完善 |
+| `ui-settings-agent-loop` | 并行工具调用上限 | **非缺口**：`LoopAgentRuntime` 已存在，只是配置未暴露，属 UI 侧待接 |
 | `ui-open-in-app` | 在外部应用打开文件 | 平台相关，Avalonia 可做（`Process.Start`），低优先 |
 | `ui-directory-picker-native` | 原生目录选择器 | Avalonia 有 `StorageProvider`，**可做** |
 
