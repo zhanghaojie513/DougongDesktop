@@ -26,6 +26,7 @@ public sealed class MainWindow : Window
     private string? _selectedSessionId;
     private IReadOnlyList<SessionSummary>? _currentSessions;
     private readonly StatusCapsule _capsule = new();
+    private readonly ConversationView _conversation = new();
     private readonly UiExtensionLoader _uiPlugins;
 
     public MainWindow()
@@ -42,6 +43,10 @@ public sealed class MainWindow : Window
         Content = new AppShell(_slots, _vm);
 
         LoadUiPlugins();
+
+        // 自检模式：没 provider 时也能验证消息流渲染
+        if (Environment.GetEnvironmentVariable("DOUGONG_UI_SELFTEST") is "1")
+            _conversation.LoadSelfTestData();
 
         Opened += async (_, _) =>
         {
@@ -106,6 +111,9 @@ public sealed class MainWindow : Window
     /// <summary>按模块声明构建控件。</summary>
     private Control BuildModule(BuiltInModule module) => module.Kind switch
     {
+        // 对话区：真实消息流，不是占位
+        _ when module.Id == "builtin.conversation" => _conversation,
+
         BuiltInModuleKind.Sidebar => SidebarView.Build(
             _currentSessions, _connectionDetail, _selectedSessionId, OnSidebarSelect),
 
@@ -192,8 +200,22 @@ public sealed class MainWindow : Window
                 _capsule.OnTurnStarted();
                 break;
 
-            case ItemAddedEvent { Item: IpcToolCallItem }:
-                _capsule.OnToolRunning("工具");
+            case ItemAddedEvent added:
+                _conversation.Add(added.Item);
+                if (added.Item is IpcToolCallItem tool)
+                    _capsule.OnToolRunning(tool.ToolName);
+                break;
+
+            case ItemUpdatedEvent updated:
+                _conversation.Update(updated.Item);
+                break;
+
+            case SessionOpenedEvent opened:
+                // 切会话：先清空再重放快照里的条目
+                _conversation.Clear();
+                foreach (var turn in opened.Snapshot.Turns)
+                    foreach (var item in turn.Items)
+                        _conversation.Add(item);
                 break;
 
             case ApprovalRequestedEvent approval:
@@ -351,7 +373,14 @@ public sealed class MainWindow : Window
 
         Report("AppShell", shell);
         Report("ResizablePanels", shell?.GetVisualDescendants().OfType<ResizablePanels>().FirstOrDefault());
-        Report("Bottom(list)", shell?.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault());
+        // 按类型取 FirstOrDefault 会拿到消息流里的 ItemsControl（那是最大的一个），
+        // 不是底部条。改成从 AppShell 拿它自己持有的引用。
+        if (shell is AppShell appShell)
+        {
+            Report("Bottom(list)", appShell.BottomBar);
+            Report("Conversation.List", _conversation.List);
+            Console.Error.WriteLine($"[shell] 消息条目数 {_conversation.Count}");
+        }
 
         var panels = shell?.GetVisualDescendants().OfType<ResizablePanel>().ToArray() ?? [];
         Console.Error.WriteLine($"[shell] ResizablePanel 数量 {panels.Length}（期望 3）");
@@ -364,6 +393,7 @@ public sealed class MainWindow : Window
         Console.Error.WriteLine($"[shell] ContentControl {all.OfType<ContentControl>().Count()}");
         Console.Error.WriteLine($"[shell] Sidebar {all.OfType<TKCode.Arc.Sidebar>().Count()}");
         Console.Error.WriteLine($"[shell] AgentStatus {all.OfType<TKCode.Arc.AgentStatus>().Count()}");
-        Console.Error.WriteLine($"[shell] ItemsControl {all.OfType<ItemsControl>().Count()}");        Console.Error.WriteLine("[shell] DUMP-END");
+
+        Console.Error.WriteLine("[shell] DUMP-END");
     }
 }

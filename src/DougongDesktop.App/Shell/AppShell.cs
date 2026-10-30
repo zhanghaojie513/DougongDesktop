@@ -55,6 +55,12 @@ public sealed class AppShell : UserControl
     /// <summary>single/keyed slot 的 ContentControl，用于响应注册表变化。</summary>
     private readonly Dictionary<string, ContentControl> _contentBySlot = new(StringComparer.Ordinal);
 
+    /// <summary>底部条容器，供诊断读取实际尺寸。</summary>
+    public Control? BottomBar { get; private set; }
+
+    /// <summary>消息流列表，供诊断读取实际尺寸。</summary>
+    public Control? ConversationList { get; private set; }
+
     /// <summary>右栏面板，用于"有内容时自动展开"。</summary>
     private ResizablePanel? _rightBarPanel;
 
@@ -151,6 +157,7 @@ public sealed class AppShell : UserControl
         stack.Children.Add(panels);
         Grid.SetRow(bottom, 1);
         stack.Children.Add(bottom);
+        BottomBar = bottom;
 
         var root = new Grid();
         root.Children.Add(stack);

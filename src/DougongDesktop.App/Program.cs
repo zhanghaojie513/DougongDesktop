@@ -28,6 +28,8 @@ internal static class Program
             .WithArcFonts()       // TKCode.Arc.Fonts：Geist 显示体 + Geist Mono 代码体
             .UseArc(arc => arc
                 .UseArcControls()    // 基础控件、主题、令牌（0.3.2 入口，不再是 UseAtomUI）
-                .UseArcSpecial())    // agent 组件：ToolCall/AgentStatus/AgentPlan/ContextWindow
+                .UseArcSpecial()     // agent 组件：ToolCall/AgentStatus/AgentPlan/ContextWindow
+                .UseArcBlocks())     // Blocks：Sidebar 等复合控件。漏了它 Sidebar 会
+                                     // 有尺寸但没有视觉子节点（ControlTheme 没应用）——实测踩过
             .LogToTrace();
 }

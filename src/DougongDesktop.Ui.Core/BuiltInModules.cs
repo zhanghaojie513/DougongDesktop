@@ -45,10 +45,9 @@ public static class BuiltInModules
         // 状态胶囊常驻底部，不可关
         new("builtin.status", ReservedSlots.Bottom, Key: null, BuiltInModuleKind.StatusCapsule),
 
-        // 右栏最后：默认折叠，放最后不影响首屏
-        new("builtin.rightbar", ReservedSlots.RightBar, Key: null,
-            BuiltInModuleKind.Placeholder,
-            "右栏", "文件 · 改动 · 计划 · 上下文"),
+        // 右栏**不注册内置占位**：它是可选面板，没有真实内容时应该保持折叠。
+        // 之前注册了占位框，导致"右栏永远有占位者→永远展开"，
+        // 空占位白占了 307px 宽度。右栏留给插件或 P7 的真实内容。
     ];
 
     /// <summary>
