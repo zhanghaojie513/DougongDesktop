@@ -37,7 +37,10 @@ public sealed class AppShell : UserControl
         slots.Changed += slotKey =>
         {
             if (_contentBySlot.TryGetValue(slotKey, out var content))
-                content.ContentTemplate = slots.Resolve(slotKey, content.Content as string);
+            {
+                var t = slots.Resolve(slotKey, content.Content as string);
+                content.ContentTemplate = t;
+            }
         };
     }
 

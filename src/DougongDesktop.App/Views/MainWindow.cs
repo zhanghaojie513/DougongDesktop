@@ -21,6 +21,8 @@ public sealed class MainWindow : Window
     private readonly AppShellViewModel _vm = new();
     private readonly EngineClient _engine = new(msg => Console.Error.WriteLine($"[ui] {msg}"));
     private IDisposable? _sidebarHandle;
+    private string? _selectedSessionId;
+    private IReadOnlyList<SessionSummary>? _currentSessions;
 
     public MainWindow()
     {
@@ -136,56 +138,61 @@ public sealed class MainWindow : Window
         }
     }
 
-    /// <summary>把真实会话列表填进侧边栏 slot（替换占位）。</summary>
-    private void UpdateSidebar(IReadOnlyList<SessionSummary> sessions)
+    /// <summary>把真实会话列表填进侧边栏 slot。</summary>
+    private void UpdateSidebar(IReadOnlyList<SessionSummary>? sessions, string? detail = null)
     {
-        if (_sidebarHandle is null) return;
+        _sidebarHandle?.Dispose();
 
-        _sidebarHandle.Dispose();
         _sidebarHandle = _slots.Register(ReservedSlots.Sidebar, new SlotOccupant(
-            "builtin.sidebar", 100, MakeTemplate(() => BuildSessionList(sessions)))
+            "builtin.sidebar", 100,
+            MakeTemplate(() => SidebarView.Build(sessions, detail, _selectedSessionId, OnSidebarSelect)))
         {
             Origin = SlotOccupantOrigin.BuiltIn,
         });
 
+        _currentSessions = sessions;
     }
 
-    private Control BuildSessionList(IReadOnlyList<SessionSummary> sessions)
+    /// <summary>侧边栏选中回调。</summary>
+    private void OnSidebarSelect(string key)
     {
-        var panel = new StackPanel { Spacing = 2, Margin = new Avalonia.Thickness(8) };
-
-        panel.Children.Add(new TextBlock
+        switch (key)
         {
-            Text = sessions.Count == 0 ? "还没有会话" : $"会话（{sessions.Count}）",
-            FontSize = 12,
-            Opacity = 0.6,
-            Margin = new Avalonia.Thickness(8, 8, 8, 6),
-        });
+            case SidebarView.SettingsKey:
+                _vm.ActivePanel = "settings";
+                break;
 
-        foreach (var s in sessions.Take(20))
+            case SidebarView.NewSessionKey:
+                // P4 接入新建会话；现在先记录，不做假动作
+                Console.Error.WriteLine("[ui] 新建会话（P4 接入）");
+                break;
+
+            case "__offline":
+            case "__empty":
+                break;   // 不可选中的提示行
+
+            default:
+                _selectedSessionId = key;
+                _vm.ActivePanel = ReservedSlots.Conversation;
+                _ = OpenSessionAsync(key);
+                break;
+        }
+    }
+
+    private async Task OpenSessionAsync(string sessionId)
+    {
+        try
         {
-            panel.Children.Add(new Border
+            await _engine.SendAsync(new OpenSessionCommand
             {
-                Padding = new Avalonia.Thickness(8, 6),
-                CornerRadius = new Avalonia.CornerRadius(6),
-                Child = new StackPanel
-                {
-                    Spacing = 2,
-                    Children =
-                    {
-                        new TextBlock { Text = s.Title, FontSize = 13 },
-                        new TextBlock
-                        {
-                            Text = $"{s.ItemCount} 条目 · {s.UpdatedAt:MM-dd HH:mm}",
-                            FontSize = 11,
-                            Opacity = 0.5,
-                        },
-                    },
-                },
+                RequestId = Guid.NewGuid().ToString("N"),
+                SessionId = sessionId,
             });
         }
-
-        return panel;
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 打开会话失败：{ex.Message}");
+        }
     }
 
     private static Control Placeholder(string title, string subtitle) => new Border

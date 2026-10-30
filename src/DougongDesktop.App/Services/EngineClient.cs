@@ -150,7 +150,12 @@ public sealed class EngineClient : IAsyncDisposable
 
                     if (evt.Sequence > 0) Interlocked.Exchange(ref _lastSequence, evt.Sequence);
 
-                    EventReceived?.Invoke(evt);
+                    // 必须回到 UI 线程：读循环跑在线程池上，而订阅者会碰控件。
+                    // 直接 Invoke 会抛 "The calling thread cannot access this object"，
+                    // 异常从读循环冒出来还会把整条连接判定为断开——实测踩过。
+                    Avalonia.Threading.Dispatcher.UIThread.Post(
+                        () => EventReceived?.Invoke(evt));
+
                     return Task.CompletedTask;
                 },
                 (line, ex) => _log($"[坏行] {ex.Message}：{(line.Length > 80 ? line[..80] : line)}"),
@@ -241,7 +246,15 @@ public sealed class EngineClient : IAsyncDisposable
     {
         if (State == state && detail is null) return;
         State = state;
-        StateChanged?.Invoke(state, detail);
+
+        // 同样要回 UI 线程：订阅者会更新控件
+        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            StateChanged?.Invoke(state, detail);
+            return;
+        }
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => StateChanged?.Invoke(state, detail));
     }
 
     public async ValueTask DisposeAsync()
