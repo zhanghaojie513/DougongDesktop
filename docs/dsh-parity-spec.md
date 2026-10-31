@@ -374,163 +374,19 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ---
 
-## 7. 实施计划（主清单）
+## 7. 实施计划
 
-> **这是唯一的进度来源。** 状态标记：
-> `✅` 已完成且有验证证据 · `🚧` 进行中 · `⬜` 未开始 · `⏳` 等外部条件 · `❌` 不做
+> **主清单已拆出为独立文件：[dsh-parity-progress.md](dsh-parity-progress.md)**
 >
-> 每项都写明**实现方式**（用哪个组件/文件）和**验证方式**（怎么证明做对了）。
-> 证据以运行时 dump 或检查项为准，不以"看起来对"为准。
-
-### 7.1 P8a 布局骨架
-
-| # | 项 | 状态 | 实现方式 | 验证 |
-|---|---|---|---|---|
-| A1 | 三栏像素求解器 | ✅ | `Ui.Core/Columns.cs`：常量逐条对应 dsh `columns.ts`；`Compute()` 实现"右栏先缩→整条消失→中栏才降" | `cols-*` 5 条检查；dump 实测 `280/424/576` |
-| A2 | 中栏 400 保护 | ✅ | `Columns.CenterMin = 400`，`Compute()` 里 `available = viewport - s - CenterMin` | `cols-rightbar-yields-first` |
-| A3 | 右栏 45% 首开 | ✅ | `Columns.RightbarDefault(viewport)`；`AppShell` 首次探测占位者时赋值 | `cols-rightbar-default-45pct`；dump 实测 576/1280 |
-| A4 | 响应式 1024 自动收起 | ✅ | `AppShell.ApplyColumns()` 的 `narrow` 判断 | `cols-responsive-breakpoints`：1023→56 轨道，1025→280 |
-| A5 | 响应式 768 抽屉 | ✅ | `AppShell.ApplyColumns()` 的 `drawer` 判断，列宽传 0 | `cols-responsive-breakpoints`：767→0 不占列宽 |
-| A6 | 底部行横跨三列、空不占位 | ✅ | `AppShell.Build()`：`bottom` 作为 `stack` 第二行；`SyncBottomVisibility()` | dump `Bottom(list) 1280x40` |
-| A7 | 状态条移到侧栏底部 | ✅ | `AppShell.Build()`：`_sidebarHost` 为两行 Grid，状态条在第 1 行 | dump `EngineStatusBar 260x14` |
-| A8 | 毛玻璃 | ✅ | `TransparencyLevelHint = [AcrylicBlur, Blur, None]`；**实测实际生效 `AcrylicBlur`** | dump 读 `ActualTransparencyLevel` = AcrylicBlur。**但侧栏仍用不透明填充——这是对的**，见下 |
-| A9 | 侧边栏 280 / 52 品牌行 / 36 会话行 | ⬜ | 需设 `Sidebar.OpenWidth = 280`（**当前未设**，用的是列宽）；行高需覆盖 Arc Section 模板 | 待做 |
-| A10 | 侧边栏收起 56px 轨道 | ⏳ | **Arc 写死 64px**，见 §9.1。接受 8px 差异 | — |
-| A11 | 108 个 `--dsw-alias-*` 映射 | ✅ | `scripts/sync-dsh-tokens.py` 生成 `Theme/DshTokens.g.cs`（light/dark 各 108）；`DshTheme` 提供按主题取色 | `dsh-tokens-complete`（216 常量）、`dsh-tokens-themes-differ`（两套底色必须不同）；dump 底色 = White 与 dsh light 一致 |
-| A12 | `color-mix` 求值 | ✅ | `Ui.Core/ColorMath.cs`：`MixSrgb`（对齐 CSS）+ `MixHsl`（色相走最短弧） | `color-mix-matches-css`：黑白各半得中灰、alpha 随比例、HSL 不走反方向 |
-
-### 7.2 P8b 会话与输入
-
-| # | 项 | 状态 | 实现方式 | 对应 dsh |
-|---|---|---|---|---|
-| B1 | `/` 斜杠命令 | ⬜ | Arc `AiCommand` + `AiComposer.Commands` | `ui-commands` |
-| B2 | `@` 文件引用 | ⬜ | Arc `AiContextItem` + `AiComposer.ContextItems` | `ui-reference` |
-| B3 | 附件栏 | ⬜ | Arc `AiAttachment` + `AiComposer.Attachments` | `ui-attachment` |
-| B4 | 模型选择 | ⬜ | Arc `AiModel` / `AiModelProvider` + `AiComposer.Models` | `ui-model-selection` |
-| B5 | 消息反馈 Like/Dislike | ⬜ | Arc `AiAnswer` / `AiAnswerFeedback` | `ui-message-feedback` |
-| B6 | 引用来源 | ⬜ | Arc `AiSource` / `AiChatSource` | `ui-source` |
-
-### 7.3 P8c 设置域
-
-| # | 项 | 状态 | 实现方式 | 对应 dsh |
-|---|---|---|---|---|
-| C1 | 设置外壳 + 通用分区 | ⬜ | 主区 keyed slot 新增 `settings` 面板 | `ui-settings-general` |
-| C2 | 模型/provider 设置 | ⬜ | 表单 + `ProviderCatalog.AllPresets`（662 模型） | `ui-settings-models` |
-| C3 | 密钥管理 | ⬜ | **三档存储**：环境变量 / 凭据管理器 / 会话内存。绝不落配置文件 | `ui-settings-models` |
-| C4 | 插件清单页 | ⬜ | 按作用域分组，复用 `UiExtensionLoader.Loaded` | `ui-settings-plugin-inventory` |
-| C5 | 权限预设 | ⬜ | 默认权限行 + `/permission` 选择器 | `ui-permission-presets` |
-| C6 | Agent preset | ⬜ | 选择 + 说明 | `ui-agent-preset` |
-| C7 | Agent 循环设置（并行工具上限） | ⬜ | **非 SDK 缺口**：`LoopAgentRuntime` 已有，只缺配置暴露（台账 #14） | `ui-settings-agent-loop` |
-| C8 | 子智能体设置 | ⏳ | **等 SDK**：`dsh-capability-gap.md` P2 #15（台账 #13） | `ui-settings-subagent` |
-
-### 7.4 P8d 会话增强
-
-| # | 项 | 状态 | 实现方式 | 对应 dsh |
-|---|---|---|---|---|
-| D1 | 工作区浏览器 | ⬜ | 已有 `fs/list` IPC，补分组/扁平会话行 | `ui-workspace` |
-| D2 | `ask_user_question` 卡片 | ⬜ | 附着式卡片 + 计时等待 + 草稿 | `ui-user-questions` |
-| D3 | 交付物卡片（改动/交付文件） | ⬜ | 复用 `WorkspaceChangedEvent` | `ui-deliverables` |
-| D4 | Trajectory 视图 | ⬜ | 按轮次的事件记录表 + 时间概览 | `ui-trajectory` |
-| D5 | 后台任务列表 | ⬜ | 可展开流式输出面板 | `ui-jobs` |
-| D6 | 目标条带（goal） | ⬜ | composer 上下文条带 | `ui-goal` |
-| D7 | skill 引用与调用卡片 | ⬜ | `/` 触发 | `ui-skill` |
-
-### 7.5 P8e 插件体系
-
-| # | 项 | 状态 | 实现方式 | 对应 dsh |
-|---|---|---|---|---|
-| E1 | 插件管理页 | ⬜ | 组合包、行、配置 | `ui-plugin-manager` |
-| E2 | 插件市场 | ⬜ | 索引搜索 + 安装 | `ui-plugin-market` |
-| E3 | NuGet 安装器 | ⬜ | **SDK 明确不做**：flat container 拉 `.nupkg` → 解包 → `LoadFromDirectoryAsync` | — |
-| E4 | dockkit 分裂标签树 | ⬜ | **画布用 `WorkflowCanvas`**，分裂树自建 | `ui-dockkit` |
-| E5 | 右栏停靠面 + tab 类型注册表 | ⬜ | Arc `AiSidePanel` / `AiPanelColumn` | `ui-sidebar-right` |
-| E6 | 右侧文件树 | ✅ | `fs/list` + `RightDock` 文件 tab | `ui-sidebar-files` |
-| E7 | 文档预览 | ⬜ | Markdown/代码/图片/PDF/Office | `ui-sidebar-documentpreview` |
-| E8 | 右键菜单扩展点 | ⬜ | — | `ui-context-menu` |
-
-### 7.6 P8f 终端与浏览器
-
-| # | 项 | 状态 | 实现方式 | 验证 |
-|---|---|---|---|---|
-| F1 | 终端 VT 解析 | ✅ | `TKCode.Arc.Terminal` 的 `TerminalCore.Create`（实测见 §11.1） | 实测：Write → FormatPlainText 正确 |
-| F2 | 终端控件 | ✅ | `TerminalView`（`KeyPressed`/`TextEntered`/IME） | 已确认可用 |
-| F3 | PTY 接入 | ⬜ | Windows `ConPTY` / Unix `forkpty`，双向字节流 | 待做 |
-| F4 | 终端面板（dock tab） | ⬜ | `TerminalView` 放进右栏 | 待做 |
-| F5 | 内置浏览器 | ⬜ | WebView2（Windows）/ WebKitGTK（Linux） | 待做 |
-
-### 7.7 已完成的基础（P0–P7，不在 P8 范围）
-
-| 项 | 状态 | 证据 |
-|---|---|---|
-| IPC 契约 + 传输 | ✅ | 59 条检查；`Protocol.cs` 按域拆分 |
-| slot 框架（三 kind + priority） | ✅ | `slot-*` 12 条检查 |
-| UI 插件加载器 | ✅ | `ext-*` 6 条检查 |
-| 消息流（七种条目 + 虚拟化） | ✅ | 1000 条 → 7 容器 |
-| 工具卡片（Input/Output/两段耗时） | ✅ | `tool-*` 5 条检查 |
-| 审批闭环（四档 + 待决锁） | ✅ | `approval-*` 5 条检查 |
-| 推理流（独立条目） | ✅ | `reasoning-separate-from-text` |
-| 命令面板 Cmd+K | ✅ | dump `命令 4 条` |
-| 序号缺口重同步 | ✅ | `resync-*` 2 条检查 |
-| 诊断埋点 `uiPlugin` 三段 | ✅ | 实跑 register 80ms/build 8.6ms/render 570ms |
-
-### 7.8 进度汇总
-
-| 阶段 | 总项 | ✅ | 🚧 | ⬜ | ⏳ |
-|---|---|---|---|---|---|
-| P8a 布局骨架 | 12 | 9 | 1 | 1 | 1 |
-| P8b 会话与输入 | 6 | 0 | 0 | 6 | 0 |
-| P8c 设置域 | 8 | 0 | 0 | 7 | 1 |
-| P8d 会话增强 | 7 | 0 | 0 | 7 | 0 |
-| P8e 插件体系 | 8 | 1 | 0 | 7 | 0 |
-| P8f 终端与浏览器 | 5 | 2 | 0 | 3 | 0 |
-| **合计** | **46** | **12** | **1** | **31** | **2** |
-
-> 表格由脚本统计生成，不是手数——手数过一次，错了 3 处（P8a 的 ✅ 写成 7、
-> P8c 的分项相加不等于总数）。**核对方式**：按 `| A1 |` 这类行首模式逐行取状态列。
-
----
-
-### 7.9 原复刻顺序（已被 7.1–7.6 取代，留作依赖关系参考）
-
-标注了实际进度，避免读起来像全都做完了：
-
-1. **三栏几何**——换成像素求解器 ✅ 已做（A1）
-2. **配色 token**——建立 `--dsw-*` → Avalonia `Color` 的映射表 ⬜ **未做**（A11）
-3. **侧边栏**——按 280/56/品牌行 52/会话行 36 重排 ⬜ **未做**（A9）
-4. **底部行**——改成横跨三列的单一 slot ✅ 已做（A6）
-5. **右栏**——从 `Tabs` 改成贴边面板 + 轨道 ⬜ **未做**：`RightDock` 目前仍用 Arc `Tabs`
-6. **断点**——768 抽屉 / 1024 自动收起 ✅ 已做（A4/A5）
-
----
-
-### 7.10 A8 毛玻璃：能力可用，但不该用（与 dsh 一致）
-
-**实测结果**：`TransparencyLevelHint` 请求 `AcrylicBlur/Blur/None`，
-`ActualTransparencyLevel` 实际生效 **`AcrylicBlur`**——Windows 上毛玻璃是真的可用。
-
-**但侧栏仍然用不透明 `#F9FAFB`，这符合 dsh 的设计。**
-
-核实 dsh 的 `AppFrame.module.css`：半透明只挂在
-<code>:global([data-platform='darwin'])</code> 下——
-
-```css
-[data-platform='darwin'] .frame:not([data-sidebar-drawer]) .sidebarCol {
-  background:
-    linear-gradient(...),
-    color-mix(in srgb, color-mix(in srgb,
-      var(--dsw-specific-sidebar-fill) 97%, rgb(122 155 240)) 40%, transparent);
-  border-right: none;
-}
-```
-
-Windows 走 `.sidebarCol` 的默认规则：`background: var(--dsw-specific-sidebar-fill)`
-——不透明。而且 Windows 下还会保留 `border-right: 0.5px`，macOS 反而去掉边框。
-
-**所以"我们做不到毛玻璃"这个原判断错了两处**：
-1. 技术上 Avalonia 12 有 `AcrylicBlur`，实测生效
-2. 即便能做，**dsh 本身在 Windows 上也不用**——照抄才是对的
-
-当前实现（声明能力 + 侧栏不透明 + 保留分界线）与 dsh 的 Windows 行为一致。
+> 分工：那份只讲**状态**（可逐行勾选、可数）；这份讲**规格**（每个数字的出处、
+> 为什么这样做、做不到的怎么处置）。
+>
+> 拆开的理由：进度会被频繁改动，规格应该稳定。混在一起时，
+> 每次改状态都要动规格文件，而规格文件里那些"逐条核实过的数字"
+> 不该因为一次勾选而产生 diff 噪音。
+>
+> **下面 7.11–7.14 保留**，它们是规格性的记录（验收理念、复检发现、组件取舍），
+> 不是进度表。
 
 ---
 
