@@ -47,6 +47,7 @@ checks="$checks resync-command-roundtrips resync-request-carries-session diag-ui
 checks="$checks tool-durations-passed-through tool-null-duration-stays-null"
 checks="$checks reasoning-separate-from-text plan-replaces-wholesale plan-tool-comes-from-sdk"
 checks="$checks caps-table-beats-guess max-output-never-eats-context budget-check-comes-from-sdk"
+checks="$checks caps-no-pathological-out-ge-ctx"
 checks="$checks approval-duplicate-answer-denied approval-session-scope-is-narrow"
 checks="$checks approval-silence-is-denial approval-channel-failure-denies"
 checks="$checks approval-deny-and-stop-really-stops"

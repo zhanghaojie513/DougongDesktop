@@ -135,12 +135,28 @@ public sealed record EngineOptions
     /// 现在没有存在的理由——留着它只是多一处需要维护的规则。
     /// </para>
     /// </remarks>
-    public static int ReadRequestReserve()
+    public static int ReadRequestReserve(int contextWindow = 0)
     {
         var raw = Environment.GetEnvironmentVariable("DOUGONG_MAX_OUTPUT");
-        return int.TryParse(raw, out var value) && value > 0
+        var reserve = int.TryParse(raw, out var value) && value > 0
             ? value
             : RequestOutputReserveTokens;
+
+        // 窗口未知（0）时不夹：那是"还没配"，不是"窗口很小"。
+        if (contextWindow <= 0) return reserve;
+
+        // **必须夹取**：能力表里有窗口极小的模型——
+        // openrouter/openai/gpt-3.5-turbo-0613 的上下文只有 4095，
+        // 比固定预留 4096 还小。选它会让 Validate() 抛
+        // "上下文窗口配置不可行"，应用起不来。
+        //
+        // 这是"不取能力表当预留"带来的副作用：躲开了 out == ctx 的
+        // 病态大值，却撞上了病态小窗口。两头都要处理。
+        //
+        // 夹到窗口的 1/4：留四分之三给输入与预留。更小只是输出短些，
+        // 不会出错；取到窗口本身就会挤掉输入。
+        var ceiling = Math.Max(1, contextWindow / 4);
+        return reserve > ceiling ? ceiling : reserve;
     }
 
     /// <summary>
@@ -214,7 +230,7 @@ public sealed record EngineOptions
             ContextWindowTokens = window,
             // 夹到不挤占上下文——上游数据里有 out == ctx 的条目，
             // 不夹会让 Validate 抛错、应用起不来
-            MaxOutputTokens = ReadRequestReserve(),
+            MaxOutputTokens = ReadRequestReserve(window),
             Workspace = Environment.GetEnvironmentVariable("DOUGONG_WORKSPACE") ?? Environment.CurrentDirectory,
             SessionDirectory = Environment.GetEnvironmentVariable("DOUGONG_SESSION_DIR")
                 ?? Path.Combine(

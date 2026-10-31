@@ -42,6 +42,7 @@ internal static class ToolChecks
         failures += Case("caps-table-beats-guess", slug => CapsBeatsGuess(breakMode == slug));
         failures += Case("max-output-never-eats-context", slug => MaxOutputNeverEatsContext(breakMode == slug));
         failures += Case("budget-check-comes-from-sdk", slug => BudgetCheckFromSdk(breakMode == slug));
+        failures += Case("caps-no-pathological-out-ge-ctx", slug => NoPathologicalData(breakMode == slug));
 
         return failures;
     }
@@ -427,6 +428,74 @@ internal static class ToolChecks
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 能力表里的病态数据不会传染到我们的预算校验。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条之前是一个真实的启动故障</b>：<c>qwen/kimi-k3</c> 报
+    /// <c>out=ctx=1048576</c>、<c>xai/grok-4.5</c> 同样。那时如果我们
+    /// 拿能力表的 <c>MaxOutputTokens</c> 当请求预留，<c>Validate()</c> 会因
+    /// <c>ctx - out - 512 &lt;= 0</c> 抛异常，<b>应用起不来</b>——
+    /// 而用户看到的报错是"上下文窗口配置不可行"，问题根本不在他那里。
+    /// <para>
+    /// <b>修法与数据无关</b>：请求预留改成固定 4096
+    /// （<c>RequestOutputReserveTokens</c>），不再取能力表的 out。
+    /// 于是病态数据再离谱也不影响预算——这与 SDK 是否修了数据是<strong>两件独立的事</strong>。
+    /// </para>
+    /// <para>
+    /// <b>这条检查断言的是"不受影响"，不是"数据干净"</b>。
+    /// 实测 0.1.13 的能力表里仍有 52 条 <c>out == ctx</c>（deepinfra、openrouter
+    /// 的聚合条目）。要求数据干净是不现实的——上游怎么报我们管不了，
+    /// 能管的是"不拿它当预算输入"。
+    /// </para>
+    /// </remarks>
+    private static string? NoPathologicalData(bool inject)
+    {
+        // 逐个 model 走一遍真实路径：能力表 → ReadContextWindow / ReadRequestReserve
+        // → Validate。任何一条会抛异常都算失败。
+        var broken = new List<string>();
+        var checkedCount = 0;
+
+        foreach (var (provider, preset) in Dougong.Ai.ProviderCatalog.AllPresets)
+        {
+            foreach (var model in preset.Models)
+            {
+                checkedCount++;
+
+                var options = new EngineOptions
+                {
+                    BaseUrl = "https://example.invalid",
+                    Model = model.Id,
+                    ContextWindowTokens = EngineOptions.ReadContextWindow(model.Id),
+
+                    // 预留必须按窗口夹取——检查要覆盖真实路径，
+                    // 传 0 会绕过夹取、进而漏掉"小窗口模型"这一整类问题。
+                    MaxOutputTokens = EngineOptions.ReadRequestReserve(
+                        EngineOptions.ReadContextWindow(model.Id)),
+                };
+
+                try
+                {
+                    // 这里**显式用我们自己的取值**，不用能力表的 MaxOutputTokens——
+                    // 那正是修法。若有人把它改回去取能力表的值，这条会红。
+                    options.Validate();
+                }
+                catch (InvalidOperationException ex)
+                {
+                    broken.Add($"{provider}/{model.Id}（ctx={options.ContextWindowTokens}, " +
+                               $"reserve={options.MaxOutputTokens}）：{ex.Message.Split(Environment.NewLine)[0]}");
+                }
+            }
+        }
+
+        if (inject) return "反证注入：病态数据未被隔离";
+
+        if (broken.Count == 0) return null;
+
+        return $"能力表有 {checkedCount} 个模型，其中 {broken.Count} 个会让 Validate() 抛异常：" +
+               string.Join("；", broken.Take(3));
     }
 
     private static int Case(string slug, Func<string, string?> body)
