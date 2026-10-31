@@ -628,6 +628,48 @@ Windows 走 `.sidebarCol` 的默认规则：`background: var(--dsw-specific-side
 
 ---
 
+## 7.13 Arc 新增的 41 个 AI 组件：哪些用、哪些不用
+
+`0.3.2-preview.2` 的 Special 包里有 **132 个 `Ai*` 类型**（含新增的 41 个组件）。
+我们已经在这个版本上，**不需要升级**。逐个判断：
+
+### 值得用的三个
+
+| 组件 | 对应我们哪个需求 | 决策 |
+|---|---|---|
+| `AiCommandPalette` | 现有 `CommandPaletteDialog` 的增强版（Tab 切 AI 提问模式） | **待评估**：是产品决策（要不要在 Cmd+K 里直接问 AI），不是技术升级 |
+| `AiWorkflow` | dsh 的 `ui-workflow-run` | **用**：成品卡片（32px 行 + 1px 轨道 + 分支 tab），比用 `WorkflowCanvas` 自己拼强 |
+| `AiStreamText` | 消息流式渲染 | **待评估**：我们是 `MarkdownStream`，它是逐块淡入的纯文本。要不要换取决于是否保留 Markdown |
+
+### 明确不用：`AiMascot`
+
+**用户要求宠物形象自己设计，而 `AiMascot` 只能改颜色、换不了形体。**
+
+实测它的可配置项只有 `BodyColor` / `EyeColor` / `DotColor` / `ShowCompanion` / `ShowGround` / `Size` / `Tone` / `FollowPointer`。
+`AiMascotCanvas` 直接绘制 "soft pebble with pill eyes + companion dot" 那个固定形状——
+**想换成榫灵那只戴红檐斗拱帽的小匠人，办不到。**
+
+### 宠物：用已有素材自己实现
+
+素材位置：`dougong/artifacts/brand-character/sunling-pet-colored/`
+
+| 资源 | 内容 |
+|---|---|
+| `svg/sunling-{idle,thinking,working,success,sleeping,dragged}.svg` | **六种状态各一份 SVG**，不需要精灵图 |
+| `png/sunling-{...}.png` | 位图版本（1024 宽） |
+| `sunling-state-keyframes.json` | 状态 → 坐标映射（400×400 帧，2 行 3 列） |
+| `榫灵形象设定.png` / `角色设定.md` | 形象与性格设定 |
+
+**实现方式**：一个自建 `PetView` 控件
+- 按状态切 SVG（`Avalonia.Media.Imaging` + `SvgImage` 或预转 PNG）
+- 六状态映射：`idle`←就绪 / `thinking`←模型思考 / `working`←工具执行 / `success`←回合完成 / `sleeping`←空闲超时 / `dragged`←用户拖拽
+- 尊重 `prefers-reduced-motion`（素材说明里明确要求）
+- 透明 SVG 绘制，可作为后续桌面悬浮资源
+
+**归入 P8d（会话增强）**，不进 P8a/P8b。
+
+---
+
 ## 8. 复刻验收方式
 
 沿用既有判据——**控件树 dump 优于截图**：
