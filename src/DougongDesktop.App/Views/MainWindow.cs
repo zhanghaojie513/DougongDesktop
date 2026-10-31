@@ -48,7 +48,7 @@ public sealed class MainWindow : Window
 
     /// <summary>外壳实例。构造后不为 null。</summary>
     private AppShell Shell { get; }
-    private readonly EngineClient _engine = new(msg => Console.Error.WriteLine($"[ui] {msg}"));
+    private readonly EngineClient _engine = new(log: msg => Console.Error.WriteLine($"[ui] {msg}"));
     private readonly Dictionary<string, IDisposable> _handles = new(StringComparer.Ordinal);
     private string? _connectionDetail;
     private string? _selectedSessionId;

@@ -53,12 +53,16 @@ public sealed class AppShell : UserControl
     }
 
     /// <summary>界面偏好。构造时读一次，拖拽结束后整份写回。</summary>
-    private AppSettings _settings = AppSettings.Load();
+    /// <summary>界面偏好的存储后端。桌面用文件，web 端换实现即可。</summary>
+    private readonly ISettingsStore _store = new Services.FileSettingsStore();
+
+    private AppSettings _settings;
 
     public AppShell(SlotRegistry slots, AppShellViewModel vm)
     {
         _slots = slots;
         _vm = vm;
+        _settings = AppSettings.Load(_store);
 
         Content = Build();
         DataContext = vm;

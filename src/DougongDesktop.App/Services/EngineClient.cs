@@ -22,18 +22,25 @@ namespace DougongDesktop.App.Services;
 /// </remarks>
 public sealed class EngineClient : IAsyncDisposable
 {
-    private readonly string _endpointFile;
+    private readonly IEngineLocator _locator;
     private readonly Action<string> _log;
     private IpcConnection? _connection;
     private CancellationTokenSource? _readLoop;
     private long _lastSequence;
 
-    public EngineClient(Action<string>? log = null)
+    /// <param name="locator">
+    /// 端点发现方式。null 时用桌面实现（读 <c>endpoint.json</c>、必要时拉起 AgentHost）。
+    /// </param>
+    /// <param name="log">诊断输出。</param>
+    /// <remarks>
+    /// <b>为什么端点发现要注入</b>：它做的是"读本地文件 + 启动子进程"，
+    /// 两件都是桌面才成立的事。web 端两者都做不了（没有文件系统、浏览器
+    /// 启动不了进程），届时换一个实现即可——<see cref="EngineClient"/>
+    /// 本身只负责"连上之后怎么收发"，那部分与平台无关。
+    /// </remarks>
+    public EngineClient(IEngineLocator? locator = null, Action<string>? log = null)
     {
-        _endpointFile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".dougong-desktop", "endpoint.json");
-
+        _locator = locator ?? new FileEngineLocator(log);
         _log = log ?? (_ => { });
     }
 
@@ -61,12 +68,20 @@ public sealed class EngineClient : IAsyncDisposable
         if (await TryConnectEndpointAsync(ct).ConfigureAwait(false))
             return true;
 
-        // ② 连不上：可能没启动，也可能端点文件残留。拉起一个再试。
-        _log("端点不可用，尝试启动 AgentHost…");
+        // ② 连不上：可能没启动，也可能端点文件残留。设法拉起一个再试。
+        //    "怎么拉起"由 locator 决定——桌面起子进程，web 起不了。
+        _log("端点不可用，尝试启动引擎…");
         SetState(EngineConnectionState.Starting, null);
 
-        if (!await StartAgentHostAsync(executablePath, ct).ConfigureAwait(false))
+        if (_locator is FileEngineLocator fileLocator && executablePath is { Length: > 0 })
+            fileLocator.ExecutablePath = executablePath;
+
+        if (!await _locator.TryStartEngineAsync(ct).ConfigureAwait(false))
+        {
+            SetState(EngineConnectionState.Failed,
+                "引擎未运行，且当前环境无法自动启动它。请先启动 AgentHost。");
             return false;
+        }
 
         // ③ 等它就绪（最多 15 秒）
         for (var i = 0; i < 30; i++)
@@ -150,28 +165,33 @@ public sealed class EngineClient : IAsyncDisposable
         await connection.SendAsync(command, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 用 locator 找到端点并连上。
+    /// </summary>
+    /// <remarks>
+    /// <b>这里只剩"连"这件事</b>：读文件、找可执行文件、启动进程都已搬到
+    /// <see cref="IEngineLocator"/>。剩下的是纯网络操作，与平台无关。
+    /// <para>
+    /// <b>协议版本不匹配时明确拒绝，不"尽量解析"</b>：尽量解析会把
+    /// "字段缺失"变成"字段是默认值"，而那种错误只在某个特定操作上才暴露。
+    /// </para>
+    /// </remarks>
     private async Task<bool> TryConnectEndpointAsync(CancellationToken ct)
     {
         try
         {
-            if (!File.Exists(_endpointFile)) return false;
+            var endpoint = await _locator.DiscoverAsync(ct).ConfigureAwait(false);
+            if (endpoint is null) return false;
 
-            var json = await File.ReadAllTextAsync(_endpointFile, ct).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-
-            if (!doc.RootElement.TryGetProperty("port", out var portElement)) return false;
-            var port = portElement.GetInt32();
-
-            // 协议版本不匹配时明确拒绝，不"尽量解析"
-            if (doc.RootElement.TryGetProperty("protocolVersion", out var version)
-                && version.GetInt32() != HostProtocolContract.Version)
+            if (endpoint.ProtocolVersion is { } version && version != HostProtocolContract.Version)
             {
                 SetState(EngineConnectionState.Failed,
-                    $"引擎协议版本 {version.GetInt32()} 与客户端 {HostProtocolContract.Version} 不一致。");
+                    $"引擎协议版本 {version} 与客户端 {HostProtocolContract.Version} 不一致。");
                 return false;
             }
 
-            var connection = await IpcConnection.ConnectAsync($"127.0.0.1:{port}", ct)
+            var connection = await IpcConnection
+                .ConnectAsync($"{endpoint.Host}:{endpoint.Port}", ct)
                 .ConfigureAwait(false);
 
             _connection = connection;
@@ -180,7 +200,7 @@ public sealed class EngineClient : IAsyncDisposable
             _ = Task.Run(() => ReadLoopAsync(connection, _readLoop.Token), CancellationToken.None);
 
             SetState(EngineConnectionState.Connected, null);
-            _log($"已连接 127.0.0.1:{port}");
+            _log($"已连接 {endpoint.Host}:{endpoint.Port}");
             return true;
         }
         catch (Exception ex) when (ex is IOException or JsonException or SocketException)

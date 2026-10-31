@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DougongDesktop.App.Services;
+namespace DougongDesktop.Ui.Core;
 
 /// <summary>
 /// 界面偏好的本地持久化（`~/.dougong-desktop/ui.json`）。
@@ -25,7 +25,14 @@ public sealed class AppSettings
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".dougong-desktop");
 
-    /// <summary>界面偏好文件路径。</summary>
+    /// <summary>存储里的名字（不含目录）。</summary>
+    /// <remarks>
+    /// 与 <see cref="FilePath"/> 分开：实现层只需要"名字"，
+    /// 完整路径是桌面实现的事（web 端没有路径这个概念）。
+    /// </remarks>
+    public const string FileName = "ui.json";
+
+    /// <summary>界面偏好文件路径（桌面实现用）。</summary>
     /// <remarks>
     /// 名字带 <c>ui</c> 前缀是刻意的：将来如果加了 provider 配置，
     /// 它会写进 <c>providers.json</c>，两者不该混在一个文件里——
@@ -50,14 +57,22 @@ public sealed class AppSettings
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip,
     };
 
-    /// <summary>读取。文件不存在或读坏了都返回空设置。</summary>
-    public static AppSettings Load()
+    /// <summary>读取。不存在或读坏了都返回空设置。</summary>
+    /// <param name="store">存储实现。null 时用桌面实现（文件）。</param>
+    /// <remarks>
+    /// <b>读失败一律回默认值</b>：设置坏了应该用默认布局起来，而不是开不了。
+    /// 这条与"加载失败不能让 App 起不来"是同一条原则。
+    /// </remarks>
+    /// <param name="store">存储实现。必须显式传入——本类不该知道"默认存到哪",
+    /// 那是平台的事。</param>
+    public static AppSettings Load(ISettingsStore store)
     {
+        ArgumentNullException.ThrowIfNull(store);
+
         try
         {
-            if (!File.Exists(FilePath)) return new AppSettings();
+            if (store.Read(FileName) is not { } json) return new AppSettings();
 
-            var json = File.ReadAllText(FilePath);
             var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)
                          ?? new AppSettings();
 
@@ -77,21 +92,10 @@ public sealed class AppSettings
     }
 
     /// <summary>写入。失败静默——存不下布局不该打断用户。</summary>
-    public void Save()
+    /// <param name="store">存储实现。null 时用桌面实现（文件）。</param>
+    public void Save(ISettingsStore store)
     {
-        try
-        {
-            System.IO.Directory.CreateDirectory(DirectoryPath);
-
-            // 先写临时文件再替换：直接覆盖时进程被杀会留下半个 JSON，
-            // 下次启动读它就变成"布局全丢"。
-            var temp = FilePath + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(this, JsonOptions));
-            File.Move(temp, FilePath, overwrite: true);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[settings] 保存失败：{ex.Message}");
-        }
+        ArgumentNullException.ThrowIfNull(store);
+        store.Write(FileName, JsonSerializer.Serialize(this, JsonOptions));
     }
 }

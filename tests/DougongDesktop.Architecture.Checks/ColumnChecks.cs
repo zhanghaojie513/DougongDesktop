@@ -29,6 +29,7 @@ internal static class ColumnChecks
         failures += Case("dsh-tokens-complete", slug => TokensComplete(breakMode == slug));
         failures += Case("dsh-tokens-themes-differ", slug => ThemesDiffer(breakMode == slug));
         failures += Case("titlebar-tokens-match-dsh", slug => TitlebarTokens(breakMode == slug));
+        failures += Case("settings-store-is-swappable", slug => StoreSwappable(breakMode == slug));
 
         return failures;
     }
@@ -308,6 +309,54 @@ internal static class ColumnChecks
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 设置存储可替换：换成内存实现后行为一致。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条验的是"抽象真的有效"，不是"抽象存在"</b>。写了接口但
+    /// 内部仍直连 <c>File.*</c>，接口就是装饰。做法是：用内存实现跑一遍
+    /// 存-读，看值是否原样回来——全程不碰文件系统。
+    /// <para>
+    /// 这条也是 web 端的前置证明：能换成内存实现，就能换成 localStorage。
+    /// </para>
+    /// </remarks>
+    private static string? StoreSwappable(bool inject)
+    {
+        var store = new InMemoryStore();
+
+        var original = new DougongDesktop.Ui.Core.AppSettings
+        {
+            PaneSizes = [280, 1024, 0],
+        };
+
+        original.Save(store);
+
+        if (inject) return "反证注入：存储替换后读不回来";
+
+        var loaded = DougongDesktop.Ui.Core.AppSettings.Load(store);
+
+        if (loaded.PaneSizes is not { Length: 3 } sizes)
+            return "换存储后应能读回三栏尺寸，实际 null 或长度不对";
+
+        return Math.Abs(sizes[0] - 280) < 0.01 && Math.Abs(sizes[1] - 1024) < 0.01
+            ? null
+            : $"读回值不对：{string.Join(",", sizes)}";
+    }
+
+    /// <summary>内存实现：证明 <c>ISettingsStore</c> 不依赖文件系统。</summary>
+    private sealed class InMemoryStore : DougongDesktop.Ui.Core.ISettingsStore
+    {
+        private readonly Dictionary<string, string> _data = new(StringComparer.Ordinal);
+
+        public string? Read(string name) => _data.GetValueOrDefault(name);
+
+        public bool Write(string name, string content)
+        {
+            _data[name] = content;
+            return true;
+        }
     }
 
     private static int Case(string slug, Func<string, string?> body)
