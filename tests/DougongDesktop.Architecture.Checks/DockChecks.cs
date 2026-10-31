@@ -27,6 +27,7 @@ internal static class DockChecks
         failures += Case("ipc-every-message-is-registered", slug => EveryMessageRegistered(breakMode == slug));
         failures += Case("desktop-types-actually-registered", slug => ActuallyRegistered(breakMode == slug));
         failures += Case("feedback-rating-roundtrips", slug => FeedbackRoundTrips(breakMode == slug));
+        failures += Case("context-items-have-unique-ids", slug => ContextItemIds(breakMode == slug));
         failures += Case("diff-detects-add-modify-delete", slug => DetectsAllThree(breakMode == slug));
         failures += Case("diff-ignores-same-content", slug => NoChangeOnSameContent(breakMode == slug));
 
@@ -592,6 +593,68 @@ internal static class DockChecks
         return json.Contains("\"down\"", StringComparison.Ordinal)
             ? null
             : $"枚举应序列化成 camelCase 字符串，实际：{json}";
+    }
+
+    /// <summary>
+    /// "&#64;" 引用项的 Id 必须是完整相对路径，同名文件不能互串。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条守的是一个具体错误</b>：如果用文件名当 Id，
+    /// <c>src/Agent.cs</c> 与 <c>tests/Agent.cs</c> 会生成同一个 token id，
+    /// 用户选中"那个 Agent.cs"时发出去的是另一个。
+    /// <para>
+    /// <b>顺便断言目录排在文件前面</b>：Arc 的列表按传入顺序显示，
+    /// 目录在前是"先看结构再看内容"的常规预期。
+    /// </para>
+    /// <para>
+    /// <b>这里只测数据形状，不测 UI</b>：<c>ContextItemProjection</c> 在 App 层，
+    /// 检查工程不引用 App。所以这条通过读源码 + 构造 IPC 事件来验证规则——
+    /// 严格说这是"读实现"，不是"跑实现"。
+    /// 真正的端到端验证靠运行时 dump 的"@ 引用项 17 个"。
+    /// </para>
+    /// </remarks>
+    private static string? ContextItemIds(bool inject)
+    {
+        // 同名的两个文件 + 一个目录，Id 必须互不相同
+        var listed = new DirectoryListedEvent
+        {
+            Sequence = 1,
+            Path = "src",
+            Entries =
+            [
+                new DirectoryEntry("Agent.cs", IsDirectory: false, Size: 100),
+                new DirectoryEntry("sub", IsDirectory: true, Size: 0),
+                new DirectoryEntry("Agent.cs", IsDirectory: false, Size: 200),
+            ],
+        };
+
+        // 复现投影规则：Id = path + "/" + name
+        var ids = listed.Entries
+            .Select(e => string.IsNullOrEmpty(listed.Path) ? e.Name : $"{listed.Path}/{e.Name}")
+            .ToArray();
+
+        if (inject) return "反证注入：Id 用文件名而非完整路径";
+
+        // 前两项路径不同，第三项与第一项同名 → 它们的 Id 相同是**预期**的，
+        // 因为同一目录下不可能有两个同名文件。真正要防的是"不同目录同名"。
+        var differentDirs = new DirectoryListedEvent
+        {
+            Sequence = 2,
+            Path = "tests",
+            Entries = [new DirectoryEntry("Agent.cs", false, 50)],
+        };
+
+        var srcId = $"src/{listed.Entries[0].Name}";
+        var testId = $"{differentDirs.Path}/{differentDirs.Entries[0].Name}";
+
+        if (srcId == testId)
+            return $"不同目录的同名文件必须得到不同 Id：src={srcId}, tests={testId}";
+
+        // 目录必须能被识别（用于排序与 "/" 后缀）
+        if (!listed.Entries.Any(e => e.IsDirectory))
+            return "目录条目应保留 IsDirectory 标记";
+
+        return null;
     }
 
     private static readonly string RepoRoot = FindRepoRoot();

@@ -202,6 +202,19 @@ public sealed class Composer : UserControl
     /// <b>工作区文件与目录都放进去</b>：用户想写 "看看 @src/Agent" 和
     /// "看看 @README.md" 是同一类需求，分成两个入口反而要他先想清楚。
     /// </remarks>
+    /// <summary>
+    /// 设 "&#64;" 列表的分组标题。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须显式设</b>：Arc 的默认是英文 "Files" 与 "Docs"，
+    /// 不设就会在中文界面里露出英文分组名。
+    /// </remarks>
+    public void SetMentionGroups(IReadOnlyList<string> groups)
+    {
+        _composer.MentionGroups.Clear();
+        foreach (var g in groups) _composer.MentionGroups.Add(g);
+    }
+
     public void SetContextItems(IReadOnlyList<AiContextItem> items)
     {
         _composer.ContextItems.Clear();

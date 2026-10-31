@@ -1,6 +1,6 @@
 {
   "size": [
-    335,
+    328,
     72
   ],
   "wordmark": "custom paths, not a font outline",
@@ -11,14 +11,20 @@
     "g",
     "n"
   ],
-  "stroke": 5.5,
+  "stroke": 6,
   "x_height": 30,
+  "round_overshoot": 0.4,
   "spacing": [
-    5.0,
-    5.6,
-    6.2,
-    5.0,
-    5.4,
-    6.0
+    3.9,
+    4.5,
+    4.0,
+    3.9,
+    4.5,
+    4.2
+  ],
+  "symbol_visible": 34,
+  "badge": [
+    44,
+    22
   ]
 }

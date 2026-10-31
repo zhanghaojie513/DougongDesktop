@@ -388,6 +388,15 @@ public sealed class MainWindow : Window
                     $"[ui] 目录 '{listed.Path}'：{listed.Entries.Count} 项" +
                     (listed.Error is { Length: > 0 } ? $"（错误：{listed.Error}）" : ""));
                 _rightDock.ApplyDirectory(listed);
+
+                // 同一份目录数据也给 composer 的 "@" 引用用——
+                // 不新开请求：右栏文件树与 "@" 列表要的是同一个东西，
+                // 两者分别请求会让它们在不同时刻显示不同内容。
+                _conversation.Composer.SetContextItems(
+                    ContextItemProjection.FromDirectory(listed));
+
+                // 分组标题也要设，否则 Arc 的默认是英文 "Files"/"Docs"
+                _conversation.Composer.SetMentionGroups(ContextItemProjection.Groups);
                 break;
 
             case TurnStartedEvent:
@@ -1028,6 +1037,11 @@ public sealed class MainWindow : Window
             .OfType<Border>()
             .Count(b => b.Child is StackPanel sp && sp.Children.OfType<Markdown>().Any());
         var bars = _conversation.GetVisualDescendants().OfType<FeedbackBar>().Count();
+        // "@" 引用项：要确认它们真的装进去了（SetContextItems 之前没有调用者）
+        var mentions = _conversation.Composer.Inner.ContextItems.Count;
+        Console.Error.WriteLine(
+            $"[shell] @ 引用项 {mentions} 个（期望 > 0，来自 fs/list）");
+
         Console.Error.WriteLine(
             $"[shell] 反馈条 {bars} 个 / 可见 assistant 容器 {visibleAssistant} 个" +
             (bars <= visibleAssistant ? "（不多于可见容器，符合预期）" : "（**多于可见容器，可疑**）"));
