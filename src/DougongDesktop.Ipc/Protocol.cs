@@ -61,6 +61,8 @@ public static class DesktopProtocol
             new JsonDerivedType(typeof(ListDirectoryCommand), "fs/list"));
         HostProtocolContract.RegisterDerivedType<ClientCommand>(
             new JsonDerivedType(typeof(ListModelsCommand), "models/list"));
+        HostProtocolContract.RegisterDerivedType<ClientCommand>(
+            new JsonDerivedType(typeof(SubmitFeedbackCommand), "feedback/submit"));
 
         HostProtocolContract.RegisterDerivedType<ServerEvent>(
             new JsonDerivedType(typeof(DirectoryListedEvent), "fs/listed"));
@@ -175,6 +177,51 @@ public sealed record WorkspaceChangedEvent : ServerEvent
 
     /// <summary>是否有改动。由 <see cref="Diff"/> 是否为空推得，单独给出便于界面判断。</summary>
     public required bool HasChanges { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 消息反馈
+// ─────────────────────────────────────────────────────────────
+
+/// <summary>一次评分的取值。</summary>
+/// <remarks>
+/// <b>三态而不是布尔</b>：撤回评分（<see cref="None"/>）是真会发生的动作——
+/// 用户点赞后改主意。两态表达不了"从有评价回到没评价"。
+/// </remarks>
+public enum FeedbackRating
+{
+    /// <summary>没有评价（或撤回）。</summary>
+    None,
+
+    /// <summary>正面。</summary>
+    Up,
+
+    /// <summary>负面。</summary>
+    Down,
+}
+
+/// <summary>提交一条消息反馈。</summary>
+/// <remarks>
+/// <b>为什么不发给引擎而是只落本地</b>：反馈是产品改进数据，不是 agent 运行的一部分。
+/// 引擎（AgentHost）不关心用户是否满意。所以这条目前只写本地诊断日志，
+/// 将来接产品分析时替换接收端即可。
+/// <para>
+/// <b>但协议放在 Ipc 而不是直接调文件</b>：将来要发给远端时，
+/// 改的是宿主的处理，而不是 UI。
+/// </para>
+/// </remarks>
+/// <param name="ItemId">被评价的条目 Id（assistant 消息或工具卡片）。</param>
+/// <param name="Rating">评分。</param>
+/// <param name="Reason">负面评价时的理由；正面可以为 null。</param>
+/// <param name="SessionId">所属会话；null 表示当前会话。</param>
+// 判别器在 DesktopPolymorphism 登记（特性必须挂基类）。
+// [JsonDerivedType(typeof(SubmitFeedbackCommand), "feedback/submit")]
+public sealed record SubmitFeedbackCommand : ClientCommand
+{
+    public required string ItemId { get; init; }
+    public required FeedbackRating Rating { get; init; }
+    public string? Reason { get; init; }
+    public string? SessionId { get; init; }
 }
 
 // ─────────────────────────────────────────────────────────────

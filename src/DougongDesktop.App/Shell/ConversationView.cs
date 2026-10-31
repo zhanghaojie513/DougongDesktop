@@ -13,6 +13,7 @@ using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 using IpcToolCallItem = Dougong.HostProtocol.ToolCallItem;
 using IpcToolCallStatus = Dougong.HostProtocol.ToolCallStatus;
+using IpcFeedbackRating = DougongDesktop.Ipc.FeedbackRating;
 using ArcToolCallItem = TKCode.Arc.ToolCallItem;
 using ArcToolCallStatus = TKCode.Arc.ToolCallStatus;
 
@@ -41,6 +42,13 @@ public sealed class ConversationView : UserControl
 
     /// <summary>当前条目数。</summary>
     public int Count => _items.Count;
+
+    /// <summary>条目列表的只读视图，供诊断统计"某种条目有几个"。</summary>
+    /// <remarks>
+    /// <b>暴露只读而不是让诊断去翻控件树</b>：控件树里只有可见的那几个
+    /// （虚拟化），统计"已完成消息应有多少反馈条"必须看数据而非控件。
+    /// </remarks>
+    public IReadOnlyList<ConversationItem> Items => _items;
 
     /// <summary>
     /// 已实例化的条目容器数。
@@ -563,7 +571,7 @@ public sealed class ConversationView : UserControl
         return button;
     }
 
-    private static Control BuildItem(ConversationItem item) => item switch
+    private Control BuildItem(ConversationItem item) => item switch
     {
         UserMessageItem user => BuildUserMessage(user),
         AssistantMessageItem assistant => BuildAssistantMessage(assistant),
@@ -591,7 +599,7 @@ public sealed class ConversationView : UserControl
         },
     };
 
-    private static Control BuildAssistantMessage(AssistantMessageItem item)
+    private Control BuildAssistantMessage(AssistantMessageItem item)
     {
         var markdown = new Markdown();
 
@@ -609,13 +617,36 @@ public sealed class ConversationView : UserControl
             markdown.Text = item.Text;
         }
 
+        // 反馈条只挂在**已完成**的消息上：流式中的正文还在变，
+        // 那时评价没有意义。这也是 dsh 的做法（动作行在轮次末尾）。
+        if (item.IsStreaming)
+        {
+            return new Border
+            {
+                Margin = new Thickness(12, 6, 60, 6),
+                Padding = new Thickness(2, 4),
+                Child = markdown,
+            };
+        }
+
+        var feedback = new FeedbackBar(item.Id);
+        feedback.Submitted += (id, rating, reason) =>
+            FeedbackRequested?.Invoke(id, rating, reason);
+
         return new Border
         {
             Margin = new Thickness(12, 6, 60, 6),
             Padding = new Thickness(2, 4),
-            Child = markdown,
+            Child = new StackPanel { Children = { markdown, feedback } },
         };
     }
+
+    /// <summary>用户对某条消息做了评价。</summary>
+    /// <remarks>
+    /// <b>转发给宿主而不是自己发 IPC</b>：<see cref="ConversationView"/> 不认识
+    /// 引擎（这是分层的既定点）。主窗口把它接到 <c>SubmitFeedbackCommand</c>。
+    /// </remarks>
+    public event Action<string, IpcFeedbackRating, string?>? FeedbackRequested;
 
     /// <summary>工具输出超过这么多行就折叠。</summary>
     /// <remarks>

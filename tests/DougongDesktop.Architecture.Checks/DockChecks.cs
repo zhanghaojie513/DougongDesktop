@@ -26,6 +26,7 @@ internal static class DockChecks
         failures += Case("wire-cross-version-compat", slug => CrossVersionCompat(breakMode == slug));
         failures += Case("ipc-every-message-is-registered", slug => EveryMessageRegistered(breakMode == slug));
         failures += Case("desktop-types-actually-registered", slug => ActuallyRegistered(breakMode == slug));
+        failures += Case("feedback-rating-roundtrips", slug => FeedbackRoundTrips(breakMode == slug));
         failures += Case("diff-detects-add-modify-delete", slug => DetectsAllThree(breakMode == slug));
         failures += Case("diff-ignores-same-content", slug => NoChangeOnSameContent(breakMode == slug));
 
@@ -349,38 +350,25 @@ internal static class DockChecks
     /// 加了新消息忘了登记 → 立刻红。
     /// </para>
     /// </remarks>
-    private static string? EveryMessageRegistered(bool inject)
-    {
-        var unregistered = new List<string>();
-
-        void Check(Type root)
-        {
-            var declared = root
-                .GetCustomAttributes(typeof(System.Text.Json.Serialization.JsonDerivedTypeAttribute), inherit: false)
-                .Cast<System.Text.Json.Serialization.JsonDerivedTypeAttribute>()
-                .Select(a => a.DerivedType)
-                .ToHashSet();
-
-            var actual = root.Assembly.GetTypes()
-                .Where(t => !t.IsAbstract && t.IsSealed && root.IsAssignableFrom(t))
-                .ToArray();
-
-            foreach (var t in actual)
-            {
-                if (inject) { unregistered.Add(t.Name); continue; }
-                if (!declared.Contains(t)) unregistered.Add(t.Name);
-            }
-        }
-
-        Check(typeof(ClientCommand));
-        Check(typeof(ServerEvent));
-        Check(typeof(ConversationItem));
-
-        if (unregistered.Count == 0) return null;
-
-        return $"以下类型没有登记判别器（序列化时无法还原）：{string.Join("、", unregistered)}";
-    }
-
+    /// <summary>
+    /// 每个桌面端消息类型都必须在 <c>RegisterMessages</c> 里登记。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条抓的是一次真实事故</b>：按域拆分 <c>Protocol.cs</c> 时漏了
+    /// <c>ConversationItem</c> 的派生类型登记，编译零错误——
+    /// 因为漏的是特性标注，不是代码。
+    /// <para>
+    /// <b>迁移到 <c>RegisterDerivedType</c> 后这条检查失效过一次</b>：
+    /// 判别器从"类型上的特性"改到"<c>RegisterMessages</c> 里的调用"，
+    /// 而旧实现查的是特性，查不到任何东西 → 永远通过。
+    /// 加了 <c>SubmitFeedbackCommand</c> 忘了登记，它没红；
+    /// 是 <c>feedback-rating-roundtrips</c> 那条往返检查抓到的。
+    /// </para>
+    /// <para>
+    /// <b>现在改为查 SDK 的 <c>RegisteredExtensions</c></b>：那是运行期的
+    /// 真实登记清单，不管判别器用什么方式登记，只要生效就在里面。
+    /// </para>
+    /// </remarks>
     /// <summary>
     /// 枚举在线上必须是 camelCase 字符串。
     /// </summary>
@@ -496,6 +484,29 @@ internal static class DockChecks
             : $"判别字段应仍是 kind:notice，实际：{produced}";
     }
 
+    private static string? EveryMessageRegistered(bool inject)
+    {
+        // 反射找本程序集里所有 ClientCommand / ServerEvent 的具体派生类型
+        var ownAssembly = typeof(DesktopProtocol).Assembly;
+
+        var expected = ownAssembly.GetTypes()
+            .Where(t => t.IsSealed && !t.IsAbstract && !t.IsGenericTypeDefinition)
+            .Where(t => typeof(ClientCommand).IsAssignableFrom(t)
+                     || typeof(ServerEvent).IsAssignableFrom(t))
+            .ToArray();
+
+        var registered = DesktopProtocol.RegisteredExtensions
+            .Select(r => r.Derived.DerivedType)
+            .ToHashSet();
+
+        var missing = expected.Where(t => inject || !registered.Contains(t)).ToArray();
+
+        if (missing.Length == 0) return null;
+
+        return $"以下消息没有在 RegisterMessages 里登记（发得出去、收不回来）：" +
+               string.Join("、", missing.Select(t => t.Name));
+    }
+
     /// <summary>
     /// 桌面端消息必须真的进了 SDK 的多态登记，不只是"写了注册代码"。
     /// </summary>
@@ -538,6 +549,49 @@ internal static class DockChecks
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 反馈命令能往返，三态都能表达。
+    /// </summary>
+    /// <remarks>
+    /// <b>三态是必要的</b>：撤回评分（<c>None</c>）是真会发生的动作——
+    /// 用户点赞后改主意。两态表达不了"从有评价回到没评价"。
+    /// <para>
+    /// 这条只验协议形状；按钮行为（重复点击只提交一次）在
+    /// <c>FeedbackBar</c> 里，属 UI 层，检查工程不引用 App，测不到。
+    /// </para>
+    /// </remarks>
+    private static string? FeedbackRoundTrips(bool inject)
+    {
+        var options = DesktopProtocol.Json;
+
+        ClientCommand command = new SubmitFeedbackCommand
+        {
+            RequestId = "r1",
+            ItemId = "item-1",
+            Rating = inject ? DougongDesktop.Ipc.FeedbackRating.Up : DougongDesktop.Ipc.FeedbackRating.Down,
+            Reason = "不准确",
+            SessionId = "sess-1",
+        };
+
+        var json = JsonSerializer.Serialize(command, typeof(ClientCommand), options);
+
+        using var doc = JsonDocument.Parse(json);
+        var back = JsonSerializer.Deserialize<ClientCommand>(doc.RootElement.GetRawText(), options)
+            as SubmitFeedbackCommand;
+
+        if (back is null) return "SubmitFeedbackCommand 应能还原";
+
+        if (back.Rating != DougongDesktop.Ipc.FeedbackRating.Down)
+            return $"Rating 应是 Down，实际 {back.Rating}";
+
+        if (back.Reason != "不准确") return $"Reason 应原样保留，实际 {back.Reason}";
+
+        // 枚举必须序列化成 camelCase 字符串（与 wire-enum-format 同一条约定）
+        return json.Contains("\"down\"", StringComparison.Ordinal)
+            ? null
+            : $"枚举应序列化成 camelCase 字符串，实际：{json}";
     }
 
     private static readonly string RepoRoot = FindRepoRoot();

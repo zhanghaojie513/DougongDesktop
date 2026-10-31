@@ -5,6 +5,7 @@ using DougongDesktop.App.Shell;
 using DougongDesktop.Ipc;
 using IpcToolCallItem = Dougong.HostProtocol.ToolCallItem;
 using IpcToolCallStatus = Dougong.HostProtocol.ToolCallStatus;
+using IpcFeedbackRating = DougongDesktop.Ipc.FeedbackRating;
 using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
@@ -124,6 +125,10 @@ public sealed class MainWindow : Window
         _conversation.Composer.ModelChanged += modelId =>
             Console.Error.WriteLine($"[ui] 选择模型 {modelId}（切换需重开会话，P8d 接入）");
         _conversation.StopRequested += () => _ = StopTurnAsync();
+
+        // 消息反馈 → 引擎（宿主侧只落本地诊断，不改会话状态）
+        _conversation.FeedbackRequested += (itemId, rating, reason) =>
+            _ = SendFeedbackAsync(itemId, rating, reason);
 
         LoadUiPlugins();
 
@@ -747,6 +752,33 @@ public sealed class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// 提交消息反馈。
+    /// </summary>
+    /// <remarks>
+    /// <b>失败只记日志</b>：反馈是锦上添花，发不出去不该打扰用户。
+    /// 界面上那边已经显示"已记录"了——回滚那个显示比静默失败更糟。
+    /// </remarks>
+    private async Task SendFeedbackAsync(
+        string itemId, IpcFeedbackRating rating, string? reason)
+    {
+        try
+        {
+            await _engine.SendAsync(new SubmitFeedbackCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                ItemId = itemId,
+                Rating = rating,
+                Reason = reason,
+                SessionId = _selectedSessionId,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 反馈提交失败：{ex.Message}");
+        }
+    }
+
     /// <summary>取消当前回合。</summary>
     private async Task StopTurnAsync()
     {
@@ -984,6 +1016,21 @@ public sealed class MainWindow : Window
         // 消息条目同理：条目数对但容器数为 0，说明模板没匹配上（P3a 踩过）。
         Console.Error.WriteLine(
             $"[shell] 消息容器 {_conversation.RenderedContainerCount} / 条目 {_conversation.Count}");
+
+        // 消息反馈（P8b）：反馈条要出现在**可见的**已完成消息上。
+        //
+        // 不能拿"总 assistant 数 − 流式数"当期望值：消息流是虚拟化的，
+        // 视口外的条目不构建控件。第一次这么写得到"期望 2 实际 1"，
+        // 差点误判成漏建——实际是第三条（30 行长文本）滚出了视口。
+        //
+        // 正确口径：可见的 assistant 容器里，非流式几个就该有几个反馈条。
+        var visibleAssistant = _conversation.GetVisualDescendants()
+            .OfType<Border>()
+            .Count(b => b.Child is StackPanel sp && sp.Children.OfType<Markdown>().Any());
+        var bars = _conversation.GetVisualDescendants().OfType<FeedbackBar>().Count();
+        Console.Error.WriteLine(
+            $"[shell] 反馈条 {bars} 个 / 可见 assistant 容器 {visibleAssistant} 个" +
+            (bars <= visibleAssistant ? "（不多于可见容器，符合预期）" : "（**多于可见容器，可疑**）"));
 
         // 右栏 dock（P7）：面板展开不够，要看到 tab 数与内容真的建出来了。
         // P3a 踩过"尺寸全对但里面是空的"，右栏同样可能重演。

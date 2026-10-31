@@ -160,6 +160,14 @@ public sealed class IpcServer : IAsyncDisposable
                     await OpenSessionAsync(open, connection, cancellationToken).ConfigureAwait(false);
                     break;
 
+                case SubmitFeedbackCommand feedback:
+                    // 反馈只落本地诊断，不进模型历史、不改变会话状态。
+                    // 它是产品改进数据，不是 agent 运行的一部分。
+                    Console.Error.WriteLine(
+                        $"[host] 反馈：{feedback.ItemId} → {feedback.Rating}" +
+                        (feedback.Reason is { Length: > 0 } ? $"（{feedback.Reason}）" : ""));
+                    break;
+
                 case ListModelsCommand:
                     await connection.SendAsync(BuildModelsEvent(), cancellationToken)
                         .ConfigureAwait(false);

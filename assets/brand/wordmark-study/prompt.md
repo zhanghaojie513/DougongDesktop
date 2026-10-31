@@ -1,0 +1,8 @@
+# dougong 独立字标
+
+用户纠正："是设计dougong"。本轮仅设计dougong字母本身，不带图标、NET徽标或展示包装。
+内置imagegen生成的栅格概念图，未转为最终SVG。
+
+## Prompt
+
+Design ONLY the lowercase custom wordmark 'dougong'. The exact seven letters are d o u g o n g. Use the bespoke bold rounded lettering in the reference as a starting direction, then refine the letterforms as a cohesive professional typographic logo: confident medium-bold weight, generous smooth bowl curves, precise consistent negative spaces, restrained sculptural transitions from curves into straight strokes, a short balanced ascender on d, beautifully drawn single-storey g forms with short architectural return hooks and subtle diagonal terminals, optical kerning carefully resolved across d-o-u-g-o-n-g. The TWO g letters must have exactly the same shape and act as the recurring signature. The lowercase n needs a flowing rounded shoulder, and the u must read distinctly from n. The whole word should be compact, fluent, original and highly readable, with the sophisticated craft of a leading technology company's custom wordmark. Avoid plain typed text, generic font specimens, thin monoline circles, narrow industrial fonts, pointy sci-fi styling, giant ink traps, excessive cuts, distortions or illustrations. IMPORTANT: Output ONLY the word 'dougong' in solid pure black on a clean pure white background. Absolutely no symbol to the left, no icon, no NET, no badge, no secondary words, no captions, no mockup, no dark strip, no second version. A single large horizontal wordmark, centered, occupying about 78 percent of the width of a wide canvas. Crisp flat vector-like edges, no texture, gradients, shadows, or 3D. The letterforms themselves are the entire design.
