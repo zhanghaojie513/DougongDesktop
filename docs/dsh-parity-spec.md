@@ -585,6 +585,49 @@ Windows 走 `.sidebarCol` 的默认规则：`background: var(--dsw-specific-side
 
 ---
 
+## 7.12 复检记录（2026-10-31）：抽象只切了一半
+
+用户要求复检。按"问三问"（真的能用吗 / 检查能抓住真违规吗 / 有没有定义了没用的）查，
+**发现一处真问题**：
+
+### `IEngineLocator` 的抽象只做了一半
+
+`EngineClient` 里还留着 `StartAgentHostAsync`（26 行）与 `InferAgentHostPath`（39 行），
+内容与 `FileEngineLocator` 里的重复——**共 65 行死代码**。
+
+- 编译：通过（两个方法都在，只是没人调用）
+- 67 条检查：全过
+- 功能：正常（走的是 locator 那条路）
+- **只有肉眼看代码才发现**
+
+这正是"抽象是装饰"的典型形态：接口加上了，旧实现没删。而漏着的
+`File.*` / `Process.*` 调用正是 web 端会崩的地方。
+
+### 新增检查 `platform-calls-stay-in-adapters`
+
+断言两个应保持平台无关的文件里不出现 `File.` / `Directory.` / `Process.` / `OperatingSystem.`：
+
+| 文件 | 为什么该纯净 |
+|---|---|
+| `EngineClient.cs` | 纯网络客户端，端点发现应由 `IEngineLocator` 负责 |
+| `AppSettings` | 只是 JSON + 存储抽象，不该知道存到哪 |
+
+**双向验证**：
+- 反证（`--break`）：直接返回错误 → 判红 ✓
+- **真实注入**：临时在 `EngineClient` 加 `File.Exists("x")` → 判红，并精确报出文件与那一行 ✓
+
+### 复检结论
+
+| 问 | 结论 |
+|---|---|
+| 三个抽象真的在用吗 | ✅ `ISettingsStore` 4 处、`IEngineLocator` 4 处、`DesktopProtocol.Json` 4 处，无死代码（删掉那 65 行之后） |
+| 检查能抓住真违规吗 | ✅ 新检查经真实注入验证；反证与正向都有效 |
+| 有没有定义了没用的 | ❌ 发现并已删除 65 行 |
+
+检查总数 66 → 67。
+
+---
+
 ## 8. 复刻验收方式
 
 沿用既有判据——**控件树 dump 优于截图**：

@@ -15,6 +15,18 @@ namespace DougongDesktop.Architecture.Checks;
 /// </remarks>
 internal static class ColumnChecks
 {
+    /// <summary>仓库根：从检查程序所在目录往上找 slnx。</summary>
+    private static readonly string RepoRoot = FindRepoRoot();
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "DougongDesktop.slnx")))
+            dir = dir.Parent;
+
+        return dir?.FullName ?? AppContext.BaseDirectory;
+    }
+
     public static int Run(string? breakMode)
     {
         var failures = 0;
@@ -30,6 +42,7 @@ internal static class ColumnChecks
         failures += Case("dsh-tokens-themes-differ", slug => ThemesDiffer(breakMode == slug));
         failures += Case("titlebar-tokens-match-dsh", slug => TitlebarTokens(breakMode == slug));
         failures += Case("settings-store-is-swappable", slug => StoreSwappable(breakMode == slug));
+        failures += Case("platform-calls-stay-in-adapters", slug => PlatformCallsContained(breakMode == slug));
 
         return failures;
     }
@@ -357,6 +370,58 @@ internal static class ColumnChecks
             _data[name] = content;
             return true;
         }
+    }
+
+    /// <summary>
+    /// 平台相关的调用必须只在适配器里，不能漏在业务代码里。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条抓的是"抽象只切了一半"</b>：复检时发现 <c>EngineClient</c> 里
+    /// 还留着 <c>StartAgentHostAsync</c> 与 <c>InferAgentHostPath</c> 两个方法，
+    /// 内容与 <c>FileEngineLocator</c> 里的重复。接口加了、旧代码没删——
+    /// 编译通过、检查全过、功能也正常（走的是 locator 那条路），
+    /// 只有肉眼看代码才发现。
+    /// <para>
+    /// <b>为什么这条重要</b>：漏着的 <c>File.*</c> 调用就是 web 端会崩的地方。
+    /// 而且它是"死代码"——不执行，所以测试与运行时都发现不了。
+    /// </para>
+    /// </remarks>
+    private static string? PlatformCallsContained(bool inject)
+    {
+        // 这些文件是与平台无关的：出现文件/进程调用就说明抽象漏了
+        var mustBePure = new (string File, string Why)[]
+        {
+            ("src/DougongDesktop.App/Services/EngineClient.cs",
+                "纯网络客户端，端点发现应由 IEngineLocator 负责"),
+            ("src/DougongDesktop.Ui.Core/AppSettings.cs",
+                "只是 JSON + 存储抽象，不该知道存到哪"),
+        };
+
+        if (inject) return "反证注入：平台调用未受约束";
+
+        foreach (var (file, why) in mustBePure)
+        {
+            var path = Path.Combine(RepoRoot, file);
+            if (!File.Exists(path)) return $"找不到 {file}";
+
+            var text = File.ReadAllText(path);
+
+            // 只看代码行，跳过注释（注释里提到 File.* 是允许的说明）
+            var codeLines = text.Split(Environment.NewLine)
+                .Where(l => !l.TrimStart().StartsWith("///", StringComparison.Ordinal)
+                         && !l.TrimStart().StartsWith("//", StringComparison.Ordinal));
+
+            foreach (var line in codeLines)
+            {
+                var hit = new[] { "File.", "Directory.", "Process.", "OperatingSystem." }
+                    .FirstOrDefault(k => line.Contains(k, StringComparison.Ordinal));
+
+                if (hit is not null)
+                    return $"{file} 里出现 {hit}（{why}）：{line.Trim()}";
+            }
+        }
+
+        return null;
     }
 
     private static int Case(string slug, Func<string, string?> body)
