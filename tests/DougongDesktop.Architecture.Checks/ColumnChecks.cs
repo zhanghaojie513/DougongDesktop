@@ -43,6 +43,8 @@ internal static class ColumnChecks
         failures += Case("titlebar-tokens-match-dsh", slug => TitlebarTokens(breakMode == slug));
         failures += Case("settings-store-is-swappable", slug => StoreSwappable(breakMode == slug));
         failures += Case("platform-calls-stay-in-adapters", slug => PlatformCallsContained(breakMode == slug));
+        failures += Case("run-clock-excludes-failure", slug => ClockExcludesFailure(breakMode == slug));
+        failures += Case("run-clock-counts-waiting", slug => ClockCountsWaiting(breakMode == slug));
 
         return failures;
     }
@@ -422,6 +424,84 @@ internal static class ColumnChecks
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 暂停的时段不计入活跃时间；失败是终态，结束计时。
+    /// </summary>
+    /// <remarks>
+    /// <b>这两件事必须分开验</b>——实现时我把它们混在一起，出了两个错：
+    /// <list type="number">
+    /// <item>一开始让 <c>Failed</c> 既是"排除段起点"又是"结束点"，
+    /// 于是 20 秒的工作被判成 5 秒</item>
+    /// <item>改成"Failed 只是终态"后，测试里还写着"失败后恢复工作"——
+    /// 而终态之后不会再有工作，那个场景不存在</item>
+    /// </list>
+    /// <para>
+    /// 正确语义：<c>Paused</c> 是可恢复的排除段；<c>Failed</c>/<c>Done</c>/
+    /// <c>Stopped</c> 是终态，记终点并停止计时。
+    /// </para>
+    /// </remarks>
+    private static string? ClockExcludesFailure(bool inject)
+    {
+        var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var clock = new DougongDesktop.Ui.Core.RunClock();
+
+        clock.SetStartedAt(t0);
+        clock.Observe(DougongDesktop.Ui.Core.RunOutcome.Working, t0);
+
+        // 工作 10 秒 → 暂停 5 秒 → 继续工作到 20 秒
+        clock.Observe(DougongDesktop.Ui.Core.RunOutcome.Paused, t0.AddSeconds(10));
+        clock.Observe(DougongDesktop.Ui.Core.RunOutcome.Working, t0.AddSeconds(15));
+
+        var elapsed = clock.Elapsed(t0.AddSeconds(20));
+
+        if (inject) return "反证注入：暂停段被计入活跃时间";
+
+        // 期望：20 秒总时长 − 5 秒暂停 = 15 秒
+        if (Math.Abs(elapsed.TotalSeconds - 15) > 0.1)
+            return $"暂停段应被扣除：期望 15s，实际 {elapsed.TotalSeconds:0.0}s（20s − 5s 暂停）";
+
+        // 失败是终态：结束计时，之后的时刻不再增长
+        clock.Observe(DougongDesktop.Ui.Core.RunOutcome.Failed, t0.AddSeconds(20));
+        var atEnd = clock.Elapsed(t0.AddSeconds(20));
+        var later = clock.Elapsed(t0.AddSeconds(60));
+
+        if (Math.Abs(atEnd.TotalSeconds - later.TotalSeconds) > 0.01)
+            return $"失败是终态，结束后的时刻不该让耗时继续涨（20s 时 {atEnd.TotalSeconds:0.0}s，60s 时 {later.TotalSeconds:0.0}s）";
+
+        return Math.Abs(atEnd.TotalSeconds - 15) < 0.1
+            ? null
+            : $"失败时刻的耗时应为 15s，实际 {atEnd.TotalSeconds:0.0}s";
+    }
+
+    /// <summary>
+    /// 等待用户输入<b>算</b>活跃时间。
+    /// </summary>
+    /// <remarks>
+    /// <b>这一条与上一条方向相反，但都是刻意的</b>：Arc 的文档明确写
+    /// "Waiting for input counts"——等用户确认也算这一段在工作。
+    /// 漏了这条会把"在等他"误判成"引擎慢"。
+    /// <para>
+    /// 两条一起才说明"排除规则不是无差别扣时间"。
+    /// </para>
+    /// </remarks>
+    private static string? ClockCountsWaiting(bool inject)
+    {
+        var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var clock = new DougongDesktop.Ui.Core.RunClock();
+
+        clock.SetStartedAt(t0);
+        clock.Observe(DougongDesktop.Ui.Core.RunOutcome.Working, t0);
+        clock.Observe(DougongDesktop.Ui.Core.RunOutcome.NeedsInput, t0.AddSeconds(5));
+
+        var elapsed = clock.Elapsed(t0.AddSeconds(20));
+
+        if (inject) return "反证注入：等待输入被扣除了";
+
+        return Math.Abs(elapsed.TotalSeconds - 20) < 0.1
+            ? null
+            : $"等待输入应算活跃时间：期望 20s，实际 {elapsed.TotalSeconds:0.0}s";
     }
 
     private static int Case(string slug, Func<string, string?> body)

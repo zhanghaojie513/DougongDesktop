@@ -670,6 +670,45 @@ Windows 走 `.sidebarCol` 的默认规则：`background: var(--dsw-specific-side
 
 ---
 
+## 7.14 全量检索 Arc 组件：按需求对照（2026-10-31）
+
+检索范围：`0.3.2-preview.2` 三个包共 **5463 个公开类型**（Arc 877 / Blocks 1924 / Special 1045，
+过滤掉辅助类后）。按 P8 各阶段的实际需求定向匹配，结论如下。
+
+### 高价值：直接改善现有实现
+
+| 组件 | 包 | 对应我们的需求 | 决策 |
+|---|---|---|---|
+| **`AgentStatusRunClock`** | Special | 状态胶囊的计时 | **立刻替换**。它的语义是"从运行开始到现在，**扣掉每段 paused 和 failed**"——我们手写的 `StatusCapsule` 只扣了审批等待，漏了失败段 |
+| **`AgentTimeline`** | Special | P8d 的 `ui-trajectory` | **用成品**。原计划自己写"按轮次的事件记录表 + 时间概览"。它把 **thinking（淡色）/ tool calls（实心）/ waiting（斜纹）** 三种段用视觉区分，还带编排者与子 agent 的分行 |
+| **`AiRelatedQuestions`** | Blocks | 消息流末端的"接下来问什么" | **待评估**。dsh 的 `ui-chat` 有这个能力，Arc 也是成品 |
+
+### 中价值：取决于数据而非组件
+
+| 组件 | 包 | 结论 |
+|---|---|---|
+| `AiDiffDocument` / `AiDiffText` | Blocks | **组件能做词级 diff，但我们没数据**。SDK 的 `FileVersion` 只存长度/时间/哈希，不存原文。这与之前 §9 的结论一致：缺口在数据侧，不在 UI 侧 |
+| `AgentMemory` | Blocks | 对应 SDK 的 agent 记忆能力。**排在 P9 之后**，且 SDK 侧尚未接入 |
+
+### 不用
+
+| 组件 | 为什么不用 |
+|---|---|
+| `AgentLoop` | "agent 循环的动画解说"（环上三个站点：Gather context / Take action / Verify），是文档演示组件，不是运行时 UI |
+| `AgentHandoff` | AI 转人工客服场景，我们不做 |
+| `AgentCursor` | 多人协作编辑光标，单人场景不需要 |
+
+### 一条方法论
+
+**有组件 ≠ 能用。** 判断顺序应该是：
+1. 我们有这个**数据**吗？
+2. 组件的**形状**与我们的需求一致吗？
+3. 只有前两条都成立，才考虑接入。
+
+`AiDiffDocument` 就是第 1 条不成立的反例——组件再好，没有改动前后的原文就没法用。
+
+---
+
 ## 8. 复刻验收方式
 
 沿用既有判据——**控件树 dump 优于截图**：

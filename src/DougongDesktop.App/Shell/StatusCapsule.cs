@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using DougongDesktop.App.Services;
 using DougongDesktop.Ipc;
+using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
 namespace DougongDesktop.App.Shell;
@@ -23,20 +24,28 @@ public sealed class StatusCapsule : UserControl
     private readonly TextBlock _elapsed;
     private readonly Avalonia.Threading.DispatcherTimer _ticker;
 
-    /// <summary>本回合开始的时刻。null 表示没有运行中的回合。</summary>
-    private DateTimeOffset? _turnStartedAt;
-
     /// <summary>
-    /// 暂停累计时长：等审批的时间不计入耗时。
+    /// 回合计时。
     /// </summary>
     /// <remarks>
-    /// <b>为什么要扣</b>：审批等待取决于人多久点确认，与引擎快慢无关。
-    /// 把它算进耗时会让"引擎变慢了"和"我回消息慢"混为一谈。
-    /// Arc 的 <c>EndedAt</c> 文档也说明它会扣掉暂停时间，我们保持一致。
+    /// <b>语义对齐 Arc 的 <c>AgentStatusRunClock</c></b>：从运行开始到现在，
+    /// <b>扣掉每段 Paused 与 Failed</b>。
+    /// <para>
+    /// <b>为什么不直接用那个类</b>：实测它是 <c>internal</c>（反射确认
+    /// <c>IsPublic=False</c>），外部引用不到。所以按它的语义自己实现一份——
+    /// 关键不是复用代码，是复用**语义**：原来的手写版本只扣审批等待，
+    /// <b>漏了失败段</b>，一个工具连续失败时那些重试时间会被算进"引擎耗时"。
+    /// </para>
+    /// <para>
+    /// 纯记账：<c>Observe(state, now)</c> 记状态变化，<c>Elapsed(now)</c>
+    /// 取当前活跃时长。时间由调用方传入，所以测试可注入固定时刻。
+    /// </para>
     /// </remarks>
-    private TimeSpan _paused;
+    private readonly RunClock _clock = new();
 
-    private DateTimeOffset? _pauseStartedAt;
+    /// <summary>本回合是否还在进行。</summary>
+    private bool _running;
+
     private EngineConnectionState _connection = EngineConnectionState.Disconnected;
 
     public StatusCapsule()
@@ -88,7 +97,7 @@ public sealed class StatusCapsule : UserControl
             return;
         }
 
-        if (state == EngineConnectionState.Connected && _turnStartedAt is null)
+        if (state == EngineConnectionState.Connected && !_running)
         {
             _status.Status = AgentStatusRunState.Idle;
             _status.Activity = new AgentStatusActivity("就绪");
@@ -96,41 +105,41 @@ public sealed class StatusCapsule : UserControl
     }
 
     /// <summary>回合开始：启动计时。</summary>
+    /// <remarks>
+    /// <b>用 <c>SetStartedAt</c> 而不是继续累加</b>：新回合是新的计时起点，
+    /// 上一回合记录的暂停段不再适用。clock 的文档专门说了这一点。
+    /// </remarks>
     public void OnTurnStarted()
     {
-        _turnStartedAt = DateTimeOffset.Now;
-        _paused = TimeSpan.Zero;
-        _pauseStartedAt = null;
+        _running = true;
+        _clock.SetStartedAt(DateTimeOffset.Now);
 
         _status.Status = AgentStatusRunState.Working;
-        _status.StartedAt = _turnStartedAt;
+        _status.StartedAt = _clock.StartedAt;
         _status.Activity = new AgentStatusActivity("思考中");
     }
 
     /// <summary>
-    /// 进入等待审批：停止计时。
+    /// 进入等待审批。
     /// </summary>
     /// <remarks>
-    /// 把状态切成 <see cref="AgentStatusRunState.NeedsInput"/>，
-    /// 视觉上与"工作中"区分——用户能立刻看出是在等他。
+    /// <b>切成 <c>NeedsInput</c> 而不是 <c>Paused</c></b>：视觉上要能看出
+    /// "在等他"而不是"卡住了"。而 <b>计时不停</b>——手动文档里明确
+    /// "Waiting for input counts"（等输入算活跃时间），所以这一步只改状态，
+    /// clock 会把它记为活跃段。
     /// </remarks>
     public void OnApprovalRequested(string toolName)
     {
+        _clock.Observe(RunOutcome.NeedsInput, DateTimeOffset.Now);
+
         _status.Status = AgentStatusRunState.NeedsInput;
         _status.Activity = new AgentStatusActivity($"等待审批：{toolName}");
-
-        // 记下暂停起点，恢复时扣掉这段
-        _pauseStartedAt = DateTimeOffset.Now;
     }
 
-    /// <summary>审批完成：恢复计时。</summary>
+    /// <summary>审批完成：回到工作状态。</summary>
     public void OnApprovalResolved()
     {
-        if (_pauseStartedAt is { } start)
-        {
-            _paused += DateTimeOffset.Now - start;
-            _pauseStartedAt = null;
-        }
+        _clock.Observe(RunOutcome.Working, DateTimeOffset.Now);
 
         _status.Status = AgentStatusRunState.Working;
         _status.Activity = new AgentStatusActivity("继续执行");
@@ -151,7 +160,7 @@ public sealed class StatusCapsule : UserControl
     public void OnToolCompleted()
     {
         // 只在回合进行中回切：已经结束的回合不该被拉回"思考中"
-        if (_turnStartedAt is null || _pauseStartedAt is not null) return;
+        if (!_running) return;
 
         _status.Status = AgentStatusRunState.Working;
         _status.Activity = new AgentStatusActivity("思考中");
@@ -162,29 +171,45 @@ public sealed class StatusCapsule : UserControl
     /// </summary>
     /// <remarks>
     /// <b>保留最后耗时，不归零</b>——那是排查依据。失败时尤其要留着。
+    /// <para>
+    /// <b>把终态也交给 clock</b>：失败时段会被它排除在活跃时间之外。
+    /// 原来的手写版本只扣审批等待，<b>漏了失败</b>——一个工具连续失败时，
+    /// 那些重试时间会被算进"引擎耗时"。
+    /// </para>
     /// </remarks>
     public void OnTurnCompleted(TurnStatus status, string? diagnostic)
     {
-        _status.Status = status switch
+        var now = DateTimeOffset.Now;
+
+        var runState = status switch
         {
             TurnStatus.Completed => AgentStatusRunState.Done,
             TurnStatus.Cancelled => AgentStatusRunState.Stopped,
             _ => AgentStatusRunState.Failed,
         };
 
+        _clock.Observe(status switch
+        {
+            TurnStatus.Completed => RunOutcome.Done,
+            TurnStatus.Cancelled => RunOutcome.Stopped,
+            _ => RunOutcome.Failed,
+        }, now);
+        _running = false;
+
+        _status.Status = runState;
+
         if (diagnostic is { Length: > 0 })
             _status.Activity = new AgentStatusActivity(diagnostic);
 
-        // 停表但不清 _turnStartedAt：UpdateElapsed 还要用它算最终耗时
-        _status.EndedAt = DateTimeOffset.Now;
+        // 停表但不清 startedAt：UpdateElapsed 还要用它算最终耗时
+        _status.EndedAt = now;
         _ticker.Stop();
         UpdateElapsed();
     }
 
     private void StopTiming()
     {
-        _turnStartedAt = null;
-        _pauseStartedAt = null;
+        _running = false;
         _ticker.Stop();
         _elapsed.Text = "—";
         _status.StartedAt = null;
@@ -196,31 +221,22 @@ public sealed class StatusCapsule : UserControl
     /// <remarks>
     /// 格式 <c>15分 7.9秒</c>，精确到 0.1 秒。
     /// <b>不足 1 分钟时只显示秒</b>（<c>7.9秒</c>），因为"0分 7.9秒"里的 0 是噪音。
+    /// <para>
+    /// <b>耗时全部来自 <see cref="RunClock"/></b>，这里只负责格式化——
+    /// 扣哪些段是 clock 的事，这里不掺和。
+    /// </para>
     /// </remarks>
     private void UpdateElapsed()
     {
-        if (_turnStartedAt is not { } start)
+        if (_clock.StartedAt is null)
         {
             _elapsed.Text = "—";
             return;
         }
 
-        var elapsed = DateTimeOffset.Now - start - _paused;
-
-        // 正在等审批：显示暂停标记，让用户知道"卡住"是我在等他
-        if (_pauseStartedAt is not null)
-        {
-            _elapsed.Text = Format(elapsed) + "（等待）";
-            return;
-        }
-
         // 已结束：用 EndedAt 而不是 Now，否则耗时会在结束后继续涨
-        if (_status.EndedAt is { } ended)
-        {
-            elapsed = ended - start - _paused;
-            _elapsed.Text = Format(elapsed);
-            return;
-        }
+        var at = _clock.EndedAt ?? DateTimeOffset.Now;
+        var elapsed = _clock.Elapsed(at);
 
         _elapsed.Text = Format(elapsed);
     }
