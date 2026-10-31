@@ -9,6 +9,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOTNET="${DOTNET:-dotnet}"
 cd "$ROOT"
 
+# 先杀掉运行中的本项目进程：它们会锁住 bin/ 里的 DLL，
+# 导致构建报 MSB3027。而构建失败后脚本继续跑，看到的是**旧产物**——
+# 那会让人误以为检查通过了。
+for name in DougongDesktop.App DougongDesktop.AgentHost; do
+  tasklist 2>/dev/null | grep -qi "^$name" && taskkill //F //IM "$name.exe" >/dev/null 2>&1 || true
+done
+
 echo "== 构建 =="
 "$DOTNET" build DougongDesktop.slnx -c Release
 

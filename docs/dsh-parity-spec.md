@@ -336,25 +336,24 @@ dsh 的 `shell.bottom` 是**横跨整行的单一 slot**，且默认组合**不�
 
 #### 1. 毛玻璃（可做）
 
-```csharp
-// 窗口级
-TransparencyLevelHint = new[] { WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur };
+**实际实现只用了窗口级声明**（`MainWindow`）：
 
-// 侧边栏
-new ExperimentalAcrylicBorder
-{
-    Material = new ExperimentalAcrylicMaterial
-    {
-        BackgroundSource = AcrylicBackgroundSource.Digger,
-        TintColor = Color.Parse("#1B1B1C"),
-        TintOpacity = 0.85,
-        MaterialOpacity = 0.6,
-    },
-    Child = sidebarContent,
-};
+```csharp
+TransparencyLevelHint =
+[
+    WindowTransparencyLevel.AcrylicBlur,   // 首选：Windows 系统级 Acrylic
+    WindowTransparencyLevel.Blur,          // 次选：普通模糊
+    WindowTransparencyLevel.None,          // 兜底：不透明
+];
 ```
 
-**平台差异**：Windows 上是系统级 Acrylic（与 Electron 同级）；Linux 可能退化为无模糊（取决于合成器），需在启动时检查 `TransparencyLevel` 实际值并降级为不透明。
+**没有用 `ExperimentalAcrylicBorder`**——初版这里写的是"侧边栏套一层
+Acrylic 边框"，但实测后不改了：**dsh 在 Windows 上侧边栏本来就不透明**
+（见 §6.2 末尾的平台差异核实），套 Acrylic 反而偏离基线。
+
+**平台差异**：Windows 上系统级 Acrylic 生效（实测 `ActualTransparencyLevel = AcrylicBlur`）；
+Linux 取决于合成器，可能退化。降级链已在 `TransparencyLevelHint` 里声明，
+不需要代码判断——Avalonia 自己按可用性选。
 
 #### 2. 轨道过渡（可做，但要绕一步）
 
@@ -374,23 +373,7 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ---
 
-## 7. 实施计划
-
-> **主清单已拆出为独立文件：[dsh-parity-progress.md](dsh-parity-progress.md)**
->
-> 分工：那份只讲**状态**（可逐行勾选、可数）；这份讲**规格**（每个数字的出处、
-> 为什么这样做、做不到的怎么处置）。
->
-> 拆开的理由：进度会被频繁改动，规格应该稳定。混在一起时，
-> 每次改状态都要动规格文件，而规格文件里那些"逐条核实过的数字"
-> 不该因为一次勾选而产生 diff 噪音。
->
-> **下面 7.11–7.14 保留**，它们是规格性的记录（验收理念、复检发现、组件取舍），
-> 不是进度表。
-
----
-
-## 7.11 验收理念：行为等价，不是编译通过
+## 6.11 验收理念：行为等价，不是编译通过
 
 > 这一节抄的是 pi.net 的移植理念（用户指定），但**它的适用范围比移植更广**——
 > 我们不是把 dsh 的 TS 翻成 C#，而是在不同框架上重建同样的行为。
@@ -441,7 +424,7 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ---
 
-## 7.12 复检记录（2026-10-31）：抽象只切了一半
+## 6.12 复检记录（2026-10-31）：抽象只切了一半
 
 用户要求复检。按"问三问"（真的能用吗 / 检查能抓住真违规吗 / 有没有定义了没用的）查，
 **发现一处真问题**：
@@ -484,7 +467,7 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ---
 
-## 7.13 Arc 新增的 41 个 AI 组件：哪些用、哪些不用
+## 6.13 Arc 新增的 41 个 AI 组件：哪些用、哪些不用
 
 `0.3.2-preview.2` 的 Special 包里有 **132 个 `Ai*` 类型**（含新增的 41 个组件）。
 我们已经在这个版本上，**不需要升级**。逐个判断：
@@ -526,7 +509,7 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ---
 
-## 7.14 全量检索 Arc 组件：按需求对照（2026-10-31）
+## 6.14 全量检索 Arc 组件：按需求对照（2026-10-31）
 
 检索范围：`0.3.2-preview.2` 三个包共 **5463 个公开类型**（Arc 877 / Blocks 1924 / Special 1045，
 过滤掉辅助类后）。按 P8 各阶段的实际需求定向匹配，结论如下。
@@ -562,6 +545,21 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 3. 只有前两条都成立，才考虑接入。
 
 `AiDiffDocument` 就是第 1 条不成立的反例——组件再好，没有改动前后的原文就没法用。
+
+---
+
+## 7. 实施计划
+
+> **主清单已拆出为独立文件：[dsh-parity-progress.md](dsh-parity-progress.md)**
+>
+> 分工：那份只讲**状态**（可逐行勾选、可数）；这份讲**规格**（每个数字的出处、
+> 为什么这样做、做不到的怎么处置）。
+>
+> 拆开的理由：进度会被频繁改动，规格应该稳定。混在一起时，
+> 每次改状态都要动规格文件，而规格文件里那些"逐条核实过的数字"
+> 不该因为一次勾选而产生 diff 噪音。
+>
+> 验收理念、复检发现、组件取舍等规格性记录在 §6.11–6.14，不是进度表。
 
 ---
 
@@ -605,8 +603,33 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 | 项 | dsh | 我们 | 状态 |
 |---|---|---|---|
 | 折叠动画 | CSS 过渡 | Arc 的 morph spring | 视觉接近，时长不同 |
-| 会话行圆角 | 12px（`radius-md`） | Arc Section 内建 | 待核 |
-| 品牌行高 | 52px | Arc `Header` | 待核 |
+| 会话行圆角 | 12px（`radius-md`） | Arc Section 内建 | **未做**：并入 A9，需覆盖 Arc 的 Section 模板 |
+| 品牌行高 | 52px | Arc `Header` | **未做**：同上 |
+
+---
+
+## 10. 组件选型的决策记录
+
+三个问题贯穿全部选型，记在这里避免重复讨论：
+
+### 10.1 有现成组件时，先问"我们有数据吗"
+
+`AiDiffText` 能做词级 diff，但 SDK 的 `FileVersion` 只存长度/时间/哈希、
+**不存文件原文**。组件再好，没有改动前后的文本就没法用。
+
+**顺序**：① 有数据吗 → ② 组件形状与需求一致吗 → ③ 才考虑接入。
+
+### 10.2 有现成组件时，再问"形状能改吗"
+
+`AiMascot` 只能改颜色（`BodyColor`/`EyeColor`/`DotColor`），
+`AiMascotCanvas` 画死"鹅卵石 + 胶囊眼 + 伴生点"那个形状。
+**换不了形体**——所以宠物自己实现，用榫灵的六状态 SVG。
+
+### 10.3 有现成组件时，最后问"可见性够吗"
+
+`AgentStatusRunClock` 的语义正是我们需要的（扣 Paused/Failed），
+但实测 **`internal`**，外部引用不到。所以按它的**语义**自己实现 `RunClock`
+——复用语义，不复用代码。
 
 ---
 
