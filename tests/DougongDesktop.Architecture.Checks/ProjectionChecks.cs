@@ -87,6 +87,7 @@ internal static class ProjectionChecks
     {
         var existing = new ToolCallItem
         {
+            At = DateTimeOffset.UnixEpoch,
             Id = "tool-inv-1",
             InvocationId = "inv-1",
             ToolName = "write_file",

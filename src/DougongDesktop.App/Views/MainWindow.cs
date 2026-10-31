@@ -566,6 +566,7 @@ public sealed class MainWindow : Window
             Console.Error.WriteLine($"[ui] 发送失败：{ex.Message}");
             _conversation.Add(new NoticeItem
             {
+                At = DateTimeOffset.Now,
                 Id = $"notice-{Guid.NewGuid():N}"[..16],
                 Level = NoticeLevel.Error,
                 Text = $"消息没有发出去：{ex.Message}",
@@ -702,6 +703,7 @@ public sealed class MainWindow : Window
                 Console.Error.WriteLine($"[ui] 未实现的斜杠命令：{commandId}");
                 _conversation.Add(new NoticeItem
                 {
+                    At = DateTimeOffset.Now,
                     Id = $"notice-{Guid.NewGuid():N}"[..16],
                     Level = NoticeLevel.Warning,
                     Text = $"命令 /{commandId} 还没有实现。",

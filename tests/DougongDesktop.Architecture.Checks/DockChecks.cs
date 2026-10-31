@@ -25,6 +25,7 @@ internal static class DockChecks
         failures += Case("wire-null-omitted", slug => WireNullOmitted(breakMode == slug));
         failures += Case("wire-cross-version-compat", slug => CrossVersionCompat(breakMode == slug));
         failures += Case("ipc-every-message-is-registered", slug => EveryMessageRegistered(breakMode == slug));
+        failures += Case("desktop-types-actually-registered", slug => ActuallyRegistered(breakMode == slug));
         failures += Case("diff-detects-add-modify-delete", slug => DetectsAllThree(breakMode == slug));
         failures += Case("diff-ignores-same-content", slug => NoChangeOnSameContent(breakMode == slug));
 
@@ -396,6 +397,7 @@ internal static class DockChecks
     {
         var item = new ToolCallItem
         {
+            At = DateTimeOffset.UnixEpoch,
             Id = "t1",
             InvocationId = "i1",
             ToolName = "read_file",
@@ -430,6 +432,7 @@ internal static class DockChecks
     {
         var item = new ToolCallItem
         {
+            At = DateTimeOffset.UnixEpoch,
             Id = "t2",
             InvocationId = "i2",
             ToolName = "read_file",
@@ -486,11 +489,55 @@ internal static class DockChecks
 
         // 反向：新代码生成的消息里，判别字段名必须还是 kind
         var produced = JsonSerializer.Serialize<ConversationItem>(
-            new NoticeItem { Id = "n1", Text = "x" }, DesktopProtocol.Json);
+            new NoticeItem { At = DateTimeOffset.UnixEpoch, Id = "n1", Text = "x" }, DesktopProtocol.Json);
 
         return produced.Contains("\"kind\":\"notice\"", StringComparison.Ordinal)
             ? null
             : $"判别字段应仍是 kind:notice，实际：{produced}";
+    }
+
+    /// <summary>
+    /// 桌面端消息必须真的进了 SDK 的多态登记，不只是"写了注册代码"。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么这条必要</b>：注册失败是静默的——编译过、序列化不报错，
+    /// 只是那条消息用错配置。SDK 专门暴露了 <c>RegisteredExtensions</c>
+    /// 就是为了让宿主能断言这件事。
+    /// <para>
+    /// <b>断言的是实际清单，不是代码里有那几行</b>：用反射读
+    /// <c>HostProtocolContract.RegisteredExtensions</c>，逐个核对
+    /// 降 5 个桌面端类型都在里面，且基线类型正确。
+    /// </para>
+    /// </remarks>
+    private static string? ActuallyRegistered(bool inject)
+    {
+        var registered = DesktopProtocol.RegisteredExtensions;
+
+        if (inject) return "反证注入：注册清单为空";
+
+        var expected = new (Type Derived, Type Base, string Discriminator)[]
+        {
+            (typeof(ListDirectoryCommand), typeof(ClientCommand), "fs/list"),
+            (typeof(ListModelsCommand), typeof(ClientCommand), "models/list"),
+            (typeof(DirectoryListedEvent), typeof(ServerEvent), "fs/listed"),
+            (typeof(WorkspaceChangedEvent), typeof(ServerEvent), "fs/changed"),
+            (typeof(ModelsListedEvent), typeof(ServerEvent), "models/listed"),
+        };
+
+        foreach (var (derived, baseType, discriminator) in expected)
+        {
+            // JsonDerivedType 是 struct，不能拿 null 判断"有没有"，
+            // 只能先 Any 再取第一个。
+            if (!registered.Any(r => r.Derived.DerivedType == derived && r.BaseType == baseType))
+                return $"{derived.Name} 没有进 SDK 的注册清单（基线 {baseType.Name}）";
+
+            var hit = registered.First(r => r.Derived.DerivedType == derived && r.BaseType == baseType);
+
+            if (hit.Derived.TypeDiscriminator as string != discriminator)
+                return $"{derived.Name} 的判别器应为 {discriminator}，实际 {hit.Derived.TypeDiscriminator}";
+        }
+
+        return null;
     }
 
     private static readonly string RepoRoot = FindRepoRoot();

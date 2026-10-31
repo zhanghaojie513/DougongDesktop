@@ -51,7 +51,7 @@ checks="$checks approval-duplicate-answer-denied approval-session-scope-is-narro
 checks="$checks approval-silence-is-denial approval-channel-failure-denies"
 checks="$checks approval-deny-and-stop-really-stops"
 checks="$checks fs-list-rejects-escape dock-unimplemented-tabs-are-labeled fs-list-roundtrips"
-checks="$checks ipc-every-message-is-registered"
+checks="$checks ipc-every-message-is-registered desktop-types-actually-registered"
 # 行为等价：迁移后线上格式必须没变（不是"编译通过"就算完成）
 checks="$checks wire-enum-format wire-null-omitted wire-cross-version-compat"
 checks="$checks diff-detects-add-modify-delete diff-ignores-same-content"

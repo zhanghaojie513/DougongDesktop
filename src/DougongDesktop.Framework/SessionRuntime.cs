@@ -150,7 +150,8 @@ public sealed class SessionRuntime : IAsyncDisposable
             // 用户输入作为第一条条目出现，先于任何模型输出。
             await AppendItemAsync(turnId, new UserMessageItem
             {
-                Id = NextItemId(),
+                At = DateTimeOffset.Now,
+               Id = NextItemId(),
                 Text = userInput,
             }, emit).ConfigureAwait(false);
 
@@ -284,7 +285,8 @@ public sealed class SessionRuntime : IAsyncDisposable
         {
             var item = new AssistantMessageItem
             {
-                Id = NextItemId(),
+                At = DateTimeOffset.Now,
+               Id = NextItemId(),
                 Text = text,
                 IsStreaming = true,
             };
@@ -326,7 +328,8 @@ public sealed class SessionRuntime : IAsyncDisposable
         {
             var item = new ReasoningItem
             {
-                Id = NextItemId(),
+                At = DateTimeOffset.Now,
+               Id = NextItemId(),
                 Text = text,
                 IsStreaming = true,
             };

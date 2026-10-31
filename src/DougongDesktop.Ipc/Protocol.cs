@@ -8,106 +8,89 @@ namespace DougongDesktop.Ipc;
 /// 桌面端特有的消息。
 /// </summary>
 /// <remarks>
-/// <b>通用契约（会话、回合、条目、审批、引擎状态）现在来自 SDK 的
-/// <c>Dougong.HostProtocol</c></b>，不在本仓库维护。这里只放桌面端独有：
+/// <b>通用契约现在全部来自 SDK 的 <c>Dougong.HostProtocol</c></b>，
+/// 不在本仓库维护。这里只剩真正桌面端独有的：
 /// <list type="bullet">
-/// <item><b>目录浏览</b>（<c>fs/list</c>）——右栏文件树的 UI 形态，
-/// 不是通用会话协议的一部分</item>
-/// <item><b>模型目录</b>（<c>models/list</c>）——宿主把 SDK 的模型能力表
-/// 投影成纯数据给 UI。放在桌面端而不是 SDK，因为它带着宿主的取舍
-/// （只传上下文窗口与输出上限，不传 wire format 细节）</item>
+/// <item><b>目录浏览</b>（<c>fs/list</c>、<c>fs/listed</c>）——右栏文件树的 UI 形态</item>
+/// <item><b>工作区改动</b>（<c>fs/changed</c>）——"改动 tab"，且"怎么算变更"
+/// 是一种实现选择（桌面端用文件版本指纹比对，给不出行级 diff）</item>
 /// </list>
 /// <para>
-/// <b>判别器登记在类型上，不在某个集中的列表里</b>：SDK 的 <c>Protocol.cs</c>
-/// 只登记它自己知道的类型，登记不了未知的派生类。所以桌面端这些消息
-/// 由各自的 <c>[JsonDerivedType]</c> 声明。序列化时用
-/// <see cref="Dougong.HostProtocol.HostProtocolContract.Json"/> 同一个实例即可——
-/// 特性挂在类型上，不依赖登记位置。
+/// <b>模型目录不在其中</b>：它曾经在这里，但那个取舍（只传上下文窗口与输出上限、
+/// 不传 wire format 细节）对任何客户端都成立，不是桌面端独有。
+/// 已收进 SDK 契约（<c>model/list</c> / <c>model/listed</c>）。
+/// </para>
+/// <para>
+/// <b>判别器由 <see cref="RegisterMessages"/> 登记</b>，不用 <c>[JsonDerivedType]</c>：
+/// 那个特性必须挂在基类上，而基类在 SDK 程序集里。
 /// </para>
 /// </remarks>
 public static class DesktopProtocol
 {
     /// <summary>
-    /// 桌面端特有消息的序列化配置。
+    /// 把桌面端特有的消息登记到 SDK 的共享配置里。
     /// </summary>
     /// <remarks>
-    /// <b>为什么不能直接用 SDK 的 <c>HostProtocolContract.Json</c></b>：
-    /// 多态基类只登记它自己知道的派生类型，而 <c>[JsonDerivedType]</c>
-    /// 必须挂在基类上——挂在派生类上无效。实测报错：
-    /// <c>Runtime type 'ListDirectoryCommand' is not supported by
-    /// polymorphic type 'Dougong.HostProtocol.ClientCommand'</c>。
+    /// <b>用 SDK 的 <c>RegisterDerivedType</c> 而不是自己克隆一份配置。</b>
+    /// 之前这里克隆 SDK 的 <c>Json</c> 再挂修饰器，那是绕法；
+    /// SDK 补了这个口之后不再需要。
     /// <para>
-    /// <b>基准设置必须与 SDK 一致</b>：SDK 文档明确警告"双方各写一份
-    /// <c>JsonSerializerOptions</c> 是这类协议最常见的裂缝"——一侧忽略 null、
-    /// 另一侧不忽略时，"字段不存在"与"字段是 null"在线上就无法区分。
-    /// 所以这里从 SDK 的配置**克隆**，只补桌面端判别器，不动任何基准项。
+    /// <b>克隆的问题</b>（SDK 文档的原文理由）：绕开"同一份配置"这条，
+    /// 两侧的 <c>DefaultIgnoreCondition</c> 一旦不同，"字段不存在"与
+    /// "字段是 null"在线上就无法区分。
+    /// </para>
+    /// <para>
+    /// <b>基线类型必须显式给泛型参数</b>，不靠反射推断——SDK 文档说明了原因：
+    /// 派生类型的 <c>BaseType</c> 未必就是要挂的多态根（可能有中间基类），
+    /// 猜错时类型能编译、特性也都在，只是序列化时不走、反序列化时不认，
+    /// 两端都不报错。
+    /// </para>
+    /// <para>
+    /// <b>必须在首次序列化之前调用</b>。之后调用 SDK 会抛
+    /// <see cref="InvalidOperationException"/> 而不是静默忽略——
+    /// 静默忽略会让人对着"消息发不出去"排查半天。
+    /// 所以由 <c>AppShell</c> 的静态构造调，早于任何连接。
     /// </para>
     /// </remarks>
-    public static JsonSerializerOptions Json { get; } = Create();
-
-    private static JsonSerializerOptions Create()
+    public static void RegisterMessages()
     {
-        var options = new JsonSerializerOptions(HostProtocolContract.Json);
+        if (_registered) return;
+        _registered = true;
 
-        // 用运行时修饰器补两条多态根的派生类型。
-        //
-        // 试过源生成（JsonSerializerContext）：对来自其他程序集的基类
-        // 报 NullReferenceException（生成器缺陷）。运行时修饰器不受此限，
-        // 且它只补"多出来的几个类型"，其余仍走 SDK 那份配置的默认行为。
-        // SDK 的 TypeInfoResolver 是 null（用 STJ 默认反射解析器）。
-        // 所以起点必须是 DefaultJsonTypeInfoResolver——用自写的空解析器
-        // 会让所有类型都解析不出来，表现为"消息全丢"，而那条错误
-        // 只在反序列化时静默发生。
-        var baseResolver = options.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver();
-        options.TypeInfoResolver = baseResolver.WithAddedModifier(DesktopPolymorphism.Add);
+        HostProtocolContract.RegisterDerivedType<ClientCommand>(
+            new JsonDerivedType(typeof(ListDirectoryCommand), "fs/list"));
+        HostProtocolContract.RegisterDerivedType<ClientCommand>(
+            new JsonDerivedType(typeof(ListModelsCommand), "models/list"));
 
-        return options;
+        HostProtocolContract.RegisterDerivedType<ServerEvent>(
+            new JsonDerivedType(typeof(DirectoryListedEvent), "fs/listed"));
+        HostProtocolContract.RegisterDerivedType<ServerEvent>(
+            new JsonDerivedType(typeof(WorkspaceChangedEvent), "fs/changed"));
+        HostProtocolContract.RegisterDerivedType<ServerEvent>(
+            new JsonDerivedType(typeof(ModelsListedEvent), "models/listed"));
     }
-}
 
-/// <summary>
-/// 桌面端派生类型的多态登记。
-/// </summary>
-/// <remarks>
-/// <b>只能在这里登记，不能在类型上加特性</b>：System.Text.Json 要求
-/// <c>[JsonDerivedType]</c> 出现在基类上，而基类
-/// （<c>Dougong.HostProtocol.ClientCommand</c>）在 SDK 程序集里，我们改不了。
-/// <para>
-/// <b>新增桌面端消息时这里必须同步加一行</b>，否则那类消息发得出去、收不回来。
-/// <c>ipc-every-message-is-registered</c> 那条检查会提醒。
-/// </para>
-/// </remarks>
-internal static class DesktopPolymorphism
-{
-    public static void Add(JsonTypeInfo typeInfo)
-    {
-        if (typeInfo.Type == typeof(ClientCommand))
-        {
-            typeInfo.PolymorphismOptions ??= new JsonPolymorphismOptions
-            {
-                TypeDiscriminatorPropertyName = "method",
-            };
+    private static bool _registered;
 
-            typeInfo.PolymorphismOptions.DerivedTypes.Add(
-                new JsonDerivedType(typeof(ListDirectoryCommand), "fs/list"));
-            typeInfo.PolymorphismOptions.DerivedTypes.Add(
-                new JsonDerivedType(typeof(ListModelsCommand), "models/list"));
-        }
-        else if (typeInfo.Type == typeof(ServerEvent))
-        {
-            typeInfo.PolymorphismOptions ??= new JsonPolymorphismOptions
-            {
-                TypeDiscriminatorPropertyName = "method",
-            };
+    /// <summary>
+    /// 序列化配置：直接用 SDK 的共享实例。
+    /// </summary>
+    /// <remarks>
+    /// <b>不再克隆</b>：桌面端消息已经通过 <c>RegisterDerivedType</c>
+    /// 进到 SDK 那份配置里，两端用同一个 <c>JsonSerializerOptions</c>，
+    /// "同一份配置"这条从机制上成立，不靠约定。
+    /// </remarks>
+    public static JsonSerializerOptions Json => HostProtocolContract.Json;
 
-            typeInfo.PolymorphismOptions.DerivedTypes.Add(
-                new JsonDerivedType(typeof(DirectoryListedEvent), "fs/listed"));
-            typeInfo.PolymorphismOptions.DerivedTypes.Add(
-                new JsonDerivedType(typeof(WorkspaceChangedEvent), "fs/changed"));
-            typeInfo.PolymorphismOptions.DerivedTypes.Add(
-                new JsonDerivedType(typeof(ModelsListedEvent), "models/listed"));
-        }
-    }
+    /// <summary>
+    /// 已登记的扩展类型，供自检。
+    /// </summary>
+    /// <remarks>
+    /// SDK 暴露这个清单就是为了让宿主能断言"我的注册真的进去了"——
+    /// 注册失败是静默的（编译过、序列化不报错，只是那条消息用错配置）。
+    /// </remarks>
+    public static IReadOnlyList<(Type BaseType, JsonDerivedType Derived)> RegisteredExtensions =>
+        HostProtocolContract.RegisteredExtensions;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -198,42 +181,11 @@ public sealed record WorkspaceChangedEvent : ServerEvent
 // 模型目录
 // ─────────────────────────────────────────────────────────────
 
-/// <summary>
-/// 一个可选模型的描述。
-/// </summary>
-/// <remarks>
-/// <b>为什么不直接用 SDK 的 <c>ModelCapabilities</c></b>：那个类型带着
-/// <c>ReasoningField</c> 与 <c>ReasoningEfforts</c>——前者是 wire format
-/// 细节（UI 不该知道"用哪个字段名传推理"），后者是个字典（跨进程要么转形状、
-/// 要么泄露实现）。这里只传 UI 真正要显示的三个数，砍掉的是**宿主的取舍**。
-/// </remarks>
-/// <param name="ProviderId">所属 provider 的稳定标识（如 <c>anthropic</c>）。</param>
-/// <param name="Id">模型标识，用于发起请求时指定。</param>
-/// <param name="ContextWindow">上下文窗口（token）。0 表示未知。</param>
-/// <param name="MaxOutputTokens">输出容量上限（token）。0 表示未知。</param>
-/// <param name="SupportsReasoning">是否支持思考模式。</param>
-public sealed record ModelInfo(
-    string ProviderId,
-    string Id,
-    int ContextWindow,
-    int MaxOutputTokens,
-    bool SupportsReasoning);
-
-/// <summary>模型目录（响应 <see cref="ListModelsCommand"/>）。</summary>
-// 判别器在 DesktopPolymorphism 登记（特性必须挂基类）。
-// [JsonDerivedType(typeof(ModelsListedEvent), "models/listed")]
-public sealed record ModelsListedEvent : ServerEvent
-{
-    public required IReadOnlyList<ModelInfo> Models { get; init; }
-
-    /// <summary>provider 的稳定标识，按字母序。</summary>
-    public required IReadOnlyList<string> Providers { get; init; }
-
-    /// <summary>当前实际在用的模型 Id；null 表示未配置。</summary>
-    public string? CurrentModelId { get; init; }
-}
-
-/// <summary>请求模型目录。</summary>
-// 判别器在 DesktopPolymorphism 登记（特性必须挂基类）。
-// [JsonDerivedType(typeof(ListModelsCommand), "models/list")]
-public sealed record ListModelsCommand : ClientCommand;
+// **这三个类型已改由 SDK 的 Dougong.HostProtocol 提供**：
+// ModelInfo、ListModelsCommand（判别器 model/list）、ModelsListedEvent（model/listed）。
+//
+// 此前这里各自定义了一份，判别器写成 models/list——与契约不一致。
+// 实测同一类型挂两个判别器时，序列化只用第一个，第二个反序列化直接抛
+// JsonException。也就是说两份定义并存时，写出去和读回来用的不是同一个值。
+//
+// 现在删掉本地定义，直接用契约的。判别器统一为 model/list 与 model/listed。

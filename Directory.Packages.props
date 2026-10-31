@@ -23,10 +23,10 @@
 
     <!-- Dougong SDK：来自 nuget.org。版本写死，与 SDK 仓库的发布节奏解耦——
          升级时只改这里一行，而不是跟着 SDK 的 main 分支漂。 -->
-    <PackageVersion Include="Dougong.Agent" Version="0.1.11-alpha.1" />
-    <PackageVersion Include="Dougong.Ai" Version="0.1.11-alpha.1" />
-    <PackageVersion Include="Dougong.Hosting" Version="0.1.11-alpha.1" />
-    <PackageVersion Include="Dougong.HostProtocol" Version="0.1.11-alpha.1" />
+    <PackageVersion Include="Dougong.Agent" Version="0.1.13-alpha.1" />
+    <PackageVersion Include="Dougong.Ai" Version="0.1.13-alpha.1" />
+    <PackageVersion Include="Dougong.Hosting" Version="0.1.13-alpha.1" />
+    <PackageVersion Include="Dougong.HostProtocol" Version="0.1.13-alpha.1" />
   </ItemGroup>
 
 </Project>

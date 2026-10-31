@@ -202,18 +202,20 @@ public sealed class ConversationView : UserControl
         var seq = 0;
         string NextId() => $"selftest-{++seq}";
 
-        Add(new UserMessageItem { Id = NextId(), Text = "帮我读一下 README.md" });
+        Add(new UserMessageItem { Id = NextId(), At = DateTimeOffset.Now, Text = "帮我读一下 README.md" });
 
         Add(new AssistantMessageItem
         {
-            Id = NextId(),
+            At = DateTimeOffset.Now,
+           Id = NextId(),
             Text = "好的，我先读文件。**这是加粗**，`这是行内代码`。\n\n```csharp\nvar x = 1;\n```",
         });
 
         // 流式条目：验证 Stream 路径（Push + Complete）
         Add(new AssistantMessageItem
         {
-            Id = NextId(),
+            At = DateTimeOffset.Now,
+           Id = NextId(),
             Text = "## 流式渲染验证\n\n这段文字通过 **MarkdownStream.Push** 推入，"
                  + "不是重设 Text。如果标题和加粗都正常，说明 Stream 路径可用。",
             IsStreaming = true,
@@ -231,6 +233,7 @@ public sealed class ConversationView : UserControl
         {
             Add(new IpcToolCallItem
             {
+                At = DateTimeOffset.Now,
                 Id = NextId(),
                 InvocationId = $"inv-{label}",
                 ToolName = "read_file",
@@ -261,6 +264,7 @@ public sealed class ConversationView : UserControl
         // JSON 输出：验证 Arc 的 JsonOutput 着色与十行折叠
         Add(new IpcToolCallItem
         {
+            At = DateTimeOffset.Now,
             Id = NextId(),
             InvocationId = "inv-json",
             ToolName = "read_config",
@@ -273,7 +277,8 @@ public sealed class ConversationView : UserControl
 
         Add(new PlanItem
         {
-            Id = NextId(),
+            At = DateTimeOffset.Now,
+           Id = NextId(),
             Steps =
             [
                 new PlanStep("读取文件", "completed", "high"),
@@ -284,7 +289,8 @@ public sealed class ConversationView : UserControl
 
         Add(new NoticeItem
         {
-            Id = NextId(),
+            At = DateTimeOffset.Now,
+           Id = NextId(),
             Level = NoticeLevel.Warning,
             Text = "上下文已压缩：移除 12 条消息，约 48000 → 12000 tokens。模型看到的不再是完整历史。",
         });
@@ -293,7 +299,8 @@ public sealed class ConversationView : UserControl
         // 但是否出现取决于 provider（只有思考模式的模型才给）
         Add(new ReasoningItem
         {
-            Id = NextId(),
+            At = DateTimeOffset.Now,
+           Id = NextId(),
             Text = "（推理示例）用户要看的是默认布局对不对。先确认三栏尺寸，"
                  + "再看消息流里每种条目是否都渲染。等等——这里要注意 JSON 输出那一档，"
                  + "它走的是折叠路径，和纯文本不一样。",
@@ -301,7 +308,8 @@ public sealed class ConversationView : UserControl
 
         Add(new AssistantMessageItem
         {
-            Id = NextId(),
+            At = DateTimeOffset.Now,
+           Id = NextId(),
             Text = string.Join(Environment.NewLine,
                 Enumerable.Range(1, 30).Select(i => $"第 {i} 行：用于测试长文本与滚动。")),
         });
@@ -331,6 +339,7 @@ public sealed class ConversationView : UserControl
             {
                 _items.Add(new IpcToolCallItem
                 {
+                    At = DateTimeOffset.Now,
                     Id = $"stress-{i}",
                     InvocationId = $"inv-{i}",
                     ToolName = "read_file",
@@ -343,7 +352,8 @@ public sealed class ConversationView : UserControl
             {
                 _items.Add(new AssistantMessageItem
                 {
-                    Id = $"stress-{i}",
+                    At = DateTimeOffset.Now,
+                   Id = $"stress-{i}",
                     Text = $"第 {i} 条消息。用于验证虚拟化：如果 1000 条全部构建，"
                          + "视觉树会膨胀到几千个节点，滚动明显发卡。",
                 });

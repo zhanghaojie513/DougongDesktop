@@ -90,6 +90,12 @@ catch (InvalidOperationException ex)
 
 using var composer = new SessionComposer(options);
 
+// **必须在任何序列化发生之前登记桌面端判别器**。
+// JsonSerializerOptions 首次使用后冻结，之后登记会抛异常而不是静默失效。
+// 刻意写成显式调用而不是静态构造：这一步"定义了但没用"会造成静默故障，
+// 调用点落在这里，读代码的人一眼能看到它确实被执行。
+DougongDesktop.Ipc.DesktopProtocol.RegisterMessages();
+
 await using var server = new IpcServer(composer, options, workspace);
 
 using var shutdown = new CancellationTokenSource();

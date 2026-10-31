@@ -57,6 +57,8 @@ internal static class ToolChecks
     {
         var existing = new ToolCallItem
         {
+            // 测试用固定时刻：依赖"现在"会让断言随执行时间变化。
+            At = DateTimeOffset.UnixEpoch,
             Id = "tool-inv-1",
             InvocationId = "inv-1",
             ToolName = "read_file",
@@ -96,6 +98,7 @@ internal static class ToolChecks
     {
         var existing = new ToolCallItem
         {
+            At = DateTimeOffset.UnixEpoch,
             Id = "tool-inv-2",
             InvocationId = "inv-2",
             ToolName = "write_file",

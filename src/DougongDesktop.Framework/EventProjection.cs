@@ -83,7 +83,8 @@ public static class EventProjection
 
         AgentEvent.ToolCallRequested requested => new Projection.Added(new ToolCallItem
         {
-            // Id 用 InvocationId 派生：同一个调用在"请求"和"完成"两处必须算出同一个 Id，
+            At = DateTimeOffset.Now,
+           // Id 用 InvocationId 派生：同一个调用在"请求"和"完成"两处必须算出同一个 Id，
             // 否则更新时找不到原条目
             Id = ToolItemId(requested.InvocationId),
             InvocationId = requested.InvocationId,
@@ -96,14 +97,16 @@ public static class EventProjection
 
         AgentEvent.PlanUpdated plan => new Projection.Added(new PlanItem
         {
-            // 计划是全量替换语义，每次都是新条目
+            At = DateTimeOffset.Now,
+           // 计划是全量替换语义，每次都是新条目
             Id = $"plan-{Guid.NewGuid():N}"[..14],
             Steps = [.. plan.Entries.Select(e => new PlanStep(e.Content, e.Status, e.Priority))],
         }),
 
         AgentEvent.ContextCompacted compacted => new Projection.Added(new NoticeItem
         {
-            Id = NoticeId(),
+            At = DateTimeOffset.Now,
+           Id = NoticeId(),
             Level = NoticeLevel.Warning,
             Text = compacted.Applied
                 ? $"上下文已压缩：移除 {compacted.RemovedMessages} 条消息，" +
@@ -114,7 +117,8 @@ public static class EventProjection
 
         AgentEvent.ToolResultTruncated truncated => new Projection.Added(new NoticeItem
         {
-            Id = NoticeId(),
+            At = DateTimeOffset.Now,
+           Id = NoticeId(),
             Level = NoticeLevel.Info,
             Text = $"工具 {truncated.ToolId} 的输出过长，进入模型上下文时" +
                    $"裁剪为 {truncated.KeptChars} / {truncated.OriginalChars} 字符。" +

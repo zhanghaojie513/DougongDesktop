@@ -44,6 +44,15 @@ public static class Program
         // 支持两种写法：--break=<名字> 和 --break <名字>
         var breakMode = ParseBreakMode(args);
 
+        // **必须在任何检查之前注册**：SDK 的 JsonSerializerOptions 一旦
+        // 被用过就冻结，此后 RegisterDerivedType 会抛 InvalidOperationException。
+        // 真实进程在 Program 第一行做这件事，检查工程照做。
+        //
+        // 实测过一次：注册放在 DockChecks 内部（序列化之后），
+        // SDK 直接抛"必须在首次序列化之前调用"——那条清晰的诊断
+        // 比静默失败好得多，立刻就定位到了原因。
+        DougongDesktop.Ipc.DesktopProtocol.RegisterMessages();
+
         var failures = 0;
 
         failures += Check("app-does-not-reference-sdk", () => AppDoesNotReferenceSdk(breakMode == "app-does-not-reference-sdk"));

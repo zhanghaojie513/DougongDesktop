@@ -237,6 +237,12 @@ public sealed class IpcServer : IAsyncDisposable
     /// <c>ProviderCatalog</c>，而 App 层禁止引用 SDK（架构守卫会红）。
     /// 经 IPC 传纯数据，UI 侧再转成 Arc 的 <c>AiModel</c>——分层不破，
     /// UI 也不必知道 SDK 类型。
+    /// <para>
+    /// <b>当前在用的 provider 必须补进列表</b>：如果用户配的是自建网关
+    /// （<c>DOUGONG_PROVIDER_BASE</c> 指向内置 22 家之外），它不在
+    /// <c>AllPresets</c> 里。不补的话，用户明明在用，选择器里却找不到它——
+    /// 看起来像"配置没生效"，而实际只是列表没列。
+    /// </para>
     /// </remarks>
     private ModelsListedEvent BuildModelsEvent()
     {
@@ -259,6 +265,8 @@ public sealed class IpcServer : IAsyncDisposable
             }
         }
 
+        AddCurrentProviderIfMissing(models, providers);
+
         return new ModelsListedEvent
         {
             Sequence = NextStatusSequence(),
@@ -266,6 +274,96 @@ public sealed class IpcServer : IAsyncDisposable
             Providers = providers,
             CurrentModelId = _options.Model,
         };
+    }
+
+    /// <summary>
+    /// 把当前配置的 provider 补进目录（若它不在内置表里）。
+    /// </summary>
+    /// <remarks>
+    /// <b>先按 BaseUrl 匹配内置 provider</b>：用户可能配的是内置那家的
+    /// 另一个端点（例如网页版地址），那时应当归到同一家，而不是变成
+    /// 一个新的"custom"。匹配用的是规范化后的 host + 路径前缀比较——
+    /// 精确相等太脆（末尾斜杠、大小写、是否带 /v1 都会让它失配）。
+    /// <para>
+    /// <b>匹配不上就叫 custom</b>：不猜一个看起来像真名的标签。
+    /// 猜错比留空更糟——用户会以为自己在用某家服务，而实际上不是。
+    /// </para>
+    /// <para>
+    /// <b>能力数据未知时给 0</b>：<see cref="ModelInfo"/> 的窗口字段
+    /// 约定 0 表示未知，UI 应照此显示，不要编一个数。
+    /// </para>
+    /// </remarks>
+    private void AddCurrentProviderIfMissing(List<ModelInfo> models, List<string> providers)
+    {
+        if (string.IsNullOrWhiteSpace(_options.Model)) return;
+
+        var providerId = MatchProviderByBaseUrl(_options.BaseUrl) ?? "custom";
+
+        if (providers.Contains(providerId, StringComparer.OrdinalIgnoreCase))
+        {
+            // 内置 provider 已列出，但当前模型可能不在它的模型表里
+            // （用户手填了一个该家新增的模型名）。补一条，否则"当前模型"
+            // 在选择器里没有对应项，UI 无法高亮。
+            EnsureModelListed(models, providerId);
+            return;
+        }
+
+        providers.Insert(0, providerId);
+        EnsureModelListed(models, providerId, _options.ContextWindowTokens, _options.MaxOutputTokens);
+    }
+
+    /// <summary>当前模型必须在 <paramref name="models"/> 里出现一次。</summary>
+    private void EnsureModelListed(
+        List<ModelInfo> models, string providerId,
+        int contextWindow = 0, int maxOutput = 0)
+    {
+        var exists = models.Any(m =>
+            string.Equals(m.ProviderId, providerId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(m.Id, _options.Model, StringComparison.Ordinal));
+        if (exists) return;
+
+        // 先按内置能力表查（内置 provider 的新模型可能有数据）。
+        var known = ProviderCatalog.FindModelCapabilities(providerId, _options.Model);
+
+        models.Insert(0, new ModelInfo(
+            providerId,
+            _options.Model,
+            known?.ContextWindow ?? contextWindow,
+            known?.MaxOutputTokens ?? maxOutput,
+            known?.SupportsReasoning ?? false));
+    }
+
+    /// <summary>
+    /// 按 BaseUrl 找出内置 provider 的标识；匹配不上返回 null。
+    /// </summary>
+    /// <remarks>
+    /// 比较 host 与路径前缀而不是完整字符串：用户可能配
+    /// <c>https://api.deepseek.com/v1</c>，而预设里是
+    /// <c>https://api.deepseek.com</c>——完整比较会失配，
+    /// 那样每家用内置端点的用户都会多出一个 custom 条目。
+    /// </remarks>
+    private static string? MatchProviderByBaseUrl(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl)) return null;
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var target)) return null;
+
+        foreach (var (providerId, preset) in ProviderCatalog.AllPresets)
+        {
+            if (!Uri.TryCreate(preset.BaseUrl, UriKind.Absolute, out var known)) continue;
+
+            if (!string.Equals(known.Host, target.Host, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // host 相同还不够：同一域名可能挂多家兼容端点
+            //（例如 OpenAI 与 Azure OpenAI 不是同域，但不少网关同域多路径）。
+            var knownPath = known.AbsolutePath.TrimEnd('/');
+            var targetPath = target.AbsolutePath.TrimEnd('/');
+
+            if (knownPath.Length == 0 || targetPath.StartsWith(knownPath, StringComparison.OrdinalIgnoreCase))
+                return providerId;
+        }
+
+        return null;
     }
 
     /// <summary>
