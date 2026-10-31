@@ -16,4 +16,20 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- 通用契约现在来自 SDK 的 Dougong.HostProtocol。
+         放在这里而不是逐个项目加 using：UI 层、框架层、宿主层都要用这些类型，
+         而它们分属不同项目——一处声明，五处生效，不会漏。
+
+         **为什么不改成逐个文件加 using**：14 个文件、35 个类型，
+         手改会漏，而且以后新文件还要记得加。全局 using 让"用 SDK 的契约"
+         成为默认，而不是需要记住的约定。 -->
+    <Using Include="Dougong.HostProtocol" />
+
+    <!-- 引用也放这里，与上面的 using 配套。
+         只放 using 不放引用，会让没有该包的项目编译失败（Ui.Core 就是）——
+         全局 using 不能凭空引入一个程序集里没有的命名空间。 -->
+    <PackageReference Include="Dougong.HostProtocol" />
+  </ItemGroup>
+
 </Project>

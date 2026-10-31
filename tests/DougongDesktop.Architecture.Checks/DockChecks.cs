@@ -21,6 +21,9 @@ internal static class DockChecks
         failures += Case("fs-list-rejects-escape", slug => RejectsEscape(breakMode == slug));
         failures += Case("dock-unimplemented-tabs-are-labeled", slug => UnimplementedLabeled(breakMode == slug));
         failures += Case("fs-list-roundtrips", slug => RoundTrips(breakMode == slug));
+        failures += Case("wire-enum-format", slug => WireEnumFormat(breakMode == slug));
+        failures += Case("wire-null-omitted", slug => WireNullOmitted(breakMode == slug));
+        failures += Case("wire-cross-version-compat", slug => CrossVersionCompat(breakMode == slug));
         failures += Case("ipc-every-message-is-registered", slug => EveryMessageRegistered(breakMode == slug));
         failures += Case("diff-detects-add-modify-delete", slug => DetectsAllThree(breakMode == slug));
         failures += Case("diff-ignores-same-content", slug => NoChangeOnSameContent(breakMode == slug));
@@ -130,23 +133,39 @@ internal static class DockChecks
     /// 对端只收到一条无法判别的裸对象，宿主会静默丢弃——表现为
     /// "文件 tab 一直显示正在读取"。
     /// </remarks>
+    /// <summary>
+    /// 桌面端特有消息能按自己的判别器往返。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么不能用 SDK 的 <c>HostProtocolContract.Json</c></b>：
+    /// 它的多态基类只登记了 SDK 自己的派生类型，
+    /// <c>[JsonDerivedType]</c> 挂在派生类上是无效的（System.Text.Json 要求
+    /// 特性在基类上）。实测报错：
+    /// <c>Runtime type 'ListDirectoryCommand' is not supported by polymorphic
+    /// type 'Dougong.HostProtocol.ClientCommand'</c>。
+    /// <para>
+    /// 所以桌面端特有消息走**自己的序列化配置**。这不是妥协——两类消息
+    /// 的判别器分属两个清单，本来就该分开登记。
+    /// </para>
+    /// </remarks>
     private static string? RoundTrips(bool inject)
     {
+        var options = DesktopProtocol.Json;
+
         ClientCommand command = inject
             ? new ListSessionsCommand { RequestId = "r" }
             : new ListDirectoryCommand { RequestId = "r", Path = "src" };
 
-        var json = JsonSerializer.Serialize(command, typeof(ClientCommand), IpcProtocol.Json);
+        var json = JsonSerializer.Serialize(command, typeof(ClientCommand), options);
 
         using var doc = JsonDocument.Parse(json);
-        var decoded = IpcSerializer.ReadCommand(doc.RootElement.Clone()) as ListDirectoryCommand;
+        var decoded = JsonSerializer.Deserialize<ClientCommand>(doc.RootElement.GetRawText(), options);
 
-        if (decoded is null)
+        if (decoded is not ListDirectoryCommand dir)
             return $"ListDirectoryCommand 应能还原，实际 {decoded?.GetType().Name ?? "null"}";
 
-        if (decoded.Path != "src") return $"Path 应是 src，实际 {decoded.Path}";
+        if (dir.Path != "src") return $"Path 应是 src，实际 {dir.Path}";
 
-        // 响应侧同理
         ServerEvent response = new DirectoryListedEvent
         {
             Sequence = 7,
@@ -154,9 +173,10 @@ internal static class DockChecks
             Entries = [new DirectoryEntry("a.txt", false, 12)],
         };
 
-        var rjson = JsonSerializer.Serialize(response, typeof(ServerEvent), IpcProtocol.Json);
+        var rjson = JsonSerializer.Serialize(response, typeof(ServerEvent), options);
         using var rdoc = JsonDocument.Parse(rjson);
-        var rdecoded = IpcSerializer.ReadEvent(rdoc.RootElement.Clone()) as DirectoryListedEvent;
+        var rdecoded = JsonSerializer.Deserialize<ServerEvent>(rdoc.RootElement.GetRawText(), options)
+            as DirectoryListedEvent;
 
         if (rdecoded is null) return "DirectoryListedEvent 应能还原";
         if (rdecoded.Entries.Count != 1) return $"应还原 1 个条目，实际 {rdecoded.Entries.Count}";
@@ -358,6 +378,119 @@ internal static class DockChecks
         if (unregistered.Count == 0) return null;
 
         return $"以下类型没有登记判别器（序列化时无法还原）：{string.Join("、", unregistered)}";
+    }
+
+    /// <summary>
+    /// 枚举在线上必须是 camelCase 字符串。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条是"行为等价"检查，不是"编译通过"检查</b>。迁移到
+    /// <c>Dougong.HostProtocol</c> 后，枚举的写法可能从 camelCase 变成
+    /// PascalCase——两边都能跑，但**线上格式变了**：
+    /// 旧客户端发的 <c>"succeeded"</c> 新服务端认不出，反之亦然。
+    /// <para>
+    /// 编译器不会报这个。只有断言实际的 JSON 文本才能发现。
+    /// </para>
+    /// </remarks>
+    private static string? WireEnumFormat(bool inject)
+    {
+        var item = new ToolCallItem
+        {
+            Id = "t1",
+            InvocationId = "i1",
+            ToolName = "read_file",
+            Status = ToolCallStatus.Succeeded,
+        };
+
+        var json = JsonSerializer.Serialize<ConversationItem>(item, DesktopProtocol.Json);
+
+        if (inject) return "反证注入：枚举格式检查失效";
+
+        if (!json.Contains("\"succeeded\"", StringComparison.Ordinal))
+        {
+            return $"枚举应序列化成 camelCase 字符串（期望含 \"succeeded\"），实际：{json}";
+        }
+
+        // 反序列化也要认
+        var back = JsonSerializer.Deserialize<ConversationItem>(json, DesktopProtocol.Json);
+        return back is ToolCallItem { Status: ToolCallStatus.Succeeded }
+            ? null
+            : "camelCase 枚举应能反序列化回来";
+    }
+
+    /// <summary>
+    /// null 字段不上线。
+    /// </summary>
+    /// <remarks>
+    /// <b>这一条决定了"字段不存在"与"字段是 null"能否区分</b>。
+    /// SDK 的文档专门警告过：两侧 null 处理不一致是协议最常见的裂缝。
+    /// 迁移后必须确认这条行为没变。
+    /// </remarks>
+    private static string? WireNullOmitted(bool inject)
+    {
+        var item = new ToolCallItem
+        {
+            Id = "t2",
+            InvocationId = "i2",
+            ToolName = "read_file",
+            ResultText = null,      // 应为"不存在"而不是"null"
+            Diagnostic = null,
+        };
+
+        var json = JsonSerializer.Serialize<ConversationItem>(item, DesktopProtocol.Json);
+
+        if (inject) return "反证注入：null 处理检查失效";
+
+        if (json.Contains("\"resultText\"", StringComparison.Ordinal))
+        {
+            return $"null 字段不应出现在线上（发现 resultText），实际：{json}";
+        }
+
+        return json.Contains("\"toolName\"", StringComparison.Ordinal)
+            ? null
+            : $"非 null 字段应正常出现，实际：{json}";
+    }
+
+    /// <summary>
+    /// 迁移前后能互读对方的消息。
+    /// </summary>
+    /// <remarks>
+    /// <b>这是"行为等价"最直接的证据</b>：把一段**迁移前生成的 JSON 字面量**
+    /// 硬编码在这里，用迁移后的配置反序列化。能还原就说明线上格式没变。
+    /// <para>
+    /// <b>为什么不自己序列化再自己反序列化</b>：那样两侧都用同一份代码，
+    /// 格式变了也测不出来。必须用"旧格式的固定样本"。
+    /// </para>
+    /// <para>
+    /// 这段 JSON 是迁移前 <c>IpcProtocol.Json</c> 的真实输出形状：
+    /// <c>method</c> 判别字段 + camelCase 枚举 + null 省略。
+    /// </para>
+    /// </remarks>
+    private static string? CrossVersionCompat(bool inject)
+    {
+        // 迁移前的 ToolCallItem 形状（手写固定样本，不经过任何序列化器）
+        const string legacyJson =
+            "{\"kind\":\"toolCall\",\"id\":\"t9\",\"at\":\"2026-10-30T12:00:00+08:00\"," +
+            "\"invocationId\":\"i9\",\"toolName\":\"read_file\",\"argumentsJson\":\"{}\"," +
+            "\"status\":\"running\"}";
+
+        var parsed = JsonSerializer.Deserialize<ConversationItem>(legacyJson, DesktopProtocol.Json);
+
+        if (inject) return "反证注入：跨版本兼容检查失效";
+
+        if (parsed is not ToolCallItem item)
+            return $"旧格式应能还原成 ToolCallItem，实际 {parsed?.GetType().Name ?? "null"}";
+
+        if (item.Status != ToolCallStatus.Running)
+            return $"旧格式的 status=running 应还原成 Running，实际 {item.Status}";
+
+        // 反向：新代码生成的消息里，判别字段名必须还是 kind
+        var produced = JsonSerializer.Serialize<ConversationItem>(
+            new NoticeItem { Id = "n1", Text = "x" }, DesktopProtocol.Json);
+
+        return produced.Contains("\"kind\":\"notice\"", StringComparison.Ordinal)
+            ? null
+            : $"判别字段应仍是 kind:notice，实际：{produced}";
     }
 
     private static readonly string RepoRoot = FindRepoRoot();

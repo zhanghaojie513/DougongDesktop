@@ -11,8 +11,8 @@ using Avalonia.VisualTree;
 using DougongDesktop.Ipc;
 using DougongDesktop.Ui.Core;
 using TKCode.Arc;
-using IpcToolCallItem = DougongDesktop.Ipc.ToolCallItem;
-using IpcToolCallStatus = DougongDesktop.Ipc.ToolCallStatus;
+using IpcToolCallItem = Dougong.HostProtocol.ToolCallItem;
+using IpcToolCallStatus = Dougong.HostProtocol.ToolCallStatus;
 using ArcToolCallItem = TKCode.Arc.ToolCallItem;
 using ArcToolCallStatus = TKCode.Arc.ToolCallStatus;
 
@@ -186,7 +186,7 @@ public sealed class ConversationView : UserControl
         // 注意：这条只验证**卡片渲染**，不走 MainWindow.ShowApproval，
         // 所以 dump 里"待决锁=False"是符合预期的——锁由宿主在真实事件里上。
         // 真实审批链路的检查在 ApprovalChecks（断言锁与卡片互斥）。
-        AddApproval(new ApprovalCard(new DougongDesktop.Ipc.ApprovalRequest(
+        AddApproval(new ApprovalCard(new Dougong.HostProtocol.ApprovalRequest(
             RequestId: "req-selftest",
             SessionId: "sess-selftest",
             TurnId: "turn-selftest",

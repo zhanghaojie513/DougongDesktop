@@ -65,7 +65,7 @@ public sealed class IpcConnection : IAsyncDisposable
 
     private async Task SendRawAsync(object message, Type declaredType, CancellationToken ct)
     {
-        var json = JsonSerializer.Serialize(message, declaredType, IpcProtocol.Json);
+        var json = JsonSerializer.Serialize(message, declaredType, DesktopProtocol.Json);
         var bytes = Encoding.UTF8.GetBytes(json + "\n");
 
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
@@ -163,8 +163,8 @@ public sealed class IpcConnection : IAsyncDisposable
 public static class IpcSerializer
 {
     public static ClientCommand? ReadCommand(JsonElement element) =>
-        element.Deserialize<ClientCommand>(IpcProtocol.Json);
+        element.Deserialize<ClientCommand>(DesktopProtocol.Json);
 
     public static ServerEvent? ReadEvent(JsonElement element) =>
-        element.Deserialize<ServerEvent>(IpcProtocol.Json);
+        element.Deserialize<ServerEvent>(DesktopProtocol.Json);
 }

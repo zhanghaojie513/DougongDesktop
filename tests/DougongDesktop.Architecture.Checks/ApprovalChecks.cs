@@ -46,8 +46,8 @@ internal static class ApprovalChecks
         {
             asked++;
             // 第一次答"允许"，第二次也答"允许"（模拟连点）
-            return Task.FromResult<DougongDesktop.Ipc.ApprovalResponse?>(
-                new DougongDesktop.Ipc.ApprovalResponse("inv-1", DougongDesktop.Ipc.ApprovalDecision.AllowOnce, null));
+            return Task.FromResult<Dougong.HostProtocol.ApprovalResponse?>(
+                new Dougong.HostProtocol.ApprovalResponse("inv-1", Dougong.HostProtocol.ApprovalDecision.AllowOnce, null));
         });
 
         var request = MakeRequest("inv-1", "read_file", "{\"path\":\"a.txt\"}");
@@ -84,8 +84,8 @@ internal static class ApprovalChecks
         var approver = new IpcApprover((_, _) =>
         {
             asks++;
-            return Task.FromResult<DougongDesktop.Ipc.ApprovalResponse?>(
-                new DougongDesktop.Ipc.ApprovalResponse("x", DougongDesktop.Ipc.ApprovalDecision.AllowForSession, null));
+            return Task.FromResult<Dougong.HostProtocol.ApprovalResponse?>(
+                new Dougong.HostProtocol.ApprovalResponse("x", Dougong.HostProtocol.ApprovalDecision.AllowForSession, null));
         });
 
         var readA = MakeRequest("inv-a", "read_file", "{\"path\":\"a.txt\"}");
@@ -117,7 +117,7 @@ internal static class ApprovalChecks
     private static string? SilenceIsDenial(bool inject)
     {
         var approver = new IpcApprover((_, _) =>
-            Task.FromResult<DougongDesktop.Ipc.ApprovalResponse?>(null));
+            Task.FromResult<Dougong.HostProtocol.ApprovalResponse?>(null));
 
         var decision = approver
             .RequestApprovalAsync(MakeRequest("inv-null", "write_file", "{\"path\":\"x\"}"))
@@ -173,9 +173,9 @@ internal static class ApprovalChecks
         string? stopReason = null;
 
         var approver = new IpcApprover(
-            (_, _) => Task.FromResult<DougongDesktop.Ipc.ApprovalResponse?>(
-                new DougongDesktop.Ipc.ApprovalResponse(
-                    "inv-stop", DougongDesktop.Ipc.ApprovalDecision.DenyAndStop, "不要再写了")),
+            (_, _) => Task.FromResult<Dougong.HostProtocol.ApprovalResponse?>(
+                new Dougong.HostProtocol.ApprovalResponse(
+                    "inv-stop", Dougong.HostProtocol.ApprovalDecision.DenyAndStop, "不要再写了")),
             timeout: null,
             stopTurn: reason =>
             {

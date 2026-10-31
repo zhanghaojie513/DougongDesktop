@@ -250,7 +250,14 @@ public static class Program
             var dir = Path.Combine(RepoRoot, "src", project);
             if (!Directory.Exists(dir)) continue;
 
+            // 排除 obj/ 与 bin/：`Directory.Build.props` 的全局 using 会在
+            // 那里生成 `<Project>.GlobalUsings.g.cs`，它含 `using Dougong.HostProtocol;`。
+            // 那是构建产物，不是我们的源码——把它算进来会让守卫在每个工程上都误报。
             var count = Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
+                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar,
+                             StringComparison.OrdinalIgnoreCase)
+                         && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar,
+                             StringComparison.OrdinalIgnoreCase))
                 .Count(f => File.ReadAllText(f).Contains("using Dougong.", StringComparison.Ordinal)
                          || File.ReadAllText(f).Contains("Dougong.Agent", StringComparison.Ordinal)
                          || File.ReadAllText(f).Contains("Dougong.Hosting", StringComparison.Ordinal));
@@ -259,7 +266,17 @@ public static class Program
         }
 
         var frameworkDir = Path.Combine(RepoRoot, "src", "DougongDesktop.Framework");
+
+        // 同样要排除 obj/bin：全局 using 会在那里生成 GlobalUsings.g.cs，
+        // 它含 `using Dougong.HostProtocol;` 而那是构建产物。
+        static bool IsSource(string path) =>
+            !path.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase)
+            && !path.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase);
+
         var frameworkCount = Directory.EnumerateFiles(frameworkDir, "*.cs", SearchOption.AllDirectories)
+            .Where(IsSource)
             .Count(f => File.ReadAllText(f).Contains("using Dougong.", StringComparison.Ordinal));
 
         if (inject) violations.Add($"(反证注入) Framework: {budget + 1} 个文件");

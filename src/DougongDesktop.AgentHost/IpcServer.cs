@@ -123,7 +123,7 @@ public sealed class IpcServer : IAsyncDisposable
         ClientCommand? command;
         try
         {
-            command = json.Deserialize<ClientCommand>(IpcProtocol.Json);
+            command = json.Deserialize<ClientCommand>(DesktopProtocol.Json);
         }
         catch (JsonException ex)
         {

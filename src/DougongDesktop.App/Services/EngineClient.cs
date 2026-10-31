@@ -164,10 +164,10 @@ public sealed class EngineClient : IAsyncDisposable
 
             // 协议版本不匹配时明确拒绝，不"尽量解析"
             if (doc.RootElement.TryGetProperty("protocolVersion", out var version)
-                && version.GetInt32() != IpcProtocol.Version)
+                && version.GetInt32() != HostProtocolContract.Version)
             {
                 SetState(EngineConnectionState.Failed,
-                    $"引擎协议版本 {version.GetInt32()} 与客户端 {IpcProtocol.Version} 不一致。");
+                    $"引擎协议版本 {version.GetInt32()} 与客户端 {HostProtocolContract.Version} 不一致。");
                 return false;
             }
 
@@ -198,7 +198,7 @@ public sealed class EngineClient : IAsyncDisposable
             await connection.ReadLoopAsync(
                 json =>
                 {
-                    if (json.Deserialize<ServerEvent>(IpcProtocol.Json) is not { } evt) return Task.CompletedTask;
+                    if (json.Deserialize<ServerEvent>(DesktopProtocol.Json) is not { } evt) return Task.CompletedTask;
 
                     // 序号缺口检测：不假装完整，明确要求重同步。
                     //

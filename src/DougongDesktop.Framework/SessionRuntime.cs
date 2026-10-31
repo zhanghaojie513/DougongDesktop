@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Dougong.Agent;
 using DougongDesktop.Ipc;
-using IpcSessionSummary = DougongDesktop.Ipc.SessionSummary;
+using IpcSessionSummary = Dougong.HostProtocol.SessionSummary;
 using Microsoft.Extensions.AI;
 
 namespace DougongDesktop.Framework;

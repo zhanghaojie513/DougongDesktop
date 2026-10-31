@@ -49,7 +49,7 @@ internal static class ResyncChecks
         using (var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true))
         {
             writer.Write(System.Text.Json.JsonSerializer.Serialize(
-                command, typeof(ClientCommand), IpcProtocol.Json));
+                command, typeof(ClientCommand), HostProtocolContract.Json));
             writer.Write('\n');
         }
 
@@ -86,7 +86,7 @@ internal static class ResyncChecks
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(
-            command, typeof(ClientCommand), IpcProtocol.Json);
+            command, typeof(ClientCommand), HostProtocolContract.Json);
 
         using var doc = System.Text.Json.JsonDocument.Parse(json);
         var decoded = IpcSerializer.ReadCommand(doc.RootElement.Clone()) as ResyncCommand;

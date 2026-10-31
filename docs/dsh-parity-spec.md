@@ -534,6 +534,57 @@ Windows 走 `.sidebarCol` 的默认规则：`background: var(--dsw-specific-side
 
 ---
 
+## 7.11 验收理念：行为等价，不是编译通过
+
+> 这一节抄的是 pi.net 的移植理念（用户指定），但**它的适用范围比移植更广**——
+> 我们不是把 dsh 的 TS 翻成 C#，而是在不同框架上重建同样的行为。
+> 陷阱是同一个：**编译通过 ≠ 做完了**。
+
+### 该问的问题
+
+编译器一个都不会回答的那些：
+
+| 问题 | 我们的对应 |
+|---|---|
+| 流式事件的顺序一样吗？ | `TextDelta` / `ReasoningDelta` 的交错顺序 |
+| 工具参数被截断时错误文案一样吗？ | `ToolResultTruncated` 的措辞 |
+| 会话恢复后消息树的分叉点一样吗？ | `SessionSnapshot` 的 `Sequence` 基准 |
+| JSON 少一个字段，默认值一样吗？ | `wire-null-omitted` 检查 |
+| 终端里一个 emoji 的宽度算对了吗？ | `TerminalView` 的 `CellMetrics` |
+
+### 落地成什么
+
+**把"可观察行为"写成断言，而不是把"源码长得像"当标准。**
+
+具体的三种断言形态（本项目已有的）：
+
+1. **固定样本往返**：用**迁移前生成的真实 JSON 字面量**硬编码，用新配置反序列化。
+   `wire-cross-version-compat` 就是这条——自己序列化再自己反序列化是**测不出**
+   格式变化的，因为两侧用同一份代码。
+
+2. **线上文本断言**：断言实际的 JSON 字符串里有什么。
+   `wire-enum-format`（camelCase 枚举）、`wire-null-omitted`（null 不出现在线上）。
+   这两条都是 dsh/SDK 文档专门警告过的裂缝。
+
+3. **数值逐条对齐**：`cols-*` 5 条、`dsh-tokens-*` 2 条、`titlebar-tokens-match-dsh`。
+   不是"看起来差不多"，是逐像素、逐色值相等。
+
+### 一个反例（本项目真实发生）
+
+迁移到 `Dougong.HostProtocol` 时，我写了 `DesktopProtocol.Json` 却**一处都没用**——
+所有收发仍走 SDK 的 `HostProtocolContract.Json`。
+
+- 编译：通过
+- 65 条检查：全过
+- 运行时：桌面端特有消息（`fs/list`、`models/list`）**根本发不出去**
+- 表现：模型目录一直是空的
+
+**这是"编译通过"最典型的骗局。** 后来靠读运行时日志发现，不是靠任何检查。
+
+教训：**"定义了但没用"这类问题，静态检查抓不住，必须看运行时行为。**
+
+---
+
 ## 8. 复刻验收方式
 
 沿用既有判据——**控件树 dump 优于截图**：

@@ -33,7 +33,7 @@ public static class CommandPaletteModule
     /// <param name="sessions">会话列表；为 null 表示引擎没连上，只放全局命令。</param>
     /// <param name="onRun">命令执行回调，参数是命令 Id。</param>
     public static CommandPaletteDialog Build(
-        IReadOnlyList<DougongDesktop.Ipc.SessionSummary>? sessions,
+        IReadOnlyList<Dougong.HostProtocol.SessionSummary>? sessions,
         Action<string> onRun)
     {
         var dialog = new CommandPaletteDialog

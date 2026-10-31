@@ -49,7 +49,7 @@ internal static class ProjectionChecks
 
         if (inject) return "反证注入：工具请求不产新条目";
 
-        return result is EventProjection.Projection.Added { Item: Ipc.ToolCallItem tool }
+        return result is EventProjection.Projection.Added { Item: ToolCallItem tool }
             && tool.Status == ToolCallStatus.Running
             && tool.ToolName == "read_file"
             ? null
@@ -85,7 +85,7 @@ internal static class ProjectionChecks
     /// </remarks>
     private static string? UnknownOutcomePreserved(bool inject)
     {
-        var existing = new Ipc.ToolCallItem
+        var existing = new ToolCallItem
         {
             Id = "tool-inv-1",
             InvocationId = "inv-1",

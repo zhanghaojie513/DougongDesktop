@@ -116,20 +116,30 @@ public sealed class Composer : UserControl
 
         foreach (var token in message.Tokens)
         {
-            // 只认命令类 token；提及（@）与命令不是一回事
-            var kind = token.GetType().GetProperty("Kind")?.GetValue(token)?.ToString();
-            if (kind is not "Command") continue;
+            // 只认命令类 token；提及（@）与命令不是一回事。
+            // 强类型访问 Kind，不用反射——反射写错属性名只会静默返回 null，
+            // 表现是"命令没反应"，那种 bug 极难查。
+            if (token.Kind != AiComposerTokenKind.Command) continue;
+            if (token.Id is not { Length: > 0 } id) continue;
 
-            var id = token.GetType().GetProperty("Id")?.GetValue(token) as string;
-            if (id is { Length: > 0 })
-            {
-                CommandInvoked?.Invoke(id);
-                return true;
-            }
+            CommandInvoked?.Invoke(id);
+            return true;
         }
 
         return false;
     }
+
+    /// <summary>
+    /// 取出这条输入里被 "&#64;" 引用的条目。
+    /// </summary>
+    /// <remarks>
+    /// <b>引用与命令分开处理</b>：选命令是"执行一个动作"，选引用是"给正文加上下文"。
+    /// 引用要和正文一起发给引擎，所以不能在 Sent 里提前返回。
+    /// </remarks>
+    public IReadOnlyList<AiPromptToken> ExtractMentions(AiComposerMessage? message) =>
+        message?.Tokens is { Count: > 0 } tokens
+            ? [.. tokens.Where(t => t.Kind == AiComposerTokenKind.Mention)]
+            : [];
 
     /// <summary>用户从 "/" 列表选中并发送了一条命令。</summary>
     public event Action<string>? CommandInvoked;

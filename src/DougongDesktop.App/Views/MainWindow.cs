@@ -3,8 +3,8 @@ using Avalonia.VisualTree;
 using DougongDesktop.App.Services;
 using DougongDesktop.App.Shell;
 using DougongDesktop.Ipc;
-using IpcToolCallItem = DougongDesktop.Ipc.ToolCallItem;
-using IpcToolCallStatus = DougongDesktop.Ipc.ToolCallStatus;
+using IpcToolCallItem = Dougong.HostProtocol.ToolCallItem;
+using IpcToolCallStatus = Dougong.HostProtocol.ToolCallStatus;
 using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
