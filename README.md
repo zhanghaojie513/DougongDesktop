@@ -176,6 +176,20 @@ bash scripts/all-checks.sh
 
 不联网、不需要 provider。
 
+### 调试界面（Spyglass）
+
+Debug 构建内置了 [Spyglass](https://github.com/AIDotNet/Spyglass)——Avalonia 的可视化调试器，
+能看视觉树、样式级联、绑定错误、资源与性能。
+
+```bash
+dotnet tool install -g TKCode.Spyglass          # 一次性
+scripts/rebuild.sh DougongDesktop.slnx Debug
+src/DougongDesktop.App/bin/Debug/net10.0/DougongDesktop.App.exe
+# 然后在窗口里按 Ctrl+Shift+I
+```
+
+详见 [docs/spyglass-usage.md](docs/spyglass-usage.md)。Release 构建不含探针。
+
 ### 跑起来
 
 ```bash
