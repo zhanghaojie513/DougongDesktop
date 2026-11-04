@@ -19,6 +19,11 @@
     <PackageVersion Include="TKCode.Arc.Workflow" Version="0.3.2-preview.2" />
     <PackageVersion Include="TKCode.Arc.Icons.Lucide" Version="0.3.2-preview.2" />
 
+    <!-- Spyglass：Avalonia 的 out-of-process 调试器（视觉树/样式/绑定/性能）。
+         只给 Debug 构建用：生产包里不该带调试探针。
+         它的 Avalonia 版本要求与我们一致（12.1.4 精确）。 -->
+    <PackageVersion Include="TKCode.Spyglass.Agent" Version="0.2.3" />
+
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
 
     <!-- Dougong SDK：来自 nuget.org。版本写死，与 SDK 仓库的发布节奏解耦——

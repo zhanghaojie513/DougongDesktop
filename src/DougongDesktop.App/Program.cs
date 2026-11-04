@@ -1,6 +1,9 @@
 using Avalonia;
 using TKCode.Arc;
 using TKCode.Arc.Fonts;
+#if DEBUG
+using Spyglass.Agent;
+#endif
 
 namespace DougongDesktop.App;
 
@@ -37,5 +40,16 @@ internal static class Program
                 .UseArcSpecial()     // agent 组件：ToolCall/AgentStatus/AgentPlan/ContextWindow
                 .UseArcBlocks())     // Blocks：Sidebar 等复合控件。漏了它 Sidebar 会
                                      // 有尺寸但没有视觉子节点（ControlTheme 没应用）——实测踩过
+            // Spyglass：Avalonia 的 out-of-process 调试器（视觉树/样式级联/绑定/性能）。
+            //
+            // **只在 Debug 构建里挂**：生产包里不该带调试探针——
+            // 它会开一个本地 WebSocket 端口，那是额外的攻击面。
+            // 包引用也加了同样的 Condition，所以 Release 构建连 dll 都不会有。
+            //
+            // 用法：跑 Debug 构建，按 Ctrl+Shift+I（macOS Cmd+Option+I）。
+            // 也可以让 AI agent 通过 MCP 读：`claude mcp add spyglass -- spyglass mcp`
+#if DEBUG
+            .UseSpyglass()
+#endif
             .LogToTrace();
 }
