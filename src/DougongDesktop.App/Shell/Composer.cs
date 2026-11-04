@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
+using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
 namespace DougongDesktop.App.Shell;
@@ -49,7 +51,15 @@ public sealed class Composer : UserControl
             Placeholder = "输入消息，Enter 发送，Shift+Enter 换行",
             MinLines = 1,
             MaxLines = 8,
-            IsAttachmentEnabled = false,   // P6 不做附件，先不显示假的加号
+            // P8b 起启用。加号 → 菜单 → "Upload file" 会调
+            // AiComposer.BrowseAsync()，**它自己开系统选择器**
+            // （内部走 TopLevel.StorageProvider）。
+            // 所以不需要我们在外面注入 picker——查文档时差点白写一层抽象。
+            IsAttachmentEnabled = true,
+
+            // UploadHandler 保持 null：本地客户端没有上传服务，
+            // 附件直接进入 Ready 状态。设一个假的进度条会让用户以为在上传网盘。
+            UploadHandler = null,
             IsGenerating = false,
         };
 
@@ -223,6 +233,20 @@ public sealed class Composer : UserControl
 
     /// <summary>用户选了某个模型。</summary>
     public event Action<string>? ModelChanged;
+
+    /// <summary>
+    /// 已附加的文件路径。
+    /// </summary>
+    /// <remarks>
+    /// <b>只记路径，不读内容</b>：读内容会带来大小上限、二进制判定、
+    /// 编码猜测一整套问题，那不属于"挑文件"这一步。
+    /// 真正发送给模型时再决定怎么带上（P8c/P8d）。
+    /// </remarks>
+    public IReadOnlyList<string> AttachedPaths =>
+        [.. _composer.Attachments.Select(a => a.File?.TryGetLocalPath() ?? a.Name)];
+
+    /// <summary>清空附件（发送后调用）。</summary>
+    public void ClearAttachments() => _composer.Attachments.Clear();
 
 
 

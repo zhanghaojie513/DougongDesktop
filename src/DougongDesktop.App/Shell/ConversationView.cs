@@ -40,6 +40,9 @@ public sealed class ConversationView : UserControl
     /// <summary>内部列表，供诊断读取实际尺寸与条目数。</summary>
     public ItemsControl List => _list;
 
+    /// <summary>滚动视口，供诊断读取视口高度。</summary>
+    public ScrollViewer Scroll => _scroll;
+
     /// <summary>当前条目数。</summary>
     public int Count => _items.Count;
 
@@ -323,6 +326,29 @@ public sealed class ConversationView : UserControl
         });
 
         Console.Error.WriteLine($"[ui] 自检数据已灌入：{_items.Count} 条");
+    }
+
+    /// <summary>
+    /// 自检：往 composer 加一个附件，验证附件条的渲染。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要这一步</b>：附件的真实入口是系统文件选择器，
+    /// 自动化测试点不到它。所以这里直接往 <c>Attachments</c> 集合塞一个条目，
+    /// 验证"有了附件之后界面上真的看得见"——至于选择器本身，
+    /// 那是 Avalonia 的能力，不是我们的逻辑。
+    /// </remarks>
+    public void LoadAttachmentSelfTest()
+    {
+        Composer.Inner.Attachments.Add(new AiAttachment
+        {
+            Id = "attach-selftest",
+            Name = "README.md",
+            Size = 2150,   // 字节；控件自己格式化
+            Kind = AiAttachmentKind.File,
+            Status = AiAttachmentStatus.Ready,
+        });
+
+        Console.Error.WriteLine($"[ui] 自检附件已加入：{Composer.Inner.Attachments.Count} 个");
     }
 
     /// <summary>

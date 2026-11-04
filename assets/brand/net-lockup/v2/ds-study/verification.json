@@ -1,0 +1,50 @@
+[
+  {
+    "page": "index",
+    "width": 1440,
+    "overflow": false,
+    "images": true
+  },
+  {
+    "page": "dir-1",
+    "width": 1440,
+    "overflow": false,
+    "images": true
+  },
+  {
+    "page": "dir-2",
+    "width": 1440,
+    "overflow": false,
+    "images": true
+  },
+  {
+    "page": "dir-3",
+    "width": 1440,
+    "overflow": false,
+    "images": true
+  },
+  {
+    "page": "index",
+    "width": 375,
+    "overflow": false,
+    "images": true
+  },
+  {
+    "page": "dir-1",
+    "width": 375,
+    "overflow": false,
+    "images": true
+  },
+  {
+    "page": "dir-2",
+    "width": 375,
+    "overflow": false,
+    "images": true
+  },
+  {
+    "page": "dir-3",
+    "width": 375,
+    "overflow": false,
+    "images": true
+  }
+]

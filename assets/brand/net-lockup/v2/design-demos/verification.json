@@ -1,0 +1,38 @@
+[
+  {
+    "file": "dir-1.html",
+    "page_errors": [],
+    "width": 1440,
+    "height": 900,
+    "overflow": false,
+    "broken_images": 0,
+    "mobile_overflow": false
+  },
+  {
+    "file": "dir-2.html",
+    "page_errors": [],
+    "width": 1440,
+    "height": 900,
+    "overflow": false,
+    "broken_images": 0,
+    "mobile_overflow": false
+  },
+  {
+    "file": "dir-3.html",
+    "page_errors": [],
+    "width": 1440,
+    "height": 900,
+    "overflow": false,
+    "broken_images": 0,
+    "mobile_overflow": false
+  },
+  {
+    "file": "index.html",
+    "page_errors": [],
+    "width": 1440,
+    "height": 900,
+    "overflow": false,
+    "broken_images": 0,
+    "mobile_overflow": false
+  }
+]

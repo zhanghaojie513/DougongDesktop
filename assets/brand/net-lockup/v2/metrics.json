@@ -1,26 +1,27 @@
 {
   "size": [
-    328,
+    334,
     72
   ],
-  "wordmark": "custom paths, not a font outline",
+  "text": "DOUGONG",
+  "wordmark": "custom uppercase paths, not a font outline",
   "glyphs": [
-    "d",
-    "o",
-    "u",
-    "g",
-    "n"
+    "D",
+    "O",
+    "U",
+    "G",
+    "N"
   ],
-  "stroke": 6,
-  "x_height": 30,
+  "stroke": 6.6,
+  "cap_height": 44,
   "round_overshoot": 0.4,
   "spacing": [
-    3.9,
+    4.2,
+    4.4,
     4.5,
-    4.0,
-    3.9,
+    4.1,
     4.5,
-    4.2
+    4.4
   ],
   "symbol_visible": 34,
   "badge": [

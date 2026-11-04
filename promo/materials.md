@@ -1,0 +1,11 @@
+# Materials
+
+What the film is made of, and where each piece came from. Real material first: the logo as a file, the product's own colours and type, its real interface. Anything rebuilt is traced over a capture listed here.
+
+## Local · C:\work\myProject\Dougong Desktop  (2026-11-02)
+
+- Logo / icon (55): `materials/local-dougong-desktop/logo.png` ← assets/logo.png (in the README), `materials/local-dougong-desktop/dougong-wordmark.png` ← assets/brand/wordmark-study/dougong-wordmark.png, `materials/local-dougong-desktop/concept-B.png` ← assets/brand/net-lockup/v2/design-demos/concept-B.png, `materials/local-dougong-desktop/concept-C.png` ← assets/brand/net-lockup/v2/design-demos/concept-C.png, `materials/local-dougong-desktop/concept-A.png` ← assets/brand/net-lockup/v2/ds-study/concept-A.png, `materials/local-dougong-desktop/_concept-B.png` ← assets/brand/net-lockup/v2/ds-study/concept-B.png, `materials/local-dougong-desktop/_concept-A.png` ← assets/brand/net-lockup/v2/design-demos/concept-A.png, `materials/local-dougong-desktop/_concept-C.png` ← assets/brand/net-lockup/v2/ds-study/concept-C.png, `materials/local-dougong-desktop/board-2.jpg` ← assets/brand/net-lockup/v2/design-demos/refs/board-2.jpg, `materials/local-dougong-desktop/board-1.jpg` ← assets/brand/net-lockup/v2/design-demos/refs/board-1.jpg, `materials/local-dougong-desktop/board.jpg` ← assets/brand/net-lockup/v2/design-demos/refs/board.jpg, `materials/local-dougong-desktop/index.png` ← assets/brand/net-lockup/v2/ds-study/index.png, …
+- Media files (5): `materials/local-dougong-desktop/four-products-1.jpg` ← design-demos/refs/four-products-1.jpg, `materials/local-dougong-desktop/four-products-3.jpg` ← design-demos/refs/four-products-3.jpg, `materials/local-dougong-desktop/four-products-4.jpg` ← design-demos/refs/four-products-4.jpg, `materials/local-dougong-desktop/codex-dsh-2.jpg` ← design-demos/refs/codex-dsh-2.jpg, `materials/local-dougong-desktop/four-products.jpg` ← design-demos/refs/four-products.jpg
+- Colours it uses: #252629 (css --ink) · #6c7078 (css --muted) · #e5e7eb (css --line) · #f5f6f8 (css --soft) · #237158 (css --green) · #875d20 (css --amber) · #171a20 (css --bg) · #101314 (css --nav) · #f7faf6 (css --panel) · #e2e7e8 (css --text)
+- Typefaces: Consolas · inherit · Segoe UI
+- Not captured: no screenshots or recordings — run the product and capture it

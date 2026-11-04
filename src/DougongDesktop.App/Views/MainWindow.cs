@@ -134,7 +134,10 @@ public sealed class MainWindow : Window
 
         // 自检模式：没 provider 时也能验证消息流渲染
         if (Environment.GetEnvironmentVariable("DOUGONG_UI_SELFTEST") is "1")
+        {
             _conversation.LoadSelfTestData();
+            _conversation.LoadAttachmentSelfTest();
+        }
 
         // 审批自检：走真实的 ShowApproval 路径，验证待决锁真的上了。
         // 与 LoadSelfTestData 里那张卡片不同——那张只验证渲染，
@@ -993,7 +996,12 @@ public sealed class MainWindow : Window
         {
             Report("Bottom(list)", appShell.BottomBar);
             Report("EngineStatusBar", appShell.StatusBar);
+            // **List 的 Bounds 是内容高度，不是视口**。实测踩过：
+            // 看到 List=658 就以为布局溢出（因为 658+174+161+40 > 820），
+            // 实际视口只有 356，658 是"可滚动的内容总高"。
+            // 判断布局是否溢出要看 Scroll 的视口，不是 List 的 Bounds。
             Report("Conversation.List", _conversation.List);
+            Report("Conversation.Scroll", _conversation.Scroll);
             Console.Error.WriteLine($"[shell] 消息条目数 {_conversation.Count}");
         }
 

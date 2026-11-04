@@ -1,0 +1,486 @@
+{
+  "sources": [
+    {
+      "kind": "local",
+      "from": "C:\\work\\myProject\\Dougong Desktop",
+      "at": "2026-11-02T15:24:27.603Z",
+      "files": [
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/logo.png",
+          "from": "assets/logo.png",
+          "note": "(in the README)"
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-wordmark.png",
+          "from": "assets/brand/wordmark-study/dougong-wordmark.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/concept-B.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/concept-B.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/concept-C.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/concept-C.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/concept-A.png",
+          "from": "assets/brand/net-lockup/v2/ds-study/concept-A.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/_concept-B.png",
+          "from": "assets/brand/net-lockup/v2/ds-study/concept-B.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/_concept-A.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/concept-A.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/_concept-C.png",
+          "from": "assets/brand/net-lockup/v2/ds-study/concept-C.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/board-2.jpg",
+          "from": "assets/brand/net-lockup/v2/design-demos/refs/board-2.jpg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/board-1.jpg",
+          "from": "assets/brand/net-lockup/v2/design-demos/refs/board-1.jpg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/board.jpg",
+          "from": "assets/brand/net-lockup/v2/design-demos/refs/board.jpg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/index.png",
+          "from": "assets/brand/net-lockup/v2/ds-study/index.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/_index.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/index.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dir-3.png",
+          "from": "assets/brand/net-lockup/v2/ds-study/dir-3.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dir-1.png",
+          "from": "assets/brand/net-lockup/v2/ds-study/dir-1.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/_dir-3.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/dir-3.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dir-2.png",
+          "from": "assets/brand/net-lockup/v2/ds-study/dir-2.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/_dir-2.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/dir-2.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-1024.png",
+          "from": "assets/brand/icons/dougong-1024.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/app-icon-light.png",
+          "from": "assets/brand/png/app-icon-light.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/_dir-1.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/dir-1.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/thumbs.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/thumbs.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/preview.png",
+          "from": "assets/brand/net-lockup/v2/preview.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-512.png",
+          "from": "assets/brand/icons/dougong-512.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-net.png",
+          "from": "assets/brand/net-lockup/v2/dougong-net.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong.ico",
+          "from": "assets/brand/icons/dougong.ico",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-net-white.png",
+          "from": "assets/brand/net-lockup/v2/dougong-net-white.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-256.png",
+          "from": "assets/brand/icons/dougong-256.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/horizontal-white.png",
+          "from": "assets/brand/png/horizontal-white.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/horizontal.png",
+          "from": "assets/brand/png/horizontal.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/symbol.png",
+          "from": "assets/brand/png/symbol.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/symbol-white.png",
+          "from": "assets/brand/png/symbol-white.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-128.png",
+          "from": "assets/brand/icons/dougong-128.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-net.svg",
+          "from": "assets/brand/net-lockup/v2/dougong-net.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-net-white.svg",
+          "from": "assets/brand/net-lockup/v2/dougong-net-white.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/icon-reference.png",
+          "from": "assets/brand/net-lockup/v2/design-demos/icon-reference.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-64.png",
+          "from": "assets/brand/icons/dougong-64.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/wordmark.svg",
+          "from": "assets/brand/net-lockup/v2/wordmark.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/horizontal-white.svg",
+          "from": "assets/brand/svg/horizontal-white.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/horizontal.svg",
+          "from": "assets/brand/svg/horizontal.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/stacked.svg",
+          "from": "assets/brand/svg/stacked.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-48.png",
+          "from": "assets/brand/icons/dougong-48.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/app-icon-light.svg",
+          "from": "assets/brand/svg/app-icon-light.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/app-icon.svg",
+          "from": "assets/brand/svg/app-icon.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/logo.svg",
+          "from": "assets/logo.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/app-icon-48.svg",
+          "from": "assets/brand/svg/app-icon-48.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/_wordmark.svg",
+          "from": "assets/brand/svg/wordmark.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/app-icon-24.svg",
+          "from": "assets/brand/svg/app-icon-24.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-32.png",
+          "from": "assets/brand/icons/dougong-32.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-24.png",
+          "from": "assets/brand/icons/dougong-24.png",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/app-icon-16.svg",
+          "from": "assets/brand/svg/app-icon-16.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/app-icon-32.svg",
+          "from": "assets/brand/svg/app-icon-32.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/symbol-white.svg",
+          "from": "assets/brand/svg/symbol-white.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/symbol.svg",
+          "from": "assets/brand/svg/symbol.svg",
+          "note": ""
+        },
+        {
+          "kind": "logo",
+          "file": "materials/local-dougong-desktop/dougong-16.png",
+          "from": "assets/brand/icons/dougong-16.png",
+          "note": ""
+        },
+        {
+          "kind": "media",
+          "file": "materials/local-dougong-desktop/four-products-1.jpg",
+          "from": "design-demos/refs/four-products-1.jpg",
+          "note": ""
+        },
+        {
+          "kind": "media",
+          "file": "materials/local-dougong-desktop/four-products-3.jpg",
+          "from": "design-demos/refs/four-products-3.jpg",
+          "note": ""
+        },
+        {
+          "kind": "media",
+          "file": "materials/local-dougong-desktop/four-products-4.jpg",
+          "from": "design-demos/refs/four-products-4.jpg",
+          "note": ""
+        },
+        {
+          "kind": "media",
+          "file": "materials/local-dougong-desktop/codex-dsh-2.jpg",
+          "from": "design-demos/refs/codex-dsh-2.jpg",
+          "note": ""
+        },
+        {
+          "kind": "media",
+          "file": "materials/local-dougong-desktop/four-products.jpg",
+          "from": "design-demos/refs/four-products.jpg",
+          "note": ""
+        }
+      ],
+      "colours": [
+        {
+          "role": "css --ink",
+          "hex": "#252629"
+        },
+        {
+          "role": "css --muted",
+          "hex": "#6c7078"
+        },
+        {
+          "role": "css --line",
+          "hex": "#e5e7eb"
+        },
+        {
+          "role": "css --soft",
+          "hex": "#f5f6f8"
+        },
+        {
+          "role": "css --green",
+          "hex": "#237158"
+        },
+        {
+          "role": "css --amber",
+          "hex": "#875d20"
+        },
+        {
+          "role": "css --bg",
+          "hex": "#171a20"
+        },
+        {
+          "role": "css --nav",
+          "hex": "#101314"
+        },
+        {
+          "role": "css --panel",
+          "hex": "#f7faf6"
+        },
+        {
+          "role": "css --text",
+          "hex": "#e2e7e8"
+        },
+        {
+          "role": "css --faint",
+          "hex": "#7e898c"
+        },
+        {
+          "role": "css --mint",
+          "hex": "#b7dfca"
+        },
+        {
+          "role": "css --yellow",
+          "hex": "#f7edce"
+        },
+        {
+          "role": "css --surface",
+          "hex": "#f8f8f3"
+        },
+        {
+          "role": "css --button",
+          "hex": "#2e343e"
+        },
+        {
+          "role": "css --selected",
+          "hex": "#f3ee69"
+        },
+        {
+          "role": "used 120×",
+          "hex": "#606c79"
+        },
+        {
+          "role": "used 15×",
+          "hex": "#536171"
+        },
+        {
+          "role": "used 10×",
+          "hex": "#5f656c"
+        },
+        {
+          "role": "used 10×",
+          "hex": "#252a30"
+        },
+        {
+          "role": "used 8×",
+          "hex": "#e8ebef"
+        },
+        {
+          "role": "used 7×",
+          "hex": "#fafbfc"
+        },
+        {
+          "role": "used 6×",
+          "hex": "#dce0e4"
+        },
+        {
+          "role": "used 6×",
+          "hex": "#e3e6e9"
+        }
+      ],
+      "fonts": [
+        {
+          "family": "Consolas",
+          "n": 3
+        },
+        {
+          "family": "inherit",
+          "n": 2
+        },
+        {
+          "family": "Segoe UI",
+          "n": 2
+        }
+      ],
+      "missing": [
+        "no screenshots or recordings — run the product and capture it"
+      ]
+    }
+  ]
+}
