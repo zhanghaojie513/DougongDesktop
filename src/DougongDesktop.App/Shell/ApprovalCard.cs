@@ -172,7 +172,7 @@ public sealed class ApprovalCard : UserControl
             stack.Children.Add(new TextBlock
             {
                 Text = $"{key}  {value}",
-                FontFamily = new FontFamily("Geist Mono, Consolas, monospace"),
+                FontFamily = DshTheme.MonoFont,
                 FontSize = 11,
                 Opacity = 0.85,
                 TextWrapping = TextWrapping.Wrap,

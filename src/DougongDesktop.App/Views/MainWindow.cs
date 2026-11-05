@@ -126,6 +126,12 @@ public sealed class MainWindow : Window
             Console.Error.WriteLine($"[ui] 选择模型 {modelId}（切换需重开会话，P8d 接入）");
         _conversation.StopRequested += () => _ = StopTurnAsync();
 
+        // 右栏：点目录进入、点文件选中（选中目前只记日志，P8d 的交付物视图再用）
+        _rightDock.DirectoryRequested += path => _ = RequestDirectoryAsync(path);
+        _rightDock.DirectoryUpRequested += path => _ = RequestDirectoryAsync(path);
+        _rightDock.FileSelected += path =>
+            Console.Error.WriteLine($"[ui] 选中文件：{path}（预览见 P8e）");
+
         // 消息反馈 → 引擎（宿主侧只落本地诊断，不改会话状态）
         _conversation.FeedbackRequested += (itemId, rating, reason) =>
             _ = SendFeedbackAsync(itemId, rating, reason);
@@ -137,6 +143,26 @@ public sealed class MainWindow : Window
         {
             _conversation.LoadSelfTestData();
             _conversation.LoadAttachmentSelfTest();
+
+            // 自检也验证"运行中"这条路径：没有 provider 时跑不到
+            // TurnStarted → TurnCompleted 的真实往返，但状态行的
+            // 渲染与计时可以直接驱动。**不验证就等于没接上**。
+            //
+            // 两个开关分开：DOUGONG_UI_RUNNING=1 只看状态行（回合进行中），
+            // =2 走完整流程（起 → 停 → 标已停止）。合在一起会造出
+            // "正在跑又已停止"的自相矛盾状态，而那正是要防的东西。
+            switch (Environment.GetEnvironmentVariable("DOUGONG_UI_RUNNING"))
+            {
+                case "1":
+                    _conversation.OnTurnStarted();
+                    break;
+
+                case "2":
+                    _conversation.OnTurnStarted();
+                    _conversation.OnTurnEnded();
+                    _conversation.MarkLastAssistantStopped();
+                    break;
+            }
         }
 
         // 审批自检：走真实的 ShowApproval 路径，验证待决锁真的上了。
@@ -185,7 +211,55 @@ public sealed class MainWindow : Window
             // 连接后再 dump：第一次 dump 时侧边栏还是占位内容，
             // 用它判断最终状态会误判（实测踩过）
             await Task.Delay(1200);
-            DumpLayout();
+            DumpLayout(layoutSettled: true);
+
+            // 目录导航自检：模拟"在右栏点进子目录"。
+            //
+            // 为什么需要这个开关：根目录加载只能证明 RequestDirectoryAsync
+            // 被调用一次。P8b 复核前，目录点击压根没接到这条链上——
+            // 而那时 @ 引用项 18 个照样是绿的。所以要验的是**第二次**请求，
+            // 以及它带来的是累加（> 第一次）而不是替换（= 子目录条目数）。
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_NAV") is "1")
+            {
+                var before = _conversation.Composer.Inner.ContextItems.Count;
+                Console.Error.WriteLine($"[nav] 导航前 @ 引用项 {before} 个");
+
+                await RequestDirectoryAsync("src");
+
+                // **等条件成立，不等固定时长**。
+                // 第一版写的是 await Task.Delay(800)，结果两轮里有一轮
+                // 响应慢于 800ms，打印出"未增长，替换或未生效"——
+                // 自检自己抖动，等于把人往错误结论上引。
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (DateTime.UtcNow < deadline
+                       && _conversation.Composer.Inner.ContextItems.Count <= before)
+                {
+                    await Task.Delay(50);
+                }
+
+                var after = _conversation.Composer.Inner.ContextItems.Count;
+                Console.Error.WriteLine(
+                    $"[nav] 导航后 @ 引用项 {after} 个" +
+                    (after > before ? "（**累加，符合预期**）" : "（**未增长，替换或未生效**）"));
+
+                // 回退验证：回到工作区根，右栏当前目录必须变回 ""。
+                //
+                // **这条测的是下游动作，不是面包屑本身**：自检模式没有鼠标，
+                // 点不了面包屑按钮。"按钮点击 → DirectoryUpRequested" 那一段
+                // 由静态检查 dock-directory-nav-is-two-way 覆盖（事件有触发点、
+                // 装配根有订阅）；这里只证明"回退路径真的把状态改回来了"。
+                await RequestDirectoryAsync(string.Empty);
+
+                var backDeadline = DateTime.UtcNow.AddSeconds(5);
+                while (DateTime.UtcNow < backDeadline && _rightDock.CurrentDirectory.Length != 0)
+                    await Task.Delay(50);
+
+                Console.Error.WriteLine(
+                    $"[nav] 回退后 CurrentDirectory='{_rightDock.CurrentDirectory}'" +
+                    (_rightDock.CurrentDirectory.Length == 0
+                        ? "（**已回到工作区根，符合预期**）"
+                        : "（**仍在子目录，回退未生效**）"));
+            }
         };
     }
 
@@ -392,11 +466,13 @@ public sealed class MainWindow : Window
                     (listed.Error is { Length: > 0 } ? $"（错误：{listed.Error}）" : ""));
                 _rightDock.ApplyDirectory(listed);
 
-                // 同一份目录数据也给 composer 的 "@" 引用用——
-                // 不新开请求：右栏文件树与 "@" 列表要的是同一个东西，
-                // 两者分别请求会让它们在不同时刻显示不同内容。
-                _conversation.Composer.SetContextItems(
-                    ContextItemProjection.FromDirectory(listed));
+                // 同一份目录数据也给 composer 的 "@" 引用用。
+                //
+                // **累加而不是替换**：右栏点进 src 之后，根目录的文件
+                // 仍应该能被 "@" 引用到。替换会让列表只剩最后浏览的那一层，
+                // 用户刚看过的根目录文件就"消失"了。
+                foreach (var item in ContextItemProjection.FromDirectory(listed))
+                    _conversation.Composer.AddContextItem(item);
 
                 // 分组标题也要设，否则 Arc 的默认是英文 "Files"/"Docs"
                 _conversation.Composer.SetMentionGroups(ContextItemProjection.Groups);
@@ -406,6 +482,9 @@ public sealed class MainWindow : Window
                 _capsule.OnTurnStarted();
                 // 生成中：发送键变停止键（Arc 的 AiComposer 自带这个切换）
                 _conversation.Composer.SetGenerating(true);
+                // 消息流末尾的"深度求索中"状态行：只有它能回答
+                // "在跑吗、跑多久了"，而用户上滚时顶部胶囊已经看不见了
+                _conversation.OnTurnStarted();
 
                 break;
 
@@ -464,6 +543,16 @@ public sealed class MainWindow : Window
             case TurnCompletedEvent done:
                 _capsule.OnTurnCompleted(done.Status, done.Diagnostic);
                 _conversation.Composer.SetGenerating(false);
+                _conversation.OnTurnEnded();
+
+                // 用户中止的回合：给最后一条助手消息打"已停止"标记。
+                //
+                // dsh 只有这一种情况下会在正文尾部挂标签
+                // （AssistantMarkdown.tsx:152-154）；失败走的是 turn-error
+                // 那一行，不重复标。这里只认 Cancelled。
+                if (done.Status == TurnStatus.Cancelled)
+                    _conversation.MarkLastAssistantStopped();
+
                 break;
         }
     }
@@ -923,7 +1012,7 @@ public sealed class MainWindow : Window
     /// <b>用 dump 不用截图</b>：P2 的经验是截图受裁切与 DPI 影响会误判成布局 bug，
     /// 而 Bounds 非零能确定"真的参与了布局"。
     /// </remarks>
-    private void DumpLayout()
+    private void DumpLayout(bool layoutSettled = false)
     {
         var shell = Content as Control;
         Console.Error.WriteLine($"[shell] 窗口 {ClientSize.Width:0} x {ClientSize.Height:0}");
@@ -1053,6 +1142,87 @@ public sealed class MainWindow : Window
         Console.Error.WriteLine(
             $"[shell] 反馈条 {bars} 个 / 可见 assistant 容器 {visibleAssistant} 个" +
             (bars <= visibleAssistant ? "（不多于可见容器，符合预期）" : "（**多于可见容器，可疑**）"));
+
+        // P8g 中区会话域：这几个元素都是新加的，必须能在 dump 里看到，
+        // 否则"接进装配但没验证"——这一类本仓库已经踩过多次。
+        var actions = _conversation.GetVisualDescendants().OfType<MessageActions>().ToArray();
+        var bottomButton = _conversation.GetVisualDescendants()
+            .OfType<Avalonia.Controls.Button>()
+            .FirstOrDefault(b => b.Width == ConversationMetrics.ScrollToBottomSize);
+        // 空状态 Hero：判的是**整块是否真的显示**，不是里面某个 TextBlock 的标志。
+        //
+        // 第一版查 `TextBlock.IsVisible`，得到"13 条消息时 Hero 仍显示"的假警报：
+        // 父容器隐藏后，子元素的 IsVisible 仍是 true——`IsVisible` 是**自身标志**，
+        // 不等于"实际可见"。要看渲染树上是否真有它，用 IsEffectivelyVisible。
+        var heroTitle = _conversation.GetVisualDescendants().OfType<TextBlock>()
+            .FirstOrDefault(t => t.Text == "探索未至之境");
+        var heroVisible = heroTitle?.IsEffectivelyVisible == true;
+        var mask = _conversation.GetVisualDescendants()
+            .OfType<Border>()
+            .Count(b => Math.Abs(b.Height - ConversationMetrics.ComposerMaskHeight) < 0.5);
+
+        // **判据而不是日志**：下面三行带 OK/坏 的标记，是为了让人扫一眼看出
+        // 哪个坏了；但真正把它当检查用的前提是"读得懂坏的表现"。
+        // 曾经这里全是纯打印，曲线救国地"看过一眼就算验了"。
+        //
+        // **口径**：动作行只会出现在用户消息上，而虚拟化列表不构建视口外
+        // 的条目。所以"0 个"不等于没接上——窄栏下用户消息可能早已滚出视口。
+        //
+        // 判据改成：**可见的用户气泡**有几个，动作行就该有几个。
+        // 气泡的可靠标识是它绑定了 MessageActions 兄弟节点（不是靠 FontSize 猜）。
+        var userBubbles = _conversation.GetVisualDescendants()
+            .OfType<Border>()
+            .Count(b => b.Child is StackPanel sp
+                        && sp.Children.OfType<MessageActions>().Any());
+        var actionsOk = actions.Length == userBubbles;
+
+        Console.Error.WriteLine(
+            $"[shell] 用户消息 气泡 {userBubbles} / 动作行 {actions.Length}" +
+            (actions.Length > 0 ? $" 首个：复制态={actions[0].ShowingCopied}" : "") +
+            (actionsOk ? " OK" : "（**气泡与动作行数不符 = 复制功能没接上**）"));
+
+        Console.Error.WriteLine(
+            $"[shell] 空状态 Hero {(_conversation.Count == 0 ? "应显示" : "应隐藏")}" +
+            $" 实际={(heroVisible ? "显示" : "隐藏")}" +
+            ((heroVisible == (_conversation.Count == 0)) ? " OK" : "（**与条目数不符**）") +
+            $" / 渐变遮罩 {mask} 个" + (mask == 1 ? " OK" : "（**遮罩数量不对**）"));
+
+        Console.Error.WriteLine(
+            $"[shell] 回到底部按钮 {(bottomButton is null ? "**缺失**" : $"{bottomButton.Width:0}×{bottomButton.Height:0} OK")}" +
+            $" / 可见性={(bottomButton?.IsVisible == true ? "显示" : "隐藏")}");
+
+        // P1：流式状态行与已停止标记。
+        var runLine = _conversation.GetVisualDescendants().OfType<RunStatusLine>().FirstOrDefault();
+        var stoppedBadges = _conversation.GetVisualDescendants().OfType<TextBlock>()
+            .Count(t => t.Text == "已停止" && t.IsEffectivelyVisible);
+
+        Console.Error.WriteLine(
+            $"[shell] 运行状态行 {(runLine is null ? "**缺失**" : "存在")}" +
+            $" 可见={(runLine?.IsEffectivelyVisible == true ? "是" : "否")}" +
+            (string.IsNullOrEmpty(_conversation.RunStatusText) ? "" : $" 文本=\"{_conversation.RunStatusText}\"") +
+            $" / 已停止标记 {stoppedBadges} 个");
+
+        // 贴底：内容高于视口时**必须**在底部。
+        // 这是 P8g 里唯一有真实失败史的判据——第一版写完运行时
+        // 停在距底 572px，界面看起来"滚了一点但没到底"，
+        // 而所有静态检查都是绿的。
+        //
+        // **只在窗口已显示时判**：Opened 里第一次 dump 时布局还没跑完
+        // （Extent 已有值但 Offset 必然是 0），那时报"没在底部"是误报。
+        // 误报比漏报更伤——它教会人忽略这条输出。
+        var dist = _conversation.Scroll.Extent.Height
+                   - _conversation.Scroll.Offset.Y
+                   - _conversation.Scroll.Viewport.Height;
+        var overflow = _conversation.Scroll.Extent.Height > _conversation.Scroll.Viewport.Height;
+        var atBottom = !overflow || Math.Abs(dist) <= ConversationMetrics.FollowThreshold;
+
+        Console.Error.WriteLine(
+            $"[shell] 贴底状态={(_conversation.IsStickingToBottom ? "跟随中" : "已暂停")}" +
+            $"，偏移={_conversation.Scroll.Offset.Y:0.#}/{_conversation.Scroll.Extent.Height:0.#}" +
+            $" 视口={_conversation.Scroll.Viewport.Height:0.#}，距底={dist:0.#}" +
+            (!layoutSettled
+                ? "（布局未完成，不判定）"
+                : atBottom ? " OK" : "（**溢出却没在底部**）"));
 
         // 右栏 dock（P7）：面板展开不够，要看到 tab 数与内容真的建出来了。
         // P3a 踩过"尺寸全对但里面是空的"，右栏同样可能重演。

@@ -12,8 +12,19 @@ cd "$ROOT"
 # 先杀掉运行中的本项目进程：它们会锁住 bin/ 里的 DLL，
 # 导致构建报 MSB3027。而构建失败后脚本继续跑，看到的是**旧产物**——
 # 那会让人误以为检查通过了。
+#
+# **跨平台**：Windows 走 tasklist/taskkill，macOS/Linux 走 pkill。
+# 只写 Windows 版的话，在 Mac 上这条会静默不生效，然后撞上它要防的那个坑。
 for name in DougongDesktop.App DougongDesktop.AgentHost; do
-  tasklist 2>/dev/null | grep -qi "^$name" && taskkill //F //IM "$name.exe" >/dev/null 2>&1 || true
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      tasklist 2>/dev/null | grep -qi "^$name" \
+        && taskkill //F //IM "$name.exe" >/dev/null 2>&1 || true
+      ;;
+    *)
+      pkill -f "$name" >/dev/null 2>&1 || true
+      ;;
+  esac
 done
 
 echo "== 构建 =="
@@ -56,11 +67,16 @@ checks="$checks ipc-every-message-is-registered desktop-types-actually-registere
 checks="$checks feedback-rating-roundtrips context-items-have-unique-ids"
 # 行为等价：迁移后线上格式必须没变（不是"编译通过"就算完成）
 checks="$checks wire-enum-format wire-null-omitted wire-cross-version-compat"
-checks="$checks diff-detects-add-modify-delete diff-ignores-same-content"
+checks="$checks diff-detects-add-modify-delete diff-ignores-same-content dock-directory-nav-is-two-way"
 checks="$checks cols-match-dsh-constants cols-sidebar-default-280 cols-rightbar-yields-first"
 checks="$checks cols-rightbar-drops-before-center cols-rightbar-default-45pct"
 checks="$checks cols-responsive-breakpoints color-mix-matches-css"
 checks="$checks dsh-tokens-complete dsh-tokens-themes-differ titlebar-tokens-match-dsh"
+# P8g 中区会话域：期望值照 dsh 源码写，不是从我们的常量反推
+checks="$checks chat-follow-threshold-is-25 chat-bubble-width-is-two-sided"
+checks="$checks chat-content-width-clamps chat-gaps-are-three-tiered chat-no-fake-streaming-caret"
+checks="$checks chat-colors-come-from-tokens chat-stopped-badge-needs-finished-turn"
+checks="$checks ui-fonts-work-on-macos"
 checks="$checks sdk-files-stay-contained"
 
 for check in $checks; do

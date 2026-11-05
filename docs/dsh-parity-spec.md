@@ -563,6 +563,122 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ---
 
+## 7.5 中区会话域（1:1 复刻范围）
+
+> **这一节原来不存在。** 此前把中区当成"已经做完的部分"，
+> 只在中栏宽度几何上对齐了 dsh，**内容侧的会话行为从未比对过**。
+> 2026-11-05 用户指出这是范围缺口，纳入复刻范围。
+>
+> 事实来源：`C:\work\myProject\dsh-src`（commit `ce7073d`，与本文档基线同版本）。
+> 所有文件名与行号均可在该仓库核验。
+
+### 7.5.1 dsh 中区的真实结构
+
+| 层 | 文件 | 说明 |
+|---|---|---|
+| 布局骨架 | `ui-layout/src/client/AppFrame.tsx:41-50` | 中列渲染 `main` slot，默认 `entryKey: conversation` |
+| 会话根 | `ui-conversation/.../skeleton/ConversationRoot.tsx:11-13` | `root[data-phase]` 三态：`settling` / `hero` / `active` |
+| 中区主体 | `ConversationContent.tsx:189-204` | `.scrollBody[data-conversation-scroll]` → `Views` + `composerSeat` |
+| 消息流 | `ui-chat/src/client/chat/ChatFlow.tsx:52-63` | `entries.map` 全量渲染，**无消息级虚拟化** |
+
+**关键事实：dsh 的消息流没有虚拟化。** 全文只有轮次导航条
+（`TurnNavigator.tsx:6,110`）用了 `@tanstack/react-virtual`。
+`ChatView.module.css:95-99` 的注释写明是"为未来虚拟化保留身份边界但不实装"。
+
+> **对我们意味着什么**：我们用 `VirtualizingStackPanel` 是**超出 dsh 的实现**。
+> 这不是偏差，但不该拿"dsh 也虚拟化"当理由——它没有。虚拟化带来的
+> 可观察差异是"视口外条目不存在"，这会影响"消息反馈条数量"这类诊断口径
+> （P8b 复核时已踩过：期望值要按可见容器算，不能按总条目算）。
+
+### 7.5.2 条目类型对照
+
+dsh 的流内 item 共 **17 种**（`register-node-renderers.ts:27-100` 等）。
+契约层（`Dougong.HostProtocol`）只给 6 种。
+
+| dsh kind | 组件 | 契约里有？ | 我们的现状 |
+|---|---|---|---|
+| `user` | `MessageItem.tsx:332-361` → `UserContent.tsx` | ✅ `UserMessageItem` | ✅ 右对齐气泡 |
+| `assistant-step` | `AssistantNodeView.tsx:18-67` | ✅ `AssistantMessageItem` | ✅ Markdown + 流式 |
+| `reasoning` | `ReasoningRow.tsx:49-112` | ✅ `ReasoningItem` | ✅ 已渲染 |
+| `tool-call` | `tool/ToolRow.tsx:129-420` | ✅ `ToolCallItem` | ✅ Arc `ToolCall` |
+| `turn-process`（计划） | `TurnProcessNodeView.tsx:10-62` | ✅ `PlanItem` | ✅ |
+| `turn-error`（通告） | `MessageItem.tsx:132-146` | ✅ `NoticeItem` | ✅ |
+| `context`（上下文注入） | `ContextInjectionRow.tsx:31-94` | ❌ | ➖ 无数据 |
+| `system-prompt` | `SystemPromptRow.tsx:25-50` | ❌ | ➖ 且 dsh 本身**全隐**（`chat-visibility.ts:10-16`） |
+| `command` | `CommandNodeView.tsx:13-24` | ❌ | ➖ 斜杠命令结果不进流 |
+| `compaction` / `manual-compaction` | `CompactionItem.tsx:31-76` | ❌ | ➖ 无压缩事件 |
+| `model-retry` | `MessageItem.tsx:63-129` | ❌ | ➖ 无重试事件 |
+| `turn-max-tokens` | `MessageItem.tsx:149-161` | ❌ | ➖ 无该终态 |
+| `turn-trigger` | `TurnTriggerNodeView.tsx:29-50` | ❌ | ➖ 无触发源概念 |
+| `turn-tail` | `TurnTailNodeView.tsx:28-81` | ❌ | ⚠️ **契约无，但动作行要做**（见 7.5.4） |
+| `question-reply` | `ui-user-questions/.../QuestionReplyView.tsx` | ❌ | ➖ `ask_user_question` 未接 |
+| `workflow-run` | `ui-workflow-run/.../WorkflowRunPanel.tsx` | ❌ | ➖ 归 P8e |
+| `unknown` | `MessageItem.tsx:399-410` | — | ✅ 降级为通用卡片 |
+
+**结论**：17 种里 6 种有数据、5 种我们已做、1 种（`turn-tail`）无数据但必须做、
+9 种因契约无边而做不了。做不了的**如实标 `➖`，不做假条目**。
+
+### 7.5.3 中区几何（dsh 实测值）
+
+| 项 | dsh 值 | 出处 |
+|---|---|---|
+| 会话内容列宽 | `clamp(680px, 列宽 × 0.64, 920px)` | `ConversationRoot.module.css:461-467` |
+| 用户气泡最大宽 | `min(列宽 × 0.702, 82%)` | `MessageItem.module.css:10-21` |
+| 左右留白 | 各 **32px**（`16 + clearance 16`） | `ChatView.module.css:29-32` |
+| 消息间距 | 默认 4px；assistant 相邻 12px；`turn-process` 后 16px | `ChatView.module.css:77-93` |
+| 用户消息 | **右对齐**，圆角 `--dsw-radius-xl`，padding 10/16 | `MessageItem.module.css:3-8` |
+| 助手消息 | **左对齐、整列宽**（非气泡） | `AssistantMarkdown.module.css:9-21` |
+| 头像 | **无**（全仓 grep `avatar` 无命中） | — |
+| 滚动条宽 | **5px**，thumb 圆角 999，track 透明 | `ui-theme/src/styles/scrollbar.css:17-25` |
+| 贴底阈值 | **≤25px**（`FOLLOW_THRESHOLD 24` 传入 +1） | `use-chat-reading.ts:7,277` |
+| 正文 | 14px / 行高 24px | 字体轴 |
+| 输入区 | sticky 贴底 + **36px 渐变遮罩** | `ConversationRoot.module.css:507-530` |
+
+### 7.5.4 我们要补的行为（按优先级）
+
+**P0 — 契约有数据、纯 UI 缺失**：
+
+| 项 | dsh 行为 | 我们现状 | 出处 |
+|---|---|---|---|
+| 用户消息复制 | 时间 + 复制图标，点后变对勾 **1000ms** 复原 | ❌ 无 | `MessageIconActions.tsx:45-90`、`use-clipboard-copy.ts:18-44` |
+| 用户气泡右对齐精确值 | `min(列宽×0.702, 82%)` | ⚠️ 固定 `Margin 60` | `MessageItem.module.css:10-21` |
+| assistant 动作行 | 复制 → 赞踩 → 分支 → 用量 → 时间 | ⚠️ 只有赞踩 | `TurnTailNodeView.tsx:57-78` |
+| 消息间距分层 | 4 / 12 / 16px 三种 | ⚠️ 统一 6px | `ChatView.module.css:77-93` |
+| 贴底阈值 | 25px | ⚠️ 80px | `use-chat-reading.ts:7` |
+| "回到底部"按钮 | 34×34 圆形，距底 16px | ❌ 无 | `ChatView.tsx:272-283` |
+| 空状态 | logo + "探索未至之境" + 预览版徽章 + 工作区 chip | ⚠️ 一行灰字 | `EmptyHero.tsx:132-166`、`locales.ts:79-81` |
+| 输入区渐变遮罩 | 36px `linear-gradient` | ❌ 无 | `ConversationRoot.module.css:507-530` |
+
+**P1 — 需要少量新状态**：
+
+| 项 | dsh 行为 | 出处 |
+|---|---|---|
+| 流式"深度求索中，用时 N" | 鲸鱼尾图标 + 秒级计时 | `RunningStatus.tsx:25-48`、`chat/message-chrome.ts:13` |
+| 已停止标记 | assistant 尾部 11px 灰底小标签 | `AssistantMarkdown.tsx:152-154` |
+| 工具卡三态视觉 | running 整行 shimmer / error 用错误色+首行 / stopped 琥珀 | `ToolRow.module.css:118-126`、`DisclosureRow.tsx:114` |
+| 代码块复制 + 语言标签 | 复制 1000ms 复原；语言标签；默认自动换行 | `CodeBlock.tsx:157-206` |
+
+**P2 — 结构较大，可延后**：
+
+| 项 | dsh 行为 | 出处 |
+|---|---|---|
+| 轮次导航条 | 右侧 28px 竖排刻度，hover 预览卡，≤900px 隐藏 | `TurnNavigator.tsx:81-295` |
+| 加载更早 | 顶部按钮 + 锚点补偿 | `ChatView.tsx:239-245` |
+| 折叠四层模型 | 轮次 → 分组 → 单条，不可互相绕过 | `conversation-nodes/README.md:20-60` |
+| 四种工作详情模式 | compact/standard/detailed/verbose + 两个偏好 | `ui-chat/src/chat-settings.ts:15-56` |
+| 列宽可拖拽 | min 640，边缘预算 176，持久化 | `ConversationWidthControls.tsx:5-28` |
+
+**明确不做（有据可依）**：
+
+- **虚拟化**：dsh 没有，我们已有。不拆，但诊断口径按可见容器算
+- **流式光标/闪烁**：dsh 全仓**没有** streaming caret（grep 仅命中输入框）。
+  不要照想象加一个 `▍`
+- **会话内文本搜索**：dsh 没有（`Ctrl+F` 未接管）
+- **mermaid 渲染**：dsh 客户端不渲染（仅文档站校验脚本用）
+- **消息重试/编辑/分享/查看源**：dsh 都没有（只有"在新对话中分支"）
+
+---
+
 ## 8. 复刻验收方式
 
 沿用既有判据——**控件树 dump 优于截图**：

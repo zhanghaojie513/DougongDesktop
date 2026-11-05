@@ -102,6 +102,18 @@ public static class Columns
     /// <summary>大圆角。</summary>
     public const double RadiusLg = 16;
 
+    /// <summary>
+    /// 超大圆角。
+    /// </summary>
+    /// <remarks>
+    /// 出处 dsh <c>ui-theme/src/styles/base.css:22</c>：
+    /// <c>--dsw-radius-xl: 20px</c>。用户消息气泡用它
+    /// （<c>MessageItem.module.css:3-8</c>）。
+    /// <b>不要拿 <see cref="RadiusLg"/> 顶替</b>——差 4px，气泡会显得"方一点"，
+    /// 而气泡是中区出现频率最高的元素，每天要看几十次。
+    /// </remarks>
+    public const double RadiusXl = 20;
+
     /// <summary>面板圆角（dsh 的 <c>--dsw-radius-panel</c> 是 28）。</summary>
     public const double RadiusPanel = 28;
 
@@ -168,4 +180,94 @@ public static class Columns
     /// 右栏首次打开时的宽度。
     /// </summary>
     public static double RightbarDefault(double viewport) => viewport * RightbarDefaultRatio;
+}
+
+/// <summary>
+/// 中区会话域的几何与行为常量。数值逐条对应 dsh 的 CSS 与 TS。
+/// </summary>
+/// <remarks>
+/// 出处：dsh `0.2.2-alpha.2`（commit `ce7073d`），
+/// 具体文件与行号见 <c>docs/dsh-parity-spec.md</c> §7.5。
+/// <para>
+/// <b>放在 Ui.Core 而不是 App</b>：这些数字要能被检查工程断言。
+/// 检查工程不引用 App（与"App 不引 SDK"同向的隔离），放进 Ui.Core
+/// 才能写"贴底阈值必须等于 25"这种能失败的检查——写死在 XAML/代码里就查不到。
+/// </para>
+/// </remarks>
+public static class ConversationMetrics
+{
+    /// <summary>会话内容列宽下限。</summary>
+    public const double ContentWidthMin = 680;
+
+    /// <summary>会话内容列宽上限。</summary>
+    public const double ContentWidthMax = 920;
+
+    /// <summary>内容列宽占中栏的比例。</summary>
+    public const double ContentWidthRatio = 0.64;
+
+    /// <summary>用户气泡最大宽占内容列宽的比例。</summary>
+    public const double UserBubbleRatio = 0.702;
+
+    /// <summary>用户气泡最大宽占容器宽的比例（另一条约束，取二者更小的）。</summary>
+    public const double UserBubbleMaxPercent = 0.82;
+
+    /// <summary>消息区左右留白。</summary>
+    public const double Gutter = 32;
+
+    /// <summary>
+    /// 距底部多少像素以内算"贴底"（自动跟随新内容）。
+    /// </summary>
+    /// <remarks>
+    /// dsh `use-chat-reading.ts:7` 是 <c>FOLLOW_THRESHOLD = 24</c>，
+    /// 但传入采样函数时写的是 <c>FOLLOW_THRESHOLD + 1</c>（同文件 :277）。
+    /// 也就是说**实际生效值是 25**。<b>这里取 25，不取 24</b>——
+    /// 照常量名抄 24 会差 1px。
+    /// </remarks>
+    public const double FollowThreshold = 25;
+
+    /// <summary>消息流默认行间距。</summary>
+    public const double GapDefault = 4;
+
+    /// <summary>相邻 assistant 消息之间的间距。</summary>
+    public const double GapAssistant = 12;
+
+    /// <summary>轮次处理行之后的间距。</summary>
+    public const double GapAfterTurnProcess = 16;
+
+    /// <summary>"回到底部"按钮直径。</summary>
+    public const double ScrollToBottomSize = 34;
+
+    /// <summary>"回到底部"按钮距底距离。</summary>
+    public const double ScrollToBottomInset = 16;
+
+    /// <summary>输入区上方渐变遮罩高度。</summary>
+    public const double ComposerMaskHeight = 36;
+
+    /// <summary>代码块复制按钮成功态的复原延时（毫秒）。</summary>
+    public const int CopyFeedbackMs = 1000;
+
+    /// <summary>
+    /// 会话内容列宽：<c>clamp(680, 中栏宽 × 0.64, 920)</c>。
+    /// </summary>
+    /// <remarks>
+    /// 出处 <c>ConversationRoot.module.css:461-467</c>。
+    /// 用户可拖拽覆盖（min 640），那是 M17，未做。
+    /// </remarks>
+    public static double ContentWidth(double centerWidth) =>
+        Math.Clamp(centerWidth * ContentWidthRatio, ContentWidthMin, ContentWidthMax);
+
+    /// <summary>
+    /// 用户气泡的最大宽度。
+    /// </summary>
+    /// <remarks>
+    /// dsh 是两条约束取小：<c>min(内容列宽 × 0.702, 容器宽 × 82%)</c>
+    /// （<c>MessageItem.module.css:10-21</c>）。
+    /// <para>
+    /// <b>为什么必须两条都要</b>：窄窗口下容器宽先到线（82%），
+    /// 宽窗口下 0.702 那条先到线。只留一条，另一边必然错——
+    /// 这就是"改一处坏一处"的典型。
+    /// </para>
+    /// </remarks>
+    public static double UserBubbleWidth(double contentWidth, double containerWidth) =>
+        Math.Min(contentWidth * UserBubbleRatio, containerWidth * UserBubbleMaxPercent);
 }

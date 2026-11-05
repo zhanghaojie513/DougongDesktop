@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using DougongDesktop.Ipc;
+using DougongDesktop.Ui.Core;
 
 namespace DougongDesktop.App.Shell;
 
@@ -48,6 +49,34 @@ public sealed class RightDock : UserControl
 
     /// <summary>用户点开了某个文件。</summary>
     public event Action<string>? FileSelected;
+
+    /// <summary>
+    /// 用户点了某个目录，要进入它。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么需要这个</b>：之前目录是不可点的文字，
+    /// 导致 "@" 引用只能看到根目录一层——深层文件引用不到。
+    /// </remarks>
+    public event Action<string>? DirectoryRequested;
+
+    /// <summary>用户点了面包屑上的某一级，要回到那里。空串表示工作区根。</summary>
+    /// <remarks>
+    /// <b>和 <see cref="DirectoryRequested"/> 是同一个下游动作，但语义不同</b>：
+    /// 进入是"往下走一层"，这里是"跳到某个已知祖先"。分成两个事件是为了
+    /// 让订阅方能区分——将来若要做"进入时记住滚动位置、返回时恢复"，
+    /// 这两种导航的期望不一致。
+    /// </remarks>
+    public event Action<string>? DirectoryUpRequested;
+
+    /// <summary>
+    /// 当前文件 tab 正在显示哪个目录（相对工作区的路径，根为 <c>""</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <b>要有这个状态才能画面包屑</b>。上一版没有——目录可点之后，
+    /// 点进 <c>src/</c> 就再也回不到根目录了：界面上没有任何返回入口，
+    /// 只能重启应用。能进不能出，等于把单向门当成了导航。
+    /// </remarks>
+    public string CurrentDirectory { get; private set; } = string.Empty;
 
     public RightDock()
     {
@@ -121,6 +150,11 @@ public sealed class RightDock : UserControl
     /// <summary>把引擎回来的目录内容填进文件 tab。</summary>
     public void ApplyDirectory(DirectoryListedEvent listed)
     {
+        // 出错时不推进 CurrentDirectory：用户点了 src/ 但读失败，
+        // 面包屑若跟着变成 src，他会以为自己已经在 src 里
+        if (listed.Error is not { Length: > 0 })
+            CurrentDirectory = listed.Path ?? string.Empty;
+
         if (_tabItems.TryGetValue(Keys.Files, out var item))
             item.Content = BuildFilesTab(listed);
     }
@@ -144,12 +178,20 @@ public sealed class RightDock : UserControl
 
         if (listed.Error is { Length: > 0 })
         {
-            return Hint(listed.Error);
+            // 读失败时仍画面包屑：用户停在一个读不了的目录里，
+            // 更需要一条回去的路，否则又成了死胡同
+            return new StackPanel
+            {
+                Children = { BuildBreadcrumb(), Hint(listed.Error) },
+            };
         }
 
         if (listed.Entries.Count == 0)
         {
-            return Hint("（空目录）");
+            return new StackPanel
+            {
+                Children = { BuildBreadcrumb(), Hint("（空目录）") },
+            };
         }
 
         var list = new StackPanel { Spacing = 1, Margin = new Thickness(9, 4) };
@@ -163,17 +205,16 @@ public sealed class RightDock : UserControl
                 Opacity = entry.IsDirectory ? 0.9 : 0.75,
                 FontFamily = entry.IsDirectory
                     ? FontFamily.Default
-                    : new FontFamily("Geist Mono, Consolas, monospace"),
+                    : DshTheme.MonoFont,
             };
 
-            if (entry.IsDirectory)
-            {
-                list.Children.Add(label);
-                continue;
-            }
-
-            // 只有文件可点：目录的展开留给后续（需要维护路径栈，
-            // 本期先保证"能看到工作区里有什么"这一件事做对）
+            // 目录与文件都可点，但**点击含义不同**：
+            //   目录 → 进入（发 DirectoryRequested）
+            //   文件 → 选中（发 FileSelected）
+            //
+            // 这一点之前做错了：目录只是不可点的文字，
+            // 于是 "@" 引用只能看到根目录那一层，用户引用不了
+            // src/App/Shell/X.cs 这种深层文件——功能等于半残。
             var button = new Button
             {
                 Content = label,
@@ -187,7 +228,11 @@ public sealed class RightDock : UserControl
             var path = string.IsNullOrEmpty(listed.Path)
                 ? entry.Name
                 : $"{listed.Path}/{entry.Name}";
-            button.Click += (_, _) => FileSelected?.Invoke(path);
+
+            if (entry.IsDirectory)
+                button.Click += (_, _) => DirectoryRequested?.Invoke(path);
+            else
+                button.Click += (_, _) => FileSelected?.Invoke(path);
 
             list.Children.Add(button);
         }
@@ -197,9 +242,84 @@ public sealed class RightDock : UserControl
 
         return new ScrollViewer
         {
-            Content = list,
+            Content = new StackPanel { Children = { BuildBreadcrumb(), list } },
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };
+    }
+
+    /// <summary>
+    /// 文件 tab 顶部的路径面包屑：每一级可点，点了回到那一级。
+    /// </summary>
+    /// <remarks>
+    /// <b>这是"能进不能出"的修法</b>。上一版把目录改成可点之后，
+    /// 点进 <c>src/</c> 就没有任何返回入口了——界面上没有向上按钮，
+    /// 也没有路径显示，用户只能重启应用才能回到根目录。
+    /// 加这一条同时解决两件事：显示当前位置、提供回退。
+    /// <para>
+    /// <b>为什么用面包屑而不是"← 返回"单按钮</b>：在
+    /// <c>src/App/Shell/</c> 这种三层深的位置，返回一次只退一层，
+    /// 想回根要点三次；面包屑一次到位，而且明确告诉用户"你在哪"。
+    /// </para>
+    /// </remarks>
+    private Control BuildBreadcrumb()
+    {
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(9, 6, 9, 2),
+            Spacing = 1,
+        };
+
+        row.Children.Add(BreadcrumbSegment("工作区", string.Empty));
+
+        var accumulated = string.Empty;
+        foreach (var part in CurrentDirectory.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            accumulated = accumulated.Length == 0 ? part : $"{accumulated}/{part}";
+
+            row.Children.Add(new TextBlock
+            {
+                Text = "/",
+                FontSize = 11,
+                Opacity = 0.35,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(2, 0),
+            });
+
+            row.Children.Add(BreadcrumbSegment(part, accumulated));
+        }
+
+        return row;
+    }
+
+    private Control BreadcrumbSegment(string text, string path)
+    {
+        var isCurrent = path == CurrentDirectory;
+
+        var button = new Button
+        {
+            Content = new TextBlock
+            {
+                Text = text,
+                FontSize = 11,
+                // 当前所在层加重，其他层淡一些——用户扫一眼就知道自己在哪
+                Opacity = isCurrent ? 0.95 : 0.6,
+            },
+            Padding = new Thickness(4, 1),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(Columns.RadiusSm),
+        };
+
+        // 当前层不可点：点了也不会发生任何事，做成可点是在骗用户
+        if (isCurrent)
+        {
+            button.IsEnabled = false;
+            return button;
+        }
+
+        button.Click += (_, _) => DirectoryUpRequested?.Invoke(path);
+        return button;
     }
 
     /// <summary>
@@ -244,7 +364,7 @@ public sealed class RightDock : UserControl
             {
                 Text = line,
                 FontSize = 11,
-                FontFamily = new FontFamily("Geist Mono, Consolas, monospace"),
+                FontFamily = DshTheme.MonoFont,
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = 17,
             });

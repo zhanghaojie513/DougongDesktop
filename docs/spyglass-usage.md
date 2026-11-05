@@ -175,5 +175,5 @@ claude mcp add spyglass -- spyglass mcp
 | 检查工程能用吗 | ✅ 能 | ❌ 不能（要 GUI） |
 
 **所以自动化断言继续用 `DumpLayout()`，人工排查用 Spyglass。**
-不要因为有了 Spyglass 就把 `DumpLayout()` 删掉——那会让 73 条检查里的
+不要因为有了 Spyglass 就把 `DumpLayout()` 删掉——那会让 81 条检查里的
 运行时观测部分失去依据。

@@ -97,6 +97,59 @@ public static class DshTheme
         ? DshTokens.Dark.DswAliasStateErrorPrimary
         : DshTokens.Light.DswAliasStateErrorPrimary;
 
+    /// <summary>警告色（dsh 叫 state-warn-primary）。</summary>
+    public static Color Warning => IsDark
+        ? DshTokens.Dark.DswAliasStateWarnPrimary
+        : DshTokens.Light.DswAliasStateWarnPrimary;
+
+    /// <summary>
+    /// 等宽字体（代码、路径、工具输出）。
+    /// </summary>
+    /// <remarks>
+    /// <b>首选内嵌的 Geist Mono</b>（<c>WithArcFonts()</c> 已注册
+    /// <c>GeistMonoFontCollection</c>），它随包分发，Windows/macOS/Linux 字形一致。
+    /// <para>
+    /// <b>不要写死 Consolas</b>：那是 Windows 自带字体，macOS 上不存在、
+    /// Linux 上通常也没有，会静默回退到系统 monospace——三个平台三种字形，
+    /// 而且回退后行宽会变，等宽对齐的键值预览会错位。
+    /// 原来 4 处都写的是 <c>"Geist Mono, Consolas, monospace"</c>，
+    /// 在 Windows 上看不出问题（Geist 命中），到 Mac 上才暴露。
+    /// </para>
+    /// </remarks>
+    public static FontFamily MonoFont { get; } =
+        new("fonts:GeistMono, Geist Mono, Menlo, monospace");
+
+    /// <summary>
+    /// 把某个 token 色降成半透明底色，用于"低强度的状态提示"。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么在代码里算而不是新建一堆 token</b>：dsh 确实有
+    /// <c>state-warn-tertiary</c> 这类"浅底"档，但它只覆盖警告色。
+    /// 错误/中性没有对应档，而我们需要的只是"同一个色降透明度"。
+    /// 按 token 派生能保证深浅主题自动跟随——手写 <c>FromArgb</c>
+    /// 做不到这一点，那正是它出问题的原因。
+    /// </remarks>
+    public static Color WithAlpha(Color color, byte alpha) =>
+        Color.FromArgb(alpha, color.R, color.G, color.B);
+
+    /// <summary>
+    /// 用户消息气泡底色。
+    /// </summary>
+    /// <remarks>
+    /// 出处 dsh <c>UserMessageBubble.module.css:3</c> 用
+    /// <c>--dsw-specific-bubble</c>，它指向浅色主题的
+    /// <c>rgb(237,243,254)</c>（淡蓝）与深色主题的 <c>rgb(44,44,46)</c>。
+    /// <para>
+    /// <b>这里原来写的是手调的淡绿 <c>Color.FromArgb(18,47,111,94)</c></b>——
+    /// 一个 token 表里本来就有、却绕过它自己配的颜色。
+    /// 淡绿既不属于 dsh 的任何一档，也没有在任何主题下算过对比度。
+    /// 这正是"token 表存在的意义"，绕过去等于白建。
+    /// </para>
+    /// </remarks>
+    public static Color Bubble => IsDark
+        ? DshTokens.Dark.DswSpecificBubble
+        : DshTokens.Light.DswSpecificBubble;
+
     /// <summary>
     /// 按系统主题初始化，并挂上跟随变化的监听。
     /// </summary>

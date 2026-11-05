@@ -19,9 +19,9 @@
 >
 > **判定要严**：有类名但没接进装配，算 `⬜`；接进装配但没有验证，算 `🟡`。
 
-最后更新：2026-10-31
+最后更新：2026-11-05
 
-**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `0.3.2-preview.2` · SDK `0.1.11-alpha.1`
+**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `0.3.2-preview.2` · SDK `0.1.18-alpha.1`
 
 ---
 
@@ -52,13 +52,22 @@
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 0 | 7 | 0 | 0 | 8 | 13% |
 | P8f 终端与浏览器 | 0 | 0 | 5 | 0 | 0 | 5 | 0% |
-| **合计** | **16** | **0** | **26** | **2** | **2** | **46** | **38%** |
+| **P8g 中区会话域** | **8** | **1** | **4** | **0** | **6** | **19** | **69%** |
+| **合计** | **24** | **1** | **30** | **2** | **8** | **65** | **45%** |
+
+> **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
+> 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
+> 规格见 `docs/dsh-parity-spec.md` §7.5。
 
 **P8a 已完成**：10 项做到、1 项明确不做（A9 保留 Arc 实现）、
 1 项等上游（A10 Arc 侧栏 64px）。它的待办为零。
 
 完成度算法：`(✅ + 🟡×0.5) / (✅+🟡+⬜)`，不含 `⏳` 与 `➖`。
-`16 / 42 = 38%`（分母 46 − 2 个 ⏳ − 2 个 ➖）
+`(24 + 1×0.5) / (24+1+30) = 24.5 / 55 = 45%`
+
+> 加 P8g 时完成度从 38% 掉到 33%（分母变大）。做完 P0 那批回到 40%。
+> **不做的那些（M18–M23 六项 ➖）不算进分母**——它们是 dsh 也没有的东西，
+> 拿它们充数就成了"用没做的功能凑完成度"。
 
 **统计口径**：这些数字从下面第二部分的表格逐行数出来，不是手填的。
 **改了一行状态就要同步改这里**——两处对不上说明漏改。
@@ -124,7 +133,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | # | 状态 | 项 | 实现方式 | 我们 | 验证 |
 |---|---|---|---|---|---|
 | B1 | ✅ | `/` 斜杠命令 | `[Arc]` | `AiCommand` + `AiComposer.Commands`；识别靠 `Sent` 的 token，不解析文本 | 无检查；dump 见 composer |
-| B2 | ✅ | `@` 文件引用 | `[Arc]` | `ContextItemProjection` 把 `fs/list` 结果转成 `AiContextItem`；Id 用完整相对路径（同名文件不互串）；分组标题显式设中文（Arc 默认英文） | dump「@ 引用项 17 个」与目录条目数一致；`context-items-have-unique-ids` |
+| B2 | ✅ | `@` 文件引用 | `[Arc]` | `ContextItemProjection` 把 `fs/list` 结果转成 `AiContextItem`；Id 用完整相对路径（同名文件不互串）；分组标题显式设中文（Arc 默认英文）；**右栏目录可点进入，列表累加不替换** | dump「@ 引用项 18 个」；进入 `src/` 后 **23 个**（累加 5）；`context-items-have-unique-ids` |
 | B3 | ✅ | 附件栏 | `[Arc]` | **Arc 自带完整链路**：`IsAttachmentEnabled=true` → 加号菜单 → "Upload file" → `BrowseAsync()` 自己开系统选择器。`UploadHandler=null`（本地无上传服务，附件直接 Ready） | 自检注入 1 个附件后 Composer 高 101→161；dump「自检附件已加入：1 个」 |
 | B4 | ✅ | 模型选择 | `[Arc]` | `AiModel`/`AiModelProvider`；IPC `models/list` → `ModelProjection` → composer | 运行时日志「模型目录：662 个 / 22 家」 |
 | B5 | ✅ | 消息反馈 Like/Dislike | `[自有]` | 自建 `FeedbackBar`：赞/踩两按钮，踩后追问理由，重复点击只提交一次。**`AiAnswerActions` 实测是 `internal`**，引用不到；`AiAnswer` 是整页控件，量级不匹配 | dump「反馈条 1 个 / 可见 assistant 容器 1 个」；`feedback-rating-roundtrips` |
@@ -140,8 +149,8 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | C4 | ⬜ | 插件清单页 | `[Arc]` | 按作用域分组，复用 `UiExtensionLoader.Loaded` | 待做 |
 | C5 | ⬜ | 权限预设 | `[自有]` | 默认权限行 + `/permission` 选择器 | 待做 |
 | C6 | ⬜ | Agent preset | `[自有]` | 选择 + 说明 | 待做 |
-| C7 | ⬜ | Agent 循环设置（并行工具上限） | `[自有]` | **非 SDK 缺口**：`LoopAgentRuntime` 已有，只缺配置暴露（台账 #14） | 待做 |
-| C8 | ⏳ | 子智能体设置 | `[—]` | **等 SDK**：`dsh-capability-gap.md` P2 #15（台账 #13） | — |
+| C7 | ⬜ | Agent 循环设置（并行工具上限） | `[自有]` | **原描述"只缺配置暴露"经 0.1.18 实测有误**：`ToolConcurrency` 只有两级（串行 / 工作区独占），并发由 `ToolExecutionPlan` 的 `Reads`/`Writes` 资源键自动仲裁，**没有用户可调的并行数**。界面不该放一个调了也不生效的滑块 | 待做（范围待定） |
+| C8 | ⏳ | 子智能体设置 | `[—]` | **等 SDK**：`dsh-capability-gap.md` P2 #15（台账 #13）。**0.1.18 实测更新**：SDK 库内已有 `SubagentRegistry` + `subagent`/`subagent_list`/`subagent_result` 工具（0.1.17 引入），但 `Dougong.HostProtocol` 的 119 个顶层类型里 **0 处提及 subagent**——能力在引擎里、到不了桌面端。等待对象从"等能力"改成**"等契约暴露"** | — |
 
 ### P8d 会话增强
 
@@ -168,7 +177,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | E3 | ⬜ | NuGet 安装器 | `[自有]` | **SDK 明确不做**：flat container 拉 `.nupkg` → 解包 → `LoadFromDirectoryAsync` | 待做 |
 | E4 | ⬜ | dockkit 分裂标签树 | `[Arc]` | 画布用 `WorkflowCanvas`，分裂树自建 | 待做 |
 | E5 | ⬜ | 右栏停靠面 + tab 注册表 | `[Arc]` | `AiSidePanel` / `AiPanelColumn` | 待做 |
-| E6 | ✅ | 右侧文件树 | `[自有]` | `fs/list` + `RightDock` 文件 tab | 运行时「目录 ''：17 项」；`fs-list-*` 3 条检查 |
+| E6 | ✅ | 右侧文件树 | `[自有]` | `fs/list` + `RightDock` 文件 tab；**可进入子目录，面包屑可回退** | 运行时「目录 ''：18 项」→ 进 `src/` 「5 项」；`fs-list-*` 3 条检查 + `dock-directory-nav-is-two-way` |
 | E7 | ⬜ | 文档预览 | `[自有]` | Markdown/代码/图片/PDF/Office | 待做 |
 | E8 | ⬜ | 右键菜单扩展点 | `[自有]` | — | 待做 |
 
@@ -181,6 +190,58 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | F3 | ⬜ | PTY 接入 | `[自有]` | Windows `ConPTY` / Unix `forkpty`，双向字节流 | 待做 |
 | F4 | ⬜ | 终端面板（dock tab） | `[Arc]` | `TerminalView` 放进右栏 | 待做 |
 | F5 | ⬜ | 内置浏览器 | `[自有]` | WebView2（Windows）/ WebKitGTK（Linux） | 待做 |
+
+### P8g 中区会话域
+
+> **本组是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**（P8a），
+> 会话内容的渲染与交互从未与 dsh 比对过——这是范围缺口。
+> 事实来源 `dsh-src` commit `ce7073d`，逐项行号见规格 §7.5。
+>
+> 状态判据照旧：**契约有数据但 UI 没做 = ⬜；做了但口径不对 = 🟡；
+> 契约无数据 = ➖**（不做假条目）。
+
+**P0 — 契约有数据、纯 UI 缺失**
+
+| # | 状态 | 项 | 实现方式 | dsh 行为（出处） | 我们 |
+|---|---|---|---|---|---|
+| M1 | ✅ | 用户消息复制 | `[自有]` | 时间 + 复制图标，点后变对勾 **1000ms** 复原（`MessageIconActions.tsx:45-90`） | 自建 `MessageActions`：HH:mm + 复制；对勾 1000ms 复原；剪贴板不可用**不假装成功**。dump「气泡 1 / 动作行 1」 |
+| M2 | ✅ | 用户气泡宽度 | `[自有]` | `min(列宽×0.702, 82%)`（`MessageItem.module.css:10-21`） | `ConversationMetrics.UserBubbleWidth`，两条约束取小；`chat-bubble-width-is-two-sided` 钉住宽/窄两端 |
+| M3 | 🟡 | 助手动作行 | `[自有]` | 复制 → 赞踩 → 分支 → 用量 → 时间（`TurnTailNodeView.tsx:57-78`） | 只有赞踩（复制/分支/用量需契约字段，见 §7.5.2） |
+| M4 | ✅ | 消息间距分层 | `[自有]` | 默认 4 / assistant 相邻 12 / turn-process 后 16（`ChatView.module.css:77-93`） | 三档照搬，`chat-gaps-are-three-tiered` 断言严格递增 |
+| M5 | ✅ | 贴底阈值 | `[自有]` | **25px**（`use-chat-reading.ts:7,277`） | 25。`chat-follow-threshold-is-25` 硬编码 dsh 的**生效值**（不是常量名上的 24） |
+| M6 | ✅ | "回到底部"按钮 | `[自有]` | 34×34 圆形，距底 16px，滚离底部才出现（`ChatView.tsx:272-283`） | 同尺寸同位置；点击恢复跟随。dump「34×34 OK」 |
+| M7 | ✅ | 空状态 Hero | `[自有]` | logo + "探索未至之境" + 预览版徽章 + 工作区 chip（`EmptyHero.tsx:132-166`） | logo + 标题 + 预览版徽章。**不做工作区 chip**（桌面端工作区由启动参数定，做了会是死按钮） |
+| M8 | ✅ | 输入区渐变遮罩 | `[自有]` | 36px `linear-gradient` 贴底（`ConversationRoot.module.css:507-530`） | 36px 渐变，叠在消息流行底部（不是输入区行内，否则盖住输入框），不参与命中测试 |
+
+**P1 — 需要少量新状态**
+
+| # | 状态 | 项 | 实现方式 | dsh 行为（出处） | 我们 |
+|---|---|---|---|---|---|
+| M9 | ✅ | 流式运行状态行 | `[自有]` | 鲸鱼尾 + "深度求索中，用时 N ···"，1s 刷新（`RunningStatus.tsx:25-48`） | 自建 `RunStatusLine`，放进**滚动区末尾**（放滚动区外的话用户上滚就看不见）。dump 实测 0→7 秒计时在走 |
+| M10 | ✅ | 已停止标记 | `[自有]` | assistant 尾部 11px 灰底小标签（`AssistantMarkdown.tsx:152-154`） | 旁挂 `_stoppedAssistantIds`（契约无该字段）。`chat-stopped-badge-needs-finished-turn` 断言回合进行中不能标 |
+| M11 | ⬜ | 工具卡三态视觉 | `[Arc]` | running 整行 shimmer / error 错误色+结果首行 / stopped 琥珀（`ToolRow.module.css:118-126`） | Arc 默认态 |
+| M12 | ⬜ | 代码块复制+语言标签 | `[Arc]` | 复制 1000ms 复原；语言标签；默认自动换行（`CodeBlock.tsx:157-206`） | 待核实 Arc `Markdown` 是否自带 |
+
+**P2 — 结构较大，延后**
+
+| # | 状态 | 项 | 实现方式 | dsh 行为（出处） | 我们 |
+|---|---|---|---|---|---|
+| M13 | ⬜ | 轮次导航条 | `[自有]` | 右侧 28px 竖排刻度，hover 预览，≤900px 隐藏（`TurnNavigator.tsx:81-295`） | 无 |
+| M14 | ⬜ | 加载更早 | `[自有]` | 顶部按钮 + 锚点补偿（`ChatView.tsx:239-245`） | 无（无分页） |
+| M15 | ⬜ | 折叠四层模型 | `[自有]` | 轮次→分组→单条，不可互相绕过（`conversation-nodes/README.md:20-60`） | 只有单条折叠 |
+| M16 | ⬜ | 工作详情模式 | `[自有]` | compact/standard/detailed/verbose + 两个偏好（`chat-settings.ts:15-56`） | 无 |
+| M17 | ⬜ | 列宽可拖拽 | `[自有]` | min 640、边缘预算 176、localStorage 持久化（`ConversationWidthControls.tsx:5-28`） | 固定 clamp |
+
+**明确不做（dsh 也没有，别照想象补）**
+
+| # | 状态 | 项 | 理由与出处 |
+|---|---|---|---|
+| M18 | ➖ | 流式光标/闪烁 | dsh 全仓**没有** streaming caret——grep `cursor\|blink\|caret` 只命中输入框。加一个 `▍` 反而偏离 |
+| M19 | ➖ | 会话内文本搜索 | dsh 没有（`Ctrl+F` 未接管）。`session.search` 是侧栏搜会话，不是页内搜 |
+| M20 | ➖ | mermaid 渲染 | dsh 客户端不渲染，仓库根的 mermaid 只用于文档站校验脚本 |
+| M21 | ➖ | 消息重试/编辑/分享/查看源 | dsh 都没有。只有"在新对话中分支"（`message.branch`） |
+| M22 | ➖ | 消息级虚拟化 | **dsh 没有**（`ChatFlow.tsx:52-63` 全量 map）。我们已有 `VirtualizingStackPanel`——这是超出，不是欠缺。不拆，但诊断口径按可见容器算 |
+| M23 | ➖ | 头像 | dsh 无（全仓 grep `avatar` 无命中） |
 
 ---
 
@@ -250,3 +311,18 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-10-31 | **B5 从 ⬜ 改 ✅**：自建 `FeedbackBar`（`AiAnswerActions` 是 internal）。同时发现 `ipc-every-message-is-registered` 迁移后失效——它查类型特性，而判别器已改到 `RegisterMessages` 的调用里，查不到任何东西就永远通过。已改为查 SDK 的 `RegisteredExtensions` |
 | 2026-10-31 | **A9 从 ⬜ 改 ➖**：用户决定"保留 Arc 的，不用强行修改"。dsh 的 36/28/8/12 与 Arc 默认值接近，覆盖模板的收益不抵"与上游版本脱钩"的风险。P8a 待办清零 |
 | 2026-10-31 | **F1/F2 从 ✅ 改 ⬜**：复核时 `grep TerminalView src/` 结果为空——包引用了但产品代码零使用。原标 ✅ 违反本文件第 1 条规则（"有类名不算"）。完成度 34% → 30% |
+| 2026-11-05 | **B2 复核发现两个真缺陷**。①`FileSelected` 事件**没有订阅者**——本仓库第 4 例"定义了但没人用"。②`@` 引用**只能看到根目录一层**：右栏目录是不可点的 `TextBlock`，用户引用不了 `src/App/Shell/X.cs` 这类深层文件。已改为目录可点击触发 `DirectoryRequested` |
+| 2026-11-05 | **修①又引入③**：目录可点之后**能进不能出**——点进 `src/` 后界面无任何返回入口，只能重启。补 `CurrentDirectory` 状态 + 面包屑（每级可点，当前层禁用）。新增检查 `dock-directory-nav-is-two-way`，断言返回事件有触发点**且**装配根有订阅（只查声明抓不到"定义了没人订阅"） |
+| 2026-11-05 | **自检脚本自身抖动**：第一版回退验证写死 `Task.Delay(800)`，两轮里有一轮响应慢于此，打印"未增长"误导。改为**等条件成立**（50ms 轮询，5s 上限）。会时红时绿的自检比没有更糟 |
+| 2026-11-05 | 检查数 73 → 74。运行时实测：根目录 18 项 → 进 `src/` 累加到 23 → 回退 `CurrentDirectory=''` 复位 |
+| 2026-11-05 | 检查数 74 → **79**（`chat-*` 5 条）。其中 `chat-no-fake-streaming-caret` 的第一版反证**写错了**：往源码尾部追加 `// ▍`，被注释过滤跳过 → 反证不变红、检查形同未验证。改成追加非注释代码后才正确变红 |
+| 2026-11-05 | **P8g 复核发现四个问题**。①`_compensating` 是**死字段**：有声明有读有重置，但从没有一处置 true——注释写着"只允许一层"实际一层没限。改为 `_compensationRounds` 计数上限 8 ②用户气泡圆角用了 `RadiusLg(16)`，dsh 是 `--dsw-radius-xl: 20px`，补 `RadiusXl` ③气泡底色手调淡绿 `FromArgb(18,47,111,94)`，而 token 表**本来就有** `DswSpecificBubble`（浅 `#EDF3FE`/深 `#2C2C2E`）④错误通告手调 `(200,60,60)` 而非 `StateErrorPrimary`；同时复制按钮连点会叠加多个复原计时，加令牌作废旧计时 |
+| 2026-11-05 | **诊断口径错了一次**：查 `TextBlock.IsVisible` 判定空状态 Hero 是否显示，得到"13 条消息时 Hero 仍显示"的假警报——父容器隐藏后子元素 `IsVisible` 仍是 true。改用 `IsEffectivelyVisible` 才对。**误报比漏报更伤**，它教会人忽略这条输出 |
+| 2026-11-05 | 新增 `chat-colors-come-from-tokens`，检查连续抓到三处：气泡色（真问题）、悬停半透明黑遮罩（不该拦，改判"是否有色相"）、错误通告手调红（真问题）。检查数 79 → **80** |
+| 2026-11-05 | **P8g P1 完成 M9/M10**。M9 流式状态行 `RunStatusLine`（1s 刷新，实测 0→7 秒在走）；M10 已停止标记（旁挂 Id 集合，契约无该字段）。检查数 80 → **81** |
+| 2026-11-05 | **M10 又踩到"依赖调用方守顺序"**：自检里同时调 `OnTurnStarted` + `MarkLastAssistantStopped`，界面出现"深度求索中，用时 6 秒"与"已停止"并存——自相矛盾。真实路径顺序是对的，但守卫要写在 `ConversationView` 自己身上。加 `_turnRunning` 互斥 + `chat-stopped-badge-needs-finished-turn` |
+| 2026-11-05 | **SDK 升到 0.1.18-alpha.1**（0.1.13 → 0.1.18）。契约比对：`HostProtocol` 公开成员 **165 → 165，零增零删**；74 条检查全过；运行时连通（会话 0 条、模型 663 个/23 家）。这版变更集中在 CLI 终端呈现（字标/启动面板/单行状态行/黑白灰默认），与桌面端无交集 |
+| 2026-11-05 | **发现等待对象变了**：0.1.17 那批能力（`SubagentRegistry`、`SkillDiscovery`、`SessionGoal`、`JobRegistry`、`PermissionPresets`、`ExitPlanMode`、`MessageFeedback`、`FileReferenceIndex`）**库里都有，IPC 契约里一个都没有**——`HostProtocol` 全文检索这几个词，命中 0 次。所以 C8 的等待从"等 SDK 补能力"改成"等 SDK 把能力暴露到契约"。这也解释了为什么升级零改动：这批根本到不了桌面端 |
+| 2026-11-05 | **中区会话域纳入范围（P8g）**。此前只对齐了中栏宽度几何，会话内容行为从未与 dsh 比对——是范围缺口。新建规格 §7.5（含 17 种条目类型对照、几何实测值、三条优先级清单），进度新增 P8g 19 项（6✅/1🟡/6⬜/6➖） |
+| 2026-11-05 | **P8g P0 八项完成六项**。M1 复制、M4 间距三档、M5 阈值 25、M6 回到底部、M7 空状态 Hero、M8 渐变遮罩。M2 气泡宽度从固定 60 改成两条约束取小，M3 动作行仍缺（需契约字段） |
+| 2026-11-05 | **贴底逻辑改了四轮才对，值得记**。①原实现阈值 80（凭手感）②改成 25 后加"跨阈值"判断，结果内容增长时 Extent 先涨 Offset 后跟，被判成"用户滚走了"→载入后停在距底 572px ③改为比较"Offset 是否变小"④发现 `_scroll.Offset` 手算目标会静默失败，改用 `ScrollToEnd()` 并在 Background/Loaded/Render 三个优先级各排一次。**四次都是运行时 dump 抓到的，静态检查全程绿** |

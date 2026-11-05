@@ -84,8 +84,15 @@ public sealed class ConversationView : UserControl
     /// <summary>审批卡片区：在消息流与输入区之间，常驻、不参与虚拟化。</summary>
     private readonly StackPanel _approvalHost = new() { Spacing = 0 };
 
+    /// <summary>流式进行中的状态行（"深度求索中，用时 N 秒"）。</summary>
+    private readonly RunStatusLine _runStatus = new()
+    {
+        Margin = new Thickness(ConversationMetrics.Gutter, 4, ConversationMetrics.Gutter, 12),
+        IsVisible = false,
+    };
+
     private readonly ScrollViewer _scroll;
-    private readonly TextBlock _emptyHint;
+    private readonly Control _emptyHint;
 
     /// <summary>当前显示的条目（按 Id 索引，便于流式更新时就地替换）。</summary>
     private readonly List<ConversationItem> _items = [];
@@ -96,8 +103,39 @@ public sealed class ConversationView : UserControl
     /// <remarks>
     /// 用户往上滚看历史时不该被新消息拽回底部——那是最烦人的交互之一。
     /// 只有"本来就在底部附近"时才自动跟随。
+    /// <para>
+    /// <b>阈值 25px，不是 80px</b>。原实现写 80 是凭手感定的；dsh 的
+    /// <c>use-chat-reading.ts:7</c> 定义 <c>FOLLOW_THRESHOLD = 24</c>，
+    /// 而采样调用处（同文件 :277）传的是 <c>FOLLOW_THRESHOLD + 1</c>，
+    /// 实际生效 25。80 与 25 的可观察差别很大：用户上滚一行（约 20px）时，
+    /// 80 仍判定"在底部"并把视图拽回去，25 则正确停止跟随。
+    /// </para>
     /// </remarks>
     private bool _stickToBottom = true;
+
+    /// <summary>当前是否处于"贴底"状态，供诊断与按钮显隐。</summary>
+    public bool IsStickingToBottom => _stickToBottom;
+
+    /// <summary>上一次 ScrollChanged 时的偏移，用来区分"用户上滚"与"内容变长"。</summary>
+    private double _lastOffset;
+
+    /// <summary>上一次 ScrollChanged 时的内容高度，用来识别 ItemsSource 重建导致的高度缩水。</summary>
+    private double _lastExtent;
+
+    /// <summary>上一轮的基准是否有效。ItemsSource 重建后为 false，跳过一轮判断。</summary>
+    private bool _baselineKnown;
+
+    /// <summary>本轮连续补滚的轮数，防止 ScrollChanged 自激。</summary>
+    /// <remarks>
+    /// 只在"仍没到底"时递增，到底或用户接管时归零。
+    /// 上限 8 轮足够覆盖虚拟化列表的几轮测量（实测 2–3 轮就到底）。
+    /// </remarks>
+    private int _compensationRounds;
+
+    /// <summary>补滚轮数上限。</summary>
+    private const int MaxCompensationRounds = 8;
+
+    private readonly Avalonia.Controls.Button _scrollToBottom;
 
     public ConversationView()
     {
@@ -112,33 +150,136 @@ public sealed class ConversationView : UserControl
             Margin = new Thickness(0),
         };
 
-        _emptyHint = new TextBlock
-        {
-            Text = "还没有消息。在下方输入开始对话。",
-            FontSize = 13,
-            Opacity = 0.45,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            IsVisible = true,
-        };
+        _emptyHint = BuildEmptyHero();
 
         _scroll = new ScrollViewer
         {
-            Content = _list,
+            // 列表 + 状态行放进同一个滚动内容。
+            //
+            // 状态行必须**在滚动区里**：它是"即将出现新内容"的指示，
+            // 放在滚动区外（比如审批区那一行）的话，用户上滚看历史时
+            // 它就跟着消失了——而那正是最需要知道"还在跑吗"的时刻。
+            Content = new StackPanel { Children = { _list, _runStatus } },
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };
 
+        _scrollToBottom = new Avalonia.Controls.Button
+        {
+            Content = new TKCode.Arc.Icons.Lucide.LucideIcon
+            {
+                Kind = TKCode.Arc.Icons.Lucide.LucideIconKind.ChevronDown,
+                Size = 16,
+            },
+            Width = ConversationMetrics.ScrollToBottomSize,
+            Height = ConversationMetrics.ScrollToBottomSize,
+            CornerRadius = new CornerRadius(ConversationMetrics.ScrollToBottomSize / 2),
+            Padding = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, ConversationMetrics.ScrollToBottomInset),
+            IsVisible = false,
+            Background = new SolidColorBrush(DshTheme.ButtonElevatedFill),
+            BorderThickness = new Thickness(1),
+            BorderBrush = new SolidColorBrush(DshTheme.BorderL3),
+        };
+
+        // 订阅放在按钮构造**之后**：ScrollChanged 会在构造期间触发，
+        // 先订阅会拿到 null 的 _scrollToBottom（CS8602 抓到的就是这个顺序问题）
         _scroll.ScrollChanged += (_, _) =>
         {
-            // 距底部 80px 以内算"在底部"
-            var distance = _scroll.Extent.Height - _scroll.Offset.Y - _scroll.Viewport.Height;
-            _stickToBottom = distance < 80;
+            var extent = _scroll.Extent.Height;
+            var offset = _scroll.Offset.Y;
+            var viewport = _scroll.Viewport.Height;
+
+            // 布局还没完成（视口或内容为 0）时不做任何判断：
+            // 此时的 distance 是个无意义的大数，会把跟随状态打成"已暂停"
+            if (viewport <= 0 || extent <= 0)
+            {
+                _lastOffset = offset;
+                _lastExtent = extent;
+                _baselineKnown = true;
+                return;
+            }
+
+            // 基准未知（刚重建过 ItemsSource）：只记录，不判断
+            if (!_baselineKnown)
+            {
+                _lastOffset = offset;
+                _lastExtent = extent;
+                _baselineKnown = true;
+                return;
+            }
+
+            var distance = extent - offset - viewport;
+
+            // **区分"用户上滚"与"内容变长"**。
+            //
+            // 这是第一版写错的地方，症状是"载入后没滚到底"：
+            // 内容追加时 Extent 先变大、Offset 还没跟上，`distance`
+            // 一瞬间变得很大，于是被判成"用户滚走了"→ 跟随被关掉 →
+            // 排队中的滚底回调又被守卫拦下 → 停在中途。
+            //
+            // 正确的判据不是"离底部多远"，而是**Offset 有没有变小**：
+            //   - Offset 变小、且内容没缩水 → 用户往上滚了 → 暂停跟随
+            //   - Offset 没变或变大、内容变长  → 系统追加内容 → 继续跟随
+            //   - Extent 缩水（ItemsSource 重建）→ 两者的比较无意义，跳过
+            var contentShrank = extent < _lastExtent - 0.5;
+            var offsetWentUp = offset < _lastOffset - 0.5;
+
+            // 内容又变长了 → 布局在往前推进，允许再补一次滚
+            if (extent > _lastExtent + 0.5) _compensationRounds = 0;
+
+            if (!contentShrank && offsetWentUp)
+                _stickToBottom = false;
+            else if (distance <= ConversationMetrics.FollowThreshold)
+                _stickToBottom = true;   // 用户自己滚回来了，重新贴底
+
+            _lastOffset = offset;
+            _lastExtent = extent;
+
+            // 不在底部才显示"回到底部"
+            _scrollToBottom.IsVisible = !_stickToBottom && extent > viewport;
+
+            // **跟随中但还没到底 → 补滚**。
+            //
+            // 这是第二个必须补的地方，也是"载入后卡在中途"的真正原因：
+            // 虚拟化列表的 Extent 是**分几轮**长出来的——先建可见容器、
+            // 再测量、再扩充。每次 Add 只排一次滚底，滚动时 Extent 还没
+            // 最终定下来，于是停在半路（实测窄栏停在距底 572px）。
+            //
+            // 判据加上 `!contentShrank`：重建 ItemsSource 时的缩水是
+            // 中间态，那时补滚会把新内容的滚动位置搞乱。
+            //
+            // 防自激：补滚会再次触发 ScrollChanged，若那时仍没到底会继续
+            // 排队，形成"滚一点→再排一次"的活锁，UI 线程永远忙。
+            // 上限 8 次；超过就放弃这一轮，等下一次真正的内容增长重置。
+            //
+            // **原来这里是个死字段**：`_compensating` 有声明、有读、有重置，
+            // 但**没有任何一处把它置为 true**——注释写着"只允许一层"，
+            // 实际一层也没限。这类"注释描述了不存在的机制"比没注释更糟，
+            // 因为它让人以为已经防住了。
+            if (_stickToBottom && !contentShrank && distance > 1)
+            {
+                if (++_compensationRounds <= MaxCompensationRounds)
+                    QueueScrollToBottom();
+            }
+            else
+            {
+                _compensationRounds = 0;   // 到底了或用户接管了，计数归零
+            }
         };
+
+        ToolTip.SetTip(_scrollToBottom, "回到底部");
+
+        _scrollToBottom.Click += (_, _) => ScrollToBottom();
 
         var grid = new Grid();
         grid.Children.Add(_scroll);
         grid.Children.Add(_emptyHint);
+        grid.Children.Add(_scrollToBottom);
 
         // 输入区固定在下方，消息流占剩余空间。
         // 用 Grid 两行而不是把 Composer 叠在 ScrollViewer 上——叠上去会遮住
@@ -163,6 +304,35 @@ public sealed class ConversationView : UserControl
 
         Grid.SetRow(Composer, 3);
         root.Children.Add(Composer);
+
+        // 输入区上方的渐变遮罩（dsh `ConversationRoot.module.css:507-530`）。
+        //
+        // **为什么需要**：消息滚到输入区边缘时会硬切一刀——最后一行文字
+        // 紧贴输入框上沿被截断，视觉上像"内容被吃了"。dsh 用 36px 渐变
+        // 让内容淡出，读起来是"还有更多，往下滚"，而不是"到这儿就没了"。
+        //
+        // **叠在消息流那一行的底部**（不是输入区那行的顶部）：
+        // 放输入区行里会盖住输入框自身。它必须压在消息流末端之上。
+        // 不参与命中测试，否则会挡住消息里的链接与按钮。
+        var mask = new Border
+        {
+            Height = ConversationMetrics.ComposerMaskHeight,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            IsHitTestVisible = false,
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
+                GradientStops =
+                {
+                    new GradientStop(Color.FromArgb(0, 0, 0, 0), 0),
+                    new GradientStop(DshTheme.PageBackground, 1),
+                },
+            },
+        };
+
+        Grid.SetRow(mask, 1);
+        root.Children.Add(mask);
 
         Content = root;
 
@@ -416,8 +586,117 @@ public sealed class ConversationView : UserControl
         _items.Add(item);
         Refresh();
 
-        if (_stickToBottom) ScrollToBottom();
+        if (_stickToBottom) QueueScrollToBottom();
     }
+
+    /// <summary>已停止的助手消息 Id 集合。</summary>
+    /// <remarks>
+    /// <b>为什么用旁挂集合而不是给条目加字段</b>：<c>AssistantMessageItem</c>
+    /// 是 SDK 的契约 record，只有 <c>Text</c> 与 <c>IsStreaming</c>——
+    /// 没有"这轮被用户中止"的表达。不能改 SDK 类型，
+    /// 也不该为此加一条假的"已停止"消息（那会写脏会话记录）。
+    /// <para>
+    /// 代价是不参与持久化：重开会话后标记会消失。当前阶段可以接受——
+    /// 会话持久化（P9）尚未做，届时再决定"中止"要不要进日志。
+    /// </para>
+    /// </remarks>
+    private readonly HashSet<string> _stoppedAssistantIds = new(StringComparer.Ordinal);
+
+    /// <summary>给最后一条助手消息打上"已停止"标记。</summary>
+    /// <remarks>
+    /// 由宿主在收到 <c>TurnCompletedEvent(Cancelled)</c> 时调用。
+    /// dsh 的表现是 assistant 尾部一个 11px 灰底小标签
+    /// （<c>AssistantMarkdown.tsx:152-154</c>）。
+    /// <para>
+    /// 标记**最后一条 assistant**：用户点停止时界面上"正在生成"的就是它。
+    /// 即使末尾是工具卡（中途停的），被截断的文字仍在最后那条 assistant 里。
+    /// </para>
+    /// </remarks>
+    public void MarkLastAssistantStopped()
+    {
+        // 回合还在跑时不标：那是自相矛盾的状态（"正在生成"和"已停止"
+        // 同时出现）。真实调用顺序是先 OnTurnEnded 再标记，
+        // 但**不能依赖调用方守顺序**——这类保护要写在自己身上。
+        if (_turnRunning) return;
+
+        for (var i = _items.Count - 1; i >= 0; i--)
+        {
+            if (_items[i] is not AssistantMessageItem assistant) continue;
+
+            if (!_stoppedAssistantIds.Add(assistant.Id)) return;   // 已标过
+
+            Refresh();
+            return;
+        }
+    }
+
+    /// <summary>该助手消息是否已被标记为停止。</summary>
+    public bool IsStopped(string itemId) => _stoppedAssistantIds.Contains(itemId);
+
+    /// <summary>回合开始：显示并启动"深度求索中"状态行。</summary>
+    public void OnTurnStarted()
+    {
+        _runStatus.IsVisible = true;
+        _runStatus.Start(DateTimeOffset.Now);
+        _turnRunning = true;
+
+        // 新内容开始产生，用户期待看到它 —— 恢复跟随。
+        // 这与 dsh 的行为一致：自己的提交会让阅读位置回到末尾。
+        _stickToBottom = true;
+        QueueScrollToBottom();
+    }
+
+    /// <summary>回合结束：隐藏状态行。</summary>
+    public void OnTurnEnded()
+    {
+        _runStatus.Stop();
+        _turnRunning = false;
+    }
+
+    /// <summary>当前是否有回合在跑。</summary>
+    public bool IsTurnRunning => _turnRunning;
+
+    /// <summary>回合是否在跑。状态行与"已停止"标记互斥用。</summary>
+    private bool _turnRunning;
+
+    /// <summary>状态行当前文本（供诊断）。</summary>
+    public string RunStatusText => _runStatus.CurrentText;
+
+    /// <summary>
+    /// 排到布局之后滚到底。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须延后</b>：刚 <c>Add</c> 完时 <c>ScrollViewer.Extent</c> 还是旧值。
+    /// <para>
+    /// <b>要重试几轮</b>：自检/首次载入时消息是在窗口显示**之前**灌进去的，
+    /// 那时连视口高度都是 0，第一次 <c>ScrollToEnd</c> 什么也不会做。
+    /// 实测：只调一次时停在 offset=0（完全没滚），
+    /// 窄栏下停在距底 572px。所以要连排几轮，
+    /// 每轮都重新判断"是否还在跟随、是否还没到底"。
+    /// </para>
+    /// <para>
+    /// <b>轮数有上限</b>：无限重试会在"内容永远比视口高一像素"时自激。
+    /// 6 轮足够覆盖虚拟化列表的几轮测量，再多就是逻辑错了。
+    /// </para>
+    /// </remarks>
+    private void QueueScrollToBottom()
+    {
+        // 只排两批：一批 Background（布局前），一批 Loaded（布局后）。
+        // 用固定优先级而不是"Background + round"——后者是枚举加法，
+        // 会撞上相邻优先级的语义，行为不可预期。
+        QueueScrollToBottomAt(Avalonia.Threading.DispatcherPriority.Background);
+        QueueScrollToBottomAt(Avalonia.Threading.DispatcherPriority.Loaded);
+        QueueScrollToBottomAt(Avalonia.Threading.DispatcherPriority.Render);
+    }
+
+    private void QueueScrollToBottomAt(Avalonia.Threading.DispatcherPriority priority) =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (!_stickToBottom) return;   // 排队期间用户可能滚走了
+                _scroll.ScrollToEnd();
+            },
+            priority);
 
     /// <summary>
     /// 插入一张审批卡片。
@@ -437,8 +716,11 @@ public sealed class ConversationView : UserControl
         _approvalCards[card.RequestId] = card;
         _approvalHost.Children.Add(card);
 
-        // 强制滚到底：审批不处理回合就停着，出现在视口外等于让会话静默卡住
-        ScrollToBottom();
+        // 强制滚到底：审批不处理回合就停着，出现在视口外等于让会话静默卡住。
+        // 这里用**无条件**滚到底：哪怕用户正在看历史，也得让审批进入视野——
+        // 它是阻塞性的，看不见就等于卡死。
+        _stickToBottom = true;
+        QueueScrollToBottom();
     }
 
     /// <summary>移除一张审批卡片（已答复）。</summary>
@@ -486,11 +768,13 @@ public sealed class ConversationView : UserControl
         _list.ItemsSource = _items;
 
         _emptyHint.IsVisible = _items.Count == 0;
-    }
 
-    private void ScrollToBottom() =>
-        Avalonia.Threading.Dispatcher.UIThread.Post(
-            () => _scroll.ScrollToEnd(), Avalonia.Threading.DispatcherPriority.Background);
+        // 重建 source 会让 Offset 归零、Extent 先缩后涨，那些中间态
+        // 不该被当成"用户滚走了"。把基准标成未知，下一个 ScrollChanged
+        // 只做记录不做判断。
+        _baselineKnown = false;
+        _compensationRounds = 0;
+    }
 
     // ── 条目构建：按 kind 分派 ──────────────────────────────
 
@@ -610,20 +894,63 @@ public sealed class ConversationView : UserControl
         _ => BuildUnknown(item),
     };
 
-    private static Control BuildUserMessage(UserMessageItem item) => new Border
+    private Control BuildUserMessage(UserMessageItem item)
     {
-        Margin = new Thickness(60, 6, 12, 6),
-        Padding = new Thickness(14, 10),
-        CornerRadius = new CornerRadius(12),
-        HorizontalAlignment = HorizontalAlignment.Right,
-        Background = new SolidColorBrush(Color.FromArgb(18, 47, 111, 94)),
-        Child = new TextBlock
+        // dsh：用户消息**右对齐**、气泡最大宽 min(内容列宽 × 0.702, 82%)
+        // （MessageItem.module.css:3-8,10-21）。
+        //
+        // 原来写的是 Margin(60,...) 固定左缩进——那意味着窗口变宽时
+        // 气泡宽度上限不变，短消息在宽窗口里会缩在右边一小块，
+        // 长消息又会一直撑到只差 60px。dsh 是**按比例**卡的。
+        var bubble = new Border
         {
-            Text = item.Text,
-            TextWrapping = TextWrapping.Wrap,   // 长文本换行
-            FontSize = 14,
-        },
-    };
+            Padding = new Thickness(16, 10),
+            CornerRadius = new CornerRadius(Columns.RadiusXl),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Background = new SolidColorBrush(DshTheme.Bubble),
+            Child = new TextBlock
+            {
+                Text = item.Text,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 14,
+            },
+        };
+
+        // 复制按钮 + 时间：dsh 的顺序是「时间 · 复制」，
+        // 且**只有最后一条用户消息常显**、其余 hover 才显形
+        // （MessageIconActions.module.css:42-61）。这里先做常显——
+        // hover 显隐要接管 PointerEntered 并逐条维护状态，
+        // 但"看不见按钮"和"按钮不存在"对用户是两回事，先保证能点。
+        var actions = new MessageActions(item.Text, item.At);
+
+        // 气泡限宽：两条约束取小（见 ConversationMetrics.UserBubbleWidth）。
+        // 用 LayoutTransform-ish 的做法——ContainerSize 这里拿不到（还没布局），
+        // 所以挂在 AttachedToVisualTree 之后按实际可用宽度重算一次，
+        // 并在尺寸变化时更新。硬写 525px 只在一个窗口宽度下正确。
+        var stack = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { bubble, actions },
+        };
+
+        stack.SizeChanged += (_, e) =>
+        {
+            var contentWidth = ConversationMetrics.ContentWidth(e.NewSize.Width);
+            var limit = ConversationMetrics.UserBubbleWidth(contentWidth, e.NewSize.Width);
+
+            if (limit > 0 && bubble.MaxWidth != limit) bubble.MaxWidth = limit;
+        };
+
+        return new Border
+        {
+            Margin = new Thickness(
+                ConversationMetrics.Gutter,
+                ConversationMetrics.GapDefault,
+                ConversationMetrics.Gutter,
+                ConversationMetrics.GapDefault),
+            Child = stack,
+        };
+    }
 
     private Control BuildAssistantMessage(AssistantMessageItem item)
     {
@@ -649,7 +976,9 @@ public sealed class ConversationView : UserControl
         {
             return new Border
             {
-                Margin = new Thickness(12, 6, 60, 6),
+                Margin = new Thickness(
+                    ConversationMetrics.Gutter, ConversationMetrics.GapAssistant,
+                    ConversationMetrics.Gutter, ConversationMetrics.GapDefault),
                 Padding = new Thickness(2, 4),
                 Child = markdown,
             };
@@ -659,11 +988,42 @@ public sealed class ConversationView : UserControl
         feedback.Submitted += (id, rating, reason) =>
             FeedbackRequested?.Invoke(id, rating, reason);
 
+        var stack = new StackPanel { Children = { markdown } };
+
+        // 已停止标记：dsh 在 assistant 尾部追加一个 11px 灰底小标签
+        // （AssistantMarkdown.tsx:152-154 / .module.css:60-71）。
+        //
+        // 它不是"错误"而是"这轮没跑完"——用户自己点的停止，
+        // 用红色报错会让人以为出了问题。所以是中性灰底，不是状态色。
+        if (_stoppedAssistantIds.Contains(item.Id))
+        {
+            stack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 6, 0, 0),
+                Padding = new Thickness(8, 2),
+                CornerRadius = new CornerRadius(Columns.RadiusSm),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = new SolidColorBrush(DshTheme.WithAlpha(DshTheme.LabelPrimary, 8)),
+                Child = new TextBlock
+                {
+                    Text = "已停止",
+                    FontSize = 11,
+                    Opacity = 0.6,
+                },
+            });
+        }
+
+        stack.Children.Add(feedback);
+
+        // 相邻 assistant 消息之间 12px（dsh ChatView.module.css:77-93）。
+        // 原来统一 6px：连续几条助手消息会挤成一坨，读起来分不清边界。
         return new Border
         {
-            Margin = new Thickness(12, 6, 60, 6),
+            Margin = new Thickness(
+                ConversationMetrics.Gutter, ConversationMetrics.GapAssistant,
+                ConversationMetrics.Gutter, ConversationMetrics.GapDefault),
             Padding = new Thickness(2, 4),
-            Child = new StackPanel { Children = { markdown, feedback } },
+            Child = stack,
         };
     }
 
@@ -683,6 +1043,109 @@ public sealed class ConversationView : UserControl
 
     private const char NewLineChar = '\n';
     private const string NewLine = "\n";
+
+    /// <summary>
+    /// 空状态：dsh 的 Hero。
+    /// </summary>
+    /// <remarks>
+    /// dsh <c>EmptyHero.tsx:132-166</c> 的实际内容是：鱼形 logo（34px）+
+    /// 标题 <b>探索未至之境</b>（26/32、500 字重）+ 右上角 <b>预览版</b> 徽章
+    /// + 下方"选择工作区"chip。文案出处 <c>locales.ts:79-81</c>。
+    /// <para>
+    /// <b>原来这里只有一行灰字</b>"还没有消息。在下方输入开始对话。"——
+    /// 信息量等于没有。空状态是新用户唯一会看到的界面，
+    /// 它得回答"这是什么东西、我该做什么"，而不只是"没有任何消息"。
+    /// </para>
+    /// <para>
+    /// <b>dsh 的 hero 里没有示例问题、推荐提示、快捷操作按钮</b>
+    /// （代码里确实没有），所以这里也不加——加了就是偏离，不是增强。
+    /// 唯一多出来的"选择工作区"我们不做：桌面端工作区在启动参数里定，
+    /// 没有 dsh 那种多工作区切换。做出来会是个点了没反应的 chip。
+    /// </para>
+    /// </remarks>
+    private static Control BuildEmptyHero()
+    {
+        var logo = new TKCode.Arc.Icons.Lucide.LucideIcon
+        {
+            Kind = TKCode.Arc.Icons.Lucide.LucideIconKind.Sparkles,
+            Size = 34,
+            Foreground = new SolidColorBrush(DshTheme.BrandPrimary),
+        };
+
+        var title = new TextBlock
+        {
+            Text = "探索未至之境",
+            FontSize = 26,
+            FontWeight = FontWeight.Medium,
+            Margin = new Thickness(0, 12, 0, 0),
+        };
+
+        var badge = new Border
+        {
+            Padding = new Thickness(6, 1),
+            CornerRadius = new CornerRadius(4),
+            BorderThickness = new Thickness(1),
+            BorderBrush = new SolidColorBrush(DshTheme.BorderL3),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = new TextBlock
+            {
+                Text = "预览版",
+                FontSize = 10,
+                Opacity = 0.6,
+            },
+        };
+
+        var titleRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Children = { title, badge },
+            Spacing = 8,
+        };
+
+        var hint = new TextBlock
+        {
+            Text = "在下方输入开始对话。",
+            FontSize = 13,
+            Opacity = 0.5,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+
+        return new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { logo, titleRow, hint },
+        };
+    }
+
+    /// <summary>
+    /// 滚到底部。
+    /// </summary>
+    /// <remarks>
+    /// <b>同时恢复跟随</b>：用户点"回到底部"的意图就是"继续看新内容"，
+    /// 只把位置拉过去而不恢复跟随，下一条消息进来又会滚走，
+    /// 用户会以为按钮没生效。
+    /// <para>
+    /// <b>不做动画</b>：dsh 支持 <c>'instant' | 'smooth'</c> 两档，但 Avalonia
+    /// 的 <c>ScrollViewer</c> 没有内建平滑滚动 API，自己插值要处理
+    /// "动画中途用户又滚动"的打断。当前实现聚焦正确性，先做瞬时跳转——
+    /// 它不是视觉差异的重点。
+    /// </para>
+    /// </remarks>
+    private void ScrollToBottom()
+    {
+        _stickToBottom = true;
+        _scrollToBottom.IsVisible = false;
+
+        // 用 ScrollToEnd 而不是自己算 Offset。
+        //
+        // 自己算的版本会**静默失败**：Extent 还没测量完时算出的目标是旧值，
+        // 赋值后看起来"滚了"，实际停在上一版底部（实测距底 572px）。
+        // ScrollToEnd 是控件自己的滚动入口，它会等布局就绪再滚。
+        _scroll.ScrollToEnd();
+    }
 
     private static Control BuildToolCall(IpcToolCallItem item)
     {
@@ -899,7 +1362,7 @@ public sealed class ConversationView : UserControl
         Child = new TextBlock
         {
             Text = text,
-            FontFamily = new FontFamily("Geist Mono, Consolas, monospace"),
+            FontFamily = DshTheme.MonoFont,
             FontSize = 11,
             TextWrapping = TextWrapping.NoWrap,
             Opacity = 0.75,
@@ -978,9 +1441,16 @@ public sealed class ConversationView : UserControl
         CornerRadius = new CornerRadius(6),
         Background = new SolidColorBrush(item.Level switch
         {
-            NoticeLevel.Error => Color.FromArgb(20, 200, 60, 60),
-            NoticeLevel.Warning => Color.FromArgb(20, 200, 150, 40),
-            _ => Color.FromArgb(14, 100, 100, 100),
+            // 状态色的**低透明度底色**，不是另配一套颜色。
+            //
+            // 这里原来写的是手调 (200,60,60) / (200,150,40) /
+            // (100,100,100)——三个既不属于 dsh 任何一档、
+            // 也从没在深色主题下算过对比度的色值。
+            // 正确做法是拿 token 的状态色降透明度，
+            // 这样深浅主题都会跟着变。
+            NoticeLevel.Error => DshTheme.WithAlpha(DshTheme.Danger, 20),
+            NoticeLevel.Warning => DshTheme.WithAlpha(DshTheme.Warning, 20),
+            _ => DshTheme.WithAlpha(DshTheme.LabelSecondary, 14),
         }),
         Child = new TextBlock
         {

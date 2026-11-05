@@ -82,6 +82,9 @@ public static class Program
         // P8a：三栏几何必须与 dsh columns.ts 一致
         failures += ColumnChecks.Run(breakMode);
 
+        // P8g：中区会话域的几何与"别凭想象加功能"
+        failures += ConversationChecks.Run(breakMode);
+
         // 事件投影（纯映射层，表驱动）
         failures += ProjectionChecks.Run(breakMode);
 

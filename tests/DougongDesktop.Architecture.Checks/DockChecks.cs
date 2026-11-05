@@ -30,8 +30,68 @@ internal static class DockChecks
         failures += Case("context-items-have-unique-ids", slug => ContextItemIds(breakMode == slug));
         failures += Case("diff-detects-add-modify-delete", slug => DetectsAllThree(breakMode == slug));
         failures += Case("diff-ignores-same-content", slug => NoChangeOnSameContent(breakMode == slug));
+        failures += Case("dock-directory-nav-is-two-way", slug => NavIsTwoWay(breakMode == slug));
 
         return failures;
+    }
+
+    /// <summary>
+    /// 文件 tab 的目录导航必须**双向**：能进子目录，也能退回祖先。
+    /// </summary>
+    /// <remarks>
+    /// <b>这是 P8b 复核补上的检查，因为缺陷是真发生过的</b>：
+    /// 把目录从"不可点的文字"改成"可点进入"之后，界面上没有任何返回入口。
+    /// 用户点进 <c>src/</c> 就困在里面，只能重启应用——能进不能出，
+    /// 等于把单向门当成了导航。
+    /// <para>
+    /// <b>为什么查源码而不是跑 UI</b>：检查工程刻意不引用 App（架构守卫
+    /// <c>app-does-not-reference-sdk</c> 的镜像约束：检查工程不引 App）。
+    /// 所以这里做的是**结构断言**——返回事件存在、且真的有订阅者。
+    /// 后者尤其重要：本仓库已经出现过 4 次"定义了事件但没人订阅"，
+    /// 只查"事件声明存在"抓不到这一类。
+    /// </para>
+    /// </remarks>
+    private static string? NavIsTwoWay(bool inject)
+    {
+        var dockPath = Path.Combine(
+            RepoRoot, "src", "DougongDesktop.App", "Shell", "RightDock.cs");
+        var windowPath = Path.Combine(
+            RepoRoot, "src", "DougongDesktop.App", "Views", "MainWindow.cs");
+
+        if (!File.Exists(dockPath)) return $"找不到 {dockPath}";
+        if (!File.Exists(windowPath)) return $"找不到 {windowPath}";
+
+        var dock = File.ReadAllText(dockPath);
+        var window = File.ReadAllText(windowPath);
+
+        if (inject)
+        {
+            // 反证：假装只有单向（进入）事件，没有回退
+            dock = dock.Replace("DirectoryUpRequested", "DirectoryRequestedOnly");
+            window = window.Replace("DirectoryUpRequested", "DirectoryRequestedOnly");
+        }
+
+        // 1) 进入
+        if (!dock.Contains("DirectoryRequested", StringComparison.Ordinal))
+            return "右栏缺少进入子目录的事件 DirectoryRequested";
+
+        // 2) 回退
+        if (!dock.Contains("DirectoryUpRequested", StringComparison.Ordinal))
+            return "右栏缺少退回祖先目录的事件 DirectoryUpRequested（能进不能出）";
+
+        // 3) 回退事件在右栏内部真的被触发
+        if (!dock.Contains("DirectoryUpRequested?.Invoke", StringComparison.Ordinal))
+            return "DirectoryUpRequested 声明了但没有任何触发点——返回入口是死的";
+
+        // 4) 装配根真的订阅了它（"定义了没人订阅"已经发生过 4 次）
+        if (!window.Contains("DirectoryUpRequested +=", StringComparison.Ordinal))
+            return "MainWindow 没有订阅 DirectoryUpRequested——点了不会发生任何事";
+
+        // 5) 面包屑必须显示当前位置，否则用户不知道自己在哪一层
+        if (!dock.Contains("CurrentDirectory", StringComparison.Ordinal))
+            return "缺少 CurrentDirectory 状态，无法显示当前路径";
+
+        return null;
     }
 
     /// <summary>

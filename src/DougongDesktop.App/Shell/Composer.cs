@@ -225,6 +225,19 @@ public sealed class Composer : UserControl
         foreach (var g in groups) _composer.MentionGroups.Add(g);
     }
 
+    /// <summary>
+    /// 追加一条 "&#64;" 引用项；已存在则跳过。
+    /// </summary>
+    /// <remarks>
+    /// <b>去重按 Id</b>：右栏反复进出同一目录会重复产出同一批条目，
+    /// 不去重会让下拉框里出现多个 "README.md"——用户分不清选哪个。
+    /// </remarks>
+    public void AddContextItem(AiContextItem item)
+    {
+        if (_composer.ContextItems.Any(existing => existing.Id == item.Id)) return;
+        _composer.ContextItems.Add(item);
+    }
+
     public void SetContextItems(IReadOnlyList<AiContextItem> items)
     {
         _composer.ContextItems.Clear();
