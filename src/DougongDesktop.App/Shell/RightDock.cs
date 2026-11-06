@@ -101,7 +101,7 @@ public sealed class RightDock : UserControl
             (Keys.Changes, "改动", true),
             (Keys.Plan, "计划", true),
             (Keys.Context, "上下文（未实现）", false),
-            (Keys.Terminal, "终端（未实现）", false),
+            (Keys.Terminal, "终端", true),
         })
         {
             var item = new TKCode.Arc.TabItem
@@ -128,6 +128,43 @@ public sealed class RightDock : UserControl
         };
     }
 
+    /// <summary>
+    /// 终端面板（P8f F1/F2）。惰性创建——不点这个 tab 就不加载原生库。
+    /// </summary>
+    private TerminalPanel? _terminal;
+
+    /// <summary>终端面板实例（诊断与自检用）。</summary>
+    public TerminalPanel? Terminal => _terminal;
+
+    /// <summary>
+    /// 按 key 选中某个 tab（同步 Arc 的选中状态）。
+    /// </summary>
+    /// <remarks>
+    /// <b>不能只调 <see cref="ShowTab"/></b>：那只改内部的 <c>ActiveTab</c>
+    /// 并建内容，Arc 的 <c>Tabs</c> 仍高亮原来那个——用户看到的是另一页。
+    /// 自检要走真实的选中路径，否则验证的不是用户会走的代码。
+    /// </remarks>
+    public void SelectTab(string key)
+    {
+        if (!_tabItems.TryGetValue(key, out var item)) return;
+        item.IsSelected = true;
+    }
+
+    private Control BuildTerminalTab()
+    {
+        if (_terminal is null)
+        {
+            _terminal = new TerminalPanel();
+
+            // 自检：灌一段带转义序列的内容，验证 VT 真的在解析。
+            // 不灌的话面板是空白的，"空白"与"坏了"看起来一样。
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_TERMINAL") is "1")
+                _terminal.Probe();
+        }
+
+        return _terminal;
+    }
+
     /// <summary>切换 tab 并加载内容。</summary>
     public void ShowTab(string key)
     {
@@ -144,6 +181,7 @@ public sealed class RightDock : UserControl
         Keys.Files => BuildFilesTab(),
         Keys.Changes => BuildChangesTab(),
         Keys.Plan => BuildPlanTab(),
+        Keys.Terminal => BuildTerminalTab(),
         _ => BuildNotImplemented(key),
     };
 
@@ -473,10 +511,6 @@ public sealed class RightDock : UserControl
                 "没有提供「当前上下文占用了多少」这个数据。\n\n" +
                 "窗口大小是已知的（能力表），但已用量需要运行时按当前消息列表估算——\n" +
                 "等 SDK 给出该数据后接上，不在这里用估算值冒充实际用量。"),
-            Keys.Terminal => (
-                "终端未实现",
-                "PTY 是独立进程 + 独立契约，工作量约等于一个阶段。\n\n" +
-                "本期不做假终端：能显示但打不了字的终端比没有更糟。"),
             _ => ("未知面板", key),
         };
 

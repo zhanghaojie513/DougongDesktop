@@ -39,6 +39,7 @@ public static class Program
         failures += Check("settings-check-count-matches-guards", CheckCountMatchesGuards);
         failures += Check("settings-shows-chinese-state-words", ShowsChineseStateWords);
         failures += Check("settings-plugins-lists-loaded-only", PluginsListLoadedOnly);
+        failures += Check("terminal-panel-reports-unavailable", TerminalPanelReportsUnavailable);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -310,6 +311,43 @@ public static class Program
     /// 会漏掉每一行的标题与说明。
     /// 第一版就漏了，导致"插件 Id 没显示出来"的误报：实际渲染是好的。
     /// </remarks>
+    /// <summary>
+    /// 终端面板必须如实报告"暂不可用"，不能显示一个空白假终端。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查守的是一条产品判断，不是功能</b>：<c>TerminalView</c> 已接入、
+    /// 原生库已随包落地、<c>GhosttyRuntime.Version</c> 也能读出 <c>0.1.0-dev</c>，
+    /// 但 <c>TerminalCore.Create</c> 必然抛 <c>NullReferenceException</c>
+    /// （上游缺陷，最小复现见 <c>TerminalPanel.KnownUpstreamIssue</c>）。
+    /// <para>
+    /// 所以面板当前只能"如实说不可用"。这条检查断言的是：
+    /// <list type="bullet">
+    /// <item>状态文字说明了原因（不是空白、不是"未实现"三个字了事）</item>
+    /// <item><b>没有伪装成可用</b>——不出现提示符、不出现假命令回显</item>
+    /// </list>
+    /// 上游修好之后，这条检查要跟着改成"VT 真的解析了字节"。
+    /// </para>
+    /// </remarks>
+    private static string? TerminalPanelReportsUnavailable()
+    {
+        var panel = new DougongDesktop.App.Shell.TerminalPanel();
+        var texts = CollectTexts(panel).ToArray();
+
+        if (!texts.Any(t => t.Contains("暂不可用", StringComparison.Ordinal)))
+            return "面板没有说明「暂不可用」，实际文本：" + string.Join(" | ", texts.Take(6));
+
+        // 不能用假提示符冒充可用终端
+        var fakePrompt = new[] { "$ ", "# ", "> ", "C:\\" };
+        var hasFake = texts.Any(t => fakePrompt.Any(p => t.EndsWith(p, StringComparison.Ordinal)));
+        if (hasFake)
+            return "出现了假提示符——不可用的终端不该装成能用";
+
+        if (panel.IsCoreReady)
+            return "IsCoreReady 为 true，但上游缺陷下不应就绪；若上游已修复，请更新这条检查";
+
+        return null;
+    }
+
     private static IEnumerable<string> CollectTexts(Visual root)
     {
         var blocks = root.GetLogicalDescendants()

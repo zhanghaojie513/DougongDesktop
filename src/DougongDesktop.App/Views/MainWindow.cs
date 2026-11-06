@@ -272,6 +272,14 @@ public sealed class MainWindow : Window
             // 被调用一次。P8b 复核前，目录点击压根没接到这条链上——
             // 而那时 @ 引用项 18 个照样是绿的。所以要验的是**第二次**请求，
             // 以及它带来的是累加（> 第一次）而不是替换（= 子目录条目数）。
+            // 终端自检：切到右栏的终端 tab，并灌一段带转义序列的内容。
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_TERMINAL") is "1")
+            {
+                _rightDock.SelectTab("terminal");
+                Console.Error.WriteLine(
+                    $"[shell] 终端面板 核心就绪={_rightDock.Terminal?.IsCoreReady}");
+            }
+
             if (Environment.GetEnvironmentVariable("DOUGONG_UI_NAV") is "1")
             {
                 var before = _conversation.Composer.Inner.ContextItems.Count;

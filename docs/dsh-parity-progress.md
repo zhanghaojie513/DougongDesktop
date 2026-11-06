@@ -51,9 +51,9 @@
 | P8c 设置域 | 2 | 2 | 0 | 3 | 1 | 8 | **100%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 0 | 7 | 0 | 0 | 8 | 13% |
-| P8f 终端与浏览器 | 0 | 0 | 5 | 0 | 0 | 5 | 0% |
+| P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **40%** |
 | **P8g 中区会话域** | **11** | **1** | **5** | **0** | **6** | **23** | **71%** |
-| **合计** | **29** | **3** | **25** | **4** | **9** | **70** | **56%** |
+| **合计** | **30** | **4** | **23** | **4** | **9** | **70** | **60%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -186,8 +186,8 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 
 | # | 状态 | 项 | 实现方式 | 我们 | 验证 |
 |---|---|---|---|---|---|
-| F1 | ⬜ | 终端 VT 解析 | `[—]` | 包已引用，但**没有代码调用** `TerminalCore` | 只在独立探针里实测过 Write → FormatPlainText 正确，产品代码零使用 |
-| F2 | ⬜ | 终端控件 | `[—]` | 包已引用，但**没有代码实例化** `TerminalView` | 反射确认公开、原生库随包落地——但那不算"接进装配" |
+| F1 | 🟡 | 终端 VT 解析 | `[Arc]` | **代码已接**（`TerminalPanel` 走 `TerminalCore.Write` → `CaptureFrame` → `TerminalView.Snapshot`），但**跑不通**：`TerminalCore.Create` 必抛 `NullReferenceException`（上游缺陷） | **最小复现**：新建控制台工程只加 `TKCode.Arc.Terminal 0.4.0-preview.1`，三行复现。已排除：原生库缺失、DllImport 名字、`in`/`ref` 传参、库本身损坏（`ctypes` 能加载，`GhosttyRuntime.Version` = `0.1.0-dev`，握手正常） |
+| F2 | ✅ | 终端控件 | `[Arc]` | **已接进右栏 dock tab**：终端 tab 从"未实现"改为可点开，内容为 `TerminalPanel`（`TerminalView` + 状态说明） | 运行时 `核心就绪=False` + 面板显示原因。无头检查 `terminal-panel-reports-unavailable` 断言"不许装成能用" |
 | F3 | ⬜ | PTY 接入 | `[自有]` | Windows `ConPTY` / Unix `forkpty`，双向字节流 | 待做 |
 | F4 | ⬜ | 终端面板（dock tab） | `[Arc]` | `TerminalView` 放进右栏 | 待做 |
 | F5 | ⬜ | 内置浏览器 | `[自有]` | WebView2（Windows）/ WebKitGTK（Linux） | 待做 |
@@ -342,3 +342,5 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-06 | **修了 `all-checks.sh` 一个静默失败**：构建失败时 `set -e` 不够，后面每个 `dotnet run --no-build` 会拿旧产物跑、全绿。实测踩到——给设置页注入反证时构建报 CS1061，而无头检查照样 PASS。已改为显式判断构建退出码并 `exit 1` |
 | 2026-11-06 | **P8c 收尾：C4 插件页完成，C5/C6 归 ⏳，C7 归 ➖**。C4 用真实 `SampleUiPlugin` 验证（`示例插件（sample.ui-plugin）→ shell.trailing`）。C5/C6 查到 `PermissionPreset`/`AgentPreset` 在 `HostProtocol` 里**各 0 处**——与 C8 同一类缺口，硬做只能做成"看起来能配、实际不生效"。C7 明确不做（没有可调并行数）。P8c 至此 2✅/2🟡/3⏳/1➖ = 100% |
 | 2026-11-06 | **无头检查又修了一处取样缺陷**：`CollectTexts` 只扫 `TextBlock`，而 `SettingsRow.Header`/`Description` 是 ContentControl 的属性、不是子控件，导致"插件 Id 没显示出来"的**误报**——实际渲染是好的。已改为 TextBlock + 行标题 + 行说明三路合并。这条是"误报比漏报更伤"的又一例 |
+| 2026-11-06 | **P8f 开工：F2 完成，F1 卡在上游缺陷**。终端 tab 从"未实现"改为可点开，接 `TerminalPanel`（`TerminalView` + 状态说明）。**但 VT 状态机建不起来**：`TerminalCore.Create` 必抛 `NullReferenceException`，栈顶在 `..ctor(IntPtr terminal, ...)` 即终端指针为 null。已在独立控制台工程用 7 行复现（只加包，无我方代码）——**是上游缺陷，不是集成问题**。逐一排除过：原生库在输出目录、`deps.json` 有 runtimeTargets、`ctypes` 能 dlopen、`GhosttyRuntime.Version` 返回 `0.1.0-dev`（握手成功）、`in` 传参与四参数 `TerminalSize` 都试过 |
+| 2026-11-06 | **修订 `dock-unimplemented-tabs-are-labeled`**。原检查无条件要求「终端」tab 标「未实现」且禁用，接终端后误报。但它的**意图是对的**——用户不该点进去才发现是空的。改为两个可接受形态：要么"禁用+标题标注"，要么"可点开+首屏说明原因"。两种都验证过反证能变红 |

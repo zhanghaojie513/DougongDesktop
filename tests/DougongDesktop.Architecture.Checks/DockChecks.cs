@@ -138,11 +138,23 @@ internal static class DockChecks
     }
 
     /// <summary>
-    /// 未实现的 tab 必须被禁用且在标题上写明。
+    /// 不可用的 tab 必须被禁用，且在标题或内容首屏写明原因。
     /// </summary>
     /// <remarks>
     /// <b>假功能比没有更糟</b>：能点进去但什么都不显示的 tab，用户会认为坏了。
     /// 方案文档明确要求"本期先留占位，明确标注未实现，不做假功能"。
+    /// <para>
+    /// <b>2026-11-06 修订</b>：原来无条件要求"上下文"与"终端"两个 tab 的标题
+    /// 都含「未实现」，且 <c>IsEnabled=false</c>。接终端时这条误报——
+    /// 终端 tab 现在是**可点开**的：控件接了、原生库也随包落地，
+    /// 只是 <c>TerminalCore.Create</c> 有上游缺陷导致渲染不出来。
+    /// 它不属于"未实现"，属于"实现了但跑不通"，标题不该写「未实现」。
+    /// <para>
+    /// 但那条检查的**意图是对的**：用户不该点进去才发现是空的。所以修订为——
+    /// 不可用的 tab 要么禁用并在标题标注，要么可点开但**首屏必须说明原因**。
+    /// 两种都接受，唯独"可点开且不说原因"不允许。
+    /// </para>
+    /// </para>
     /// </remarks>
     private static string? UnimplementedLabeled(bool inject)
     {
@@ -156,21 +168,38 @@ internal static class DockChecks
 
         if (inject) return "反证注入：未实现的 tab 没有标注";
 
-        // 两个未实现的 tab 必须带"未实现"字样且 IsEnabled=false
+        // 不可用的 tab 要么"禁用 + 标题标注"，要么"可点开 + 首屏说明原因"。
+        //
+        // 「上下文」是前者：完全没数据，禁用最诚实。
+        // 「终端」是后者：控件与原生库都接了，卡在上游缺陷，
+        //   所以可点开、且内容首屏必须写明原因（见 TerminalPanel 的状态文字）。
         var contextLine = FindTabDeclaration(source, "上下文");
         var terminalLine = FindTabDeclaration(source, "终端");
 
         if (contextLine is null) return "没找到「上下文」tab 的声明";
         if (terminalLine is null) return "没找到「终端」tab 的声明";
 
-        foreach (var (name, line) in new[] { ("上下文", contextLine), ("终端", terminalLine) })
-        {
-            if (!line.Contains("未实现", StringComparison.Ordinal))
-                return $"「{name}」tab 的标题没写「未实现」——用户点进去才发现是空的";
+        // 上下文：未实现 → 必须标注 + 禁用
+        if (!contextLine.Contains("未实现", StringComparison.Ordinal))
+            return "「上下文」tab 的标题没写「未实现」——用户点进去才发现是空的";
+        if (!contextLine.Contains("false", StringComparison.Ordinal))
+            return "「上下文」tab 没有禁用（IsEnabled 应为 false）";
 
-            if (!line.Contains("false", StringComparison.Ordinal))
-                return $"「{name}」tab 没有禁用（IsEnabled 应为 false）";
-        }
+        // 终端：可点开，但必须有面板且面板首屏说明"暂不可用"
+        if (terminalLine.Contains("未实现", StringComparison.Ordinal))
+            return "「终端」tab 标着「未实现」，但控件已经接了——状态不准确";
+
+        if (!source.Contains("BuildTerminalTab", StringComparison.Ordinal))
+            return "「终端」tab 可点开却没有对应的面板构建方法";
+
+        var panelPath = Path.Combine(
+            RepoRoot, "src", "DougongDesktop.App", "Shell", "TerminalPanel.cs");
+        if (!File.Exists(panelPath))
+            return "找不到 TerminalPanel.cs——终端 tab 会打开一片空白";
+
+        var panel = File.ReadAllText(panelPath);
+        if (!panel.Contains("暂不可用", StringComparison.Ordinal))
+            return "终端面板首屏没有说明「暂不可用」——用户会以为它坏了";
 
         return null;
     }
