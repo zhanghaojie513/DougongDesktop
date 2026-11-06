@@ -3,7 +3,7 @@
 > **这份文档写给"在 Mac 上重新打开这个项目的下一个会话"**。
 > 目标：读完之后能立刻构建、跑检查、知道现在停在哪、下一步做什么。
 >
-> 写于 2026-11-05，Windows 侧最后一次全绿：**82 条检查 PASS**。
+> 写于 2026-11-05。Windows 侧最后一次全绿：82 条；**Mac 上已验证：83 条**。
 
 ---
 
@@ -34,9 +34,14 @@ App (Avalonia UI)  ──禁引 SDK──►  Ipc (纯契约)  ◄── Framewo
 ### 1. 前置
 
 ```bash
-dotnet --version     # 需要 .NET 10 SDK
+dotnet --version     # 需要 .NET 10 SDK（global.json 钉 10.0.402，rollForward latestFeature）
 python3 --version    # 只有改配色 token 时才需要
 ```
+
+> **注意事项**：Homebrew 装的 SDK 在 `/usr/local/share/dotnet`，
+> 默认可能不在 PATH 里。报 `command not found: dotnet` 时先
+> `export PATH="/usr/local/share/dotnet:$PATH"`，或写进 `~/.zshrc`。
+> 实测 10.0.403 可用（`rollForward: latestFeature` 覆盖 10.0.4xx）。
 
 ### 2. 构建与自检
 
@@ -46,7 +51,7 @@ scripts/rebuild.sh DougongDesktop.slnx Release
 scripts/all-checks.sh
 ```
 
-**期望**：`ALL CHECKS PASS`，82 条。
+**期望**：`ALL CHECKS PASS`，83 条（正向 83 / 反证 83）。
 
 `all-checks.sh` 做两件事——正向跑一遍，再用 `--break=<slug>` 逐条破坏，
 确认**每条检查真的会红**。反证不生效会被判 FAIL（"检查抓不到真违规"）。
@@ -72,14 +77,17 @@ DOUGONG_UI_SELFTEST=1 src/DougongDesktop.App/bin/Release/net10.0/DougongDesktop.
 | `DOUGONG_UI_STRESS=N` | 灌 N 条，验证虚拟化（1000 条只建少量容器） |
 | `DOUGONG_UI_NAV=1` | 驱动目录导航：根 → `src/` → 回退，验证累加与复位 |
 | `DOUGONG_UI_RUNNING=1\|2` | `1` 只看运行状态行；`2` 走完整流程（起→停→标已停止） |
+| `DOUGONG_UI_SCROLL=end` | 滚到底再 dump（验证贴底与尾部条目） |
+| `DOUGONG_UI_TOOLFIRST=1` | **把工具条目前置**，强制它们进视口——验证工具卡构建路径 |
 
 **输出全在 stderr**。诊断行带 `OK` 或 `（**…**）` 标记，扫一眼就知道哪项坏了。
 
 ---
 
-## 三、Mac 适配——本轮已改掉的三处
+## 三、Mac 适配——Windows 侧已改掉的三处
 
-这三处是**为跨平台专门修的**，Mac 上不会再踩：
+这三处是切到 Mac 之前**为跨平台专门修的**（Mac 上实测确认有效）。
+Mac 上又新发现的三处见 §4.2 之后的"四之二"节。
 
 ### 1. 脚本里的 `tasklist` / `taskkill`
 
@@ -104,51 +112,50 @@ macOS 上没有 Consolas，**静默回退到系统 monospace**——字形变、
 
 ---
 
-## 四、Mac 上还没有验证过的地方（重点看这里）
+## 四、Mac 验证结果（2026-11-05 已实测，结论取代原"待验证"清单）
 
-**以下都是 Windows 上验过的行为，Mac 上大概率有差异，需要实测。**
+**Mac 上已跑通**：Release 构建 0 警告 0 错误，**83 条检查全绿**（正向 83 / 反证 83 对齐）。
+下面逐条记录实测结论。
 
-### 4.1 窗口装饰（风险最高）
+### 4.1 窗口装饰 —— 已修（原"风险最高"）
 
-`MainWindow.cs:79-80`：
+`MainWindow.cs:79-80` 仍开 `ExtendClientAreaToDecorationsHint = true`。
+**macOS 上红绿灯确实叠在自绘内容上**，位置由系统决定——不分支就会压住左侧
+「收起侧栏」图标（下图的分支修掉的正是这个）。
 
-```csharp
-ExtendClientAreaToDecorationsHint = true;
-ExtendClientAreaTitleBarHeightHint = Columns.TitlebarHeight;   // 40
+已按平台分支修掉（`AppShell.BuildTitlebar`）：
+
+| | Windows | macOS |
+|---|---|---|
+| 左侧内边距 | 8px | **80px**（`Columns.MacTrafficLightInset`） |
+| 自绘 —/□/✕ | 有 | **无**（系统红绿灯已提供） |
+
+自检实测：`标题栏按钮` 从 **6 个降到 3 个**（剩下的 3 个是「收起侧栏 / 应用 / 编辑」，不是窗口按钮）。
+新增检查 `titlebar-branches-for-macos` 钉住这条，反证已验证能变红。
+
+**视觉已确认**（2026-11-06 截图复核）：红绿灯在最左，与「收起侧栏」图标之间
+有肉眼可见的空隙，图标未被压住；标题栏右侧干净，没有残留的自绘 —/□/✕。
+80px 这个估算是够用的。
+
+> 若日后再改标题栏布局：单独截 `screencapture -x` 复核一次。
+> 控件树只能证明分支生效，证明不了"没被压住"——这次的结论来自像素，不是控件树。
+
+### 4.2 毛玻璃 —— 比预期好，没有降级
+
+```
+[shell] 毛玻璃 请求=AcrylicBlur/Blur/None 实际=AcrylicBlur（生效）
 ```
 
-Windows 上自绘标题栏铺满顶部 40px。**macOS 上红绿灯按钮（关闭/最小化/最大化）
-会叠在自绘内容上**，位置由系统决定，可能压住 DOUGONG 字标或右侧控件。
+**HANDOFF 原来预测"很可能降级为 None"，实测没有。** macOS 上 Avalonia 原生支持
+AcrylicBlur，配色不需要按不透明底重调。
 
-要看的：
-- 红绿灯是否遮住字标
-- 40px 高度是否够（macOS 原生标题栏更高）
-- 拖拽区域是否还正常
+### 4.3 滚动条外观 —— 仍属已知偏差
 
-处理方向：按平台分支——macOS 上给左侧留出红绿灯安全区（约 78px），
-或干脆不用 `ExtendClientAreaToDecorationsHint`，改用原生标题栏。
-
-### 4.2 毛玻璃（AcrylicBlur）
-
-`MainWindow.cs:95-99` 请求的级别是 `AcrylicBlur → Blur → None`。
-**macOS 上 Avalonia 的毛玻璃支持与 Windows 不同**，很可能降级为 `None`。
-
-`Opened` 里已经打了诊断，跑一次就能看到：
-
-```
-[shell] 毛玻璃 请求=AcrylicBlur/Blur/None 实际=??? （生效/未生效，已降级为不透明）
-```
-
-**降级是可接受的**（代码已按"未生效就画不透明底"处理），但要确认降级后
-配色仍成立——半透明底上的文字对比度在改成不透明后会变化。
-
-### 4.3 滚动条外观
-
-dsh 的滚动条是 `5px` 宽、thumb 圆角 999、track 透明。我们目前用的是
-Avalonia 默认滚动条，**没有覆写样式**。macOS 上默认滚动条是"浮层式"，
-只在滚动时出现——这与 dsh 的常驻细条不同。属已知偏差，未列入检查。
+未改动。macOS 默认浮层式滚动条与 dsh 的常驻 5px 细条不同。
+这是**超出预期外的偏差**，不影响功能。
 
 ### 4.4 DumpLayout 会输出两组数据，这是预期
+
 
 窗口宽度不变（1280），但自检期间 `DumpLayout` 被调用两次，**右栏状态不同**：
 
@@ -167,9 +174,48 @@ Avalonia 默认滚动条，**没有覆写样式**。macOS 上默认滚动条是"
 
 ---
 
+## 四之二、Mac 上发现并修掉的三个问题
+这三处都是 **Windows 上不可能发现**的（要么没暴露，要么行为不同）。
+
+### 1. 脚本没有可执行位（macOS 直接跑不了）
+
+`scripts/*.sh` 在 git 里是 `100644`。Windows 上用 `bash script.sh` 调用所以看不出来，
+Mac 上直接 `./scripts/rebuild.sh` 就是 `permission denied`。
+
+已 `git update-index --chmod=+x` 改成 `100755`（三个脚本都改了）。
+
+### 2. `.py` 工作区是 CRLF（仓库里是 LF）
+
+`.gitattributes` 已规定 `*.py eol=lf`，但 Windows 检出留下的工作区文件是 CRLF。
+`python3` 会因为 shebang 后的 `\r` 报错。已重新检出修正。
+
+### 3. `all-checks.sh` 的反证清单漏了 4 条检查
+
+**这是本轮最值得记的一条**：正向 82 条全 PASS、脚本打印 `ALL CHECKS PASS`，
+但反证区只跑了 78 条。漏掉的 4 条（`settings-store-is-swappable`、
+`platform-calls-stay-in-adapters`、`run-clock-excludes-failure`、
+`run-clock-counts-waiting`）**从未被证明能变红**。
+
+按 §8.4 的道理，等于这 4 条从没被验证过。已补上，并加了一道自保：
+正向输出里的每一条 slug 都必须出现在反证清单里，否则脚本 exit 1。
+自保已验证——故意删一条清单项，脚本报
+`FAIL（以下检查没有反证： sdk-files-stay-contained ）` 并返回 1。
+
+### 另外：两条会误导人的诊断已修
+
+- `ResizablePanel 数量 0（期望 3）` —— 三栏早就改成 Grid + 像素求解
+  （`AppShell.cs:287`），"期望 3"是**过时断言**，会让人以为布局退化了。
+  改成 `（预期 0：三栏是 Grid+像素求解）`。
+- `ToolCall 0 张` —— **0 张不等于坏了**。消息流的视口只有 353px，
+  排在中间的工具卡本来就进不了视口，虚拟化不构建它。
+  实测：前置工具条目后 5 张全部渲染，Input/Duration/Summary 都对。
+  诊断已补上数据侧条数与提示。新增 `DOUGONG_UI_TOOLFIRST=1` 走这条验证路径。
+
+---
+
 ## 五、当前进度
 
-### 总览（82 条检查全绿）
+### 总览（83 条检查全绿）
 
 | 阶段 | 状态 |
 |---|---|
@@ -235,8 +281,15 @@ M21 消息重试/编辑/分享、M22 消息级虚拟化、M23 头像。
 
 **M12 做法**：自建一个薄包装。Arc 的 `Markdown` 渲染代码块时给的是
 `pre`/`code` 结构，可以在 `Markdown` 外面检测子控件，或在 `Markdown.CodeBlockTheme`
-之类钩子上注入。**先查 Arc 源码**（`C:\work\myProject\arc-src` 在 Windows 上；
-Mac 上需要重新 clone `AIDotNet/TKCode.Arc`）。
+之类钩子上注入。**先查 Arc 源码**——Mac 上需要 clone
+`AIDotNet/TKCode.Arc`（见第七节）。
+
+### 另外两件待办（Mac 本轮新增）
+
+1. **人眼看一次红绿灯位置**：80px 安全区是估算值（18px 边距 + 三个 14px 圆点），
+   控件树证明不了"没被压住"。截图权限被系统挡着，需要人工确认或授权终端录屏。
+2. **滚动条样式**（§4.3）：macOS 浮层式与 dsh 常驻细条仍有差异，未处理。
+
 
 ---
 
@@ -332,19 +385,28 @@ git clone https://github.com/AIDotNet/TKCode.Arc arc-src
 
 ## 十、提交状态
 
-**本轮改动尚未提交**（19 个文件，含 4 个新文件）。Mac 上接手时先看一眼：
+**改动尚未提交**。Mac 上接手时先看一眼：
 
 ```bash
 git status --short
 git diff
 ```
 
-改动内容：
+改动内容（Windows 侧）：
 - SDK 0.1.13 → 0.1.18-alpha.1（契约 165→165 零变更）
 - P8b 复核（目录双向导航 + 面包屑）
 - P8g 中区会话域新增（规格 §7.5 + 9 项实现）
 - 跨平台修复（脚本 tasklist、字体 Consolas）
 - 检查 74 → 82 条
+
+改动内容（Mac 侧，2026-11-05）：
+- 脚本可执行位 `100644 → 100755`（三个脚本）
+- `sync-dsh-tokens.py` 工作区 CRLF → LF
+- `all-checks.sh` 补 4 条漏掉的反证 + 加"漏项自保"（不一致即 exit 1）
+- 标题栏按平台分支：macOS 留 80px 红绿灯安全区、不自绘窗口按钮
+- 新增检查 `titlebar-branches-for-macos`（检查 82 → 83）
+- 修两条误导诊断（`ResizablePanel 期望 3`、`ToolCall 0 张`）
+- 新增 `DOUGONG_UI_SCROLL=end` 与 `DOUGONG_UI_TOOLFIRST=1` 两个自检开关
 
 **新增文件**：
 - `src/.../Shell/MessageActions.cs`
@@ -352,5 +414,5 @@ git diff
 - `tests/.../ConversationChecks.cs`
 - `HANDOFF.md`（本文件）
 
-**建议先在 Mac 上跑一遍 `scripts/all-checks.sh` 确认 82 条全绿，再提交。**
-如果 Mac 上有环境差异导致失败，那本身就是需要记录的信息。
+**Mac 上已跑通 `scripts/all-checks.sh`：83 条全绿，构建 0 警告 0 错误。**
+

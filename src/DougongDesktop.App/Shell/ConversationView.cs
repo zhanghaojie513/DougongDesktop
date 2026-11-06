@@ -760,6 +760,33 @@ public sealed class ConversationView : UserControl
         Refresh();
     }
 
+    /// <summary>
+    /// 把工具条目挪到列表最前面。**只给自检用**。
+    /// </summary>
+    /// <remarks>
+    /// 视口只有 353px，而消息流是虚拟化的——中间那些工具卡永远不会被构建，
+    /// 于是 `ToolCall 0 张` 在"视口外"和"构建失败"两种情形下完全一样。
+    /// 把工具条目前置能强制它们进入视口，一次运行就能定论。
+    /// <para>
+    /// <b>不能跟着滚到底</b>：前置的意义就是把工具卡放到**视口顶部**，
+    /// 一滚到底就又滚走了——第一版就是这么写的，结果"前置后仍是 0 张"，
+    /// 差点被当成构建失败。
+    /// </para>
+    /// </remarks>
+    public void MoveToolsToFrontForProbe()
+    {
+        var tools = _items.Where(i => i is IpcToolCallItem).ToList();
+        if (tools.Count == 0) return;
+
+        _items.RemoveAll(i => i is IpcToolCallItem);
+        _items.InsertRange(0, tools);
+        Refresh();
+
+        // 明确停在顶部。_stickToBottom 不在这里改——它是用户行为的状态，
+        // 这个探针只在自检里跑，不该留下副作用。
+        _scroll.Offset = new Avalonia.Vector(_scroll.Offset.X, 0);
+    }
+
     private void Refresh()
     {
         // List<T> 不触发集合通知，重建 ItemsSource 强制刷新。

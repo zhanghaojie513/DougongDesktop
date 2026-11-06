@@ -38,6 +38,8 @@ internal static class ConversationChecks
             slug => StoppedBadgeGuarded(breakMode == slug));
         failures += Case("ui-fonts-work-on-macos",
             slug => FontsPortable(breakMode == slug));
+        failures += Case("titlebar-branches-for-macos",
+            slug => TitlebarBranchesForMac(breakMode == slug));
 
         return failures;
     }
@@ -403,6 +405,45 @@ internal static class ConversationChecks
                 }
             }
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 标题栏必须按平台分支：macOS 留红绿灯安全区、不自绘窗口按钮。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查存在的理由</b>：Windows 上自绘 —/□/✕ 是对的（原生标题栏被
+    /// <c>ExtendClientAreaToDecorationsHint</c> 抹掉后需要替代按钮）。
+    /// 但 macOS 的红绿灯由系统画在**左上角**，我们挪不动、也不该再画一套。
+    /// 不分支的结果是两套按钮同时出现，而且左侧图标被红绿灯压住——
+    /// 这正是 HANDOFF §4.1 标为"风险最高"的那一处。
+    /// <para>
+    /// 静态检查只能断言"分支存在"，不能证明"看起来对"。
+    /// 真正见过界面之后再补一条运行时断言，才算了结。
+    /// </para>
+    /// </remarks>
+    private static string? TitlebarBranchesForMac(bool inject)
+    {
+        var shell = Path.Combine(RepoRoot, "src", "DougongDesktop.App", "Shell", "AppShell.cs");
+        if (!File.Exists(shell)) return $"找不到 {shell}";
+
+        var source = File.ReadAllText(shell);
+        if (inject) source = source.Replace("if (!isMac)", "if (true)");
+
+        if (!source.Contains("OperatingSystem.IsMacOS()", StringComparison.Ordinal))
+            return "AppShell 没有按平台分支：macOS 上红绿灯会压住左侧图标，且会出现两套窗口按钮";
+
+        // 自绘窗口按钮必须包在 !isMac 里。只查 "if (!isMac)" 不够——
+        // 那行删掉后 BuildWindowButtons() 仍在，两套按钮就回来了。
+        var guarded = source.Contains("if (!isMac)", StringComparison.Ordinal)
+                      && source.Contains("BuildWindowButtons()", StringComparison.Ordinal);
+        if (!guarded)
+            return "BuildWindowButtons 没有按平台守卫：macOS 上会与系统红绿灯重复";
+
+        // 安全区必须来自 Columns（唯一真源），不能在 Shell 里写魔数
+        if (!source.Contains("Columns.MacTrafficLightInset", StringComparison.Ordinal))
+            return "macOS 红绿灯安全区没有引用 Columns.MacTrafficLightInset（不要写字面量 80）";
 
         return null;
     }

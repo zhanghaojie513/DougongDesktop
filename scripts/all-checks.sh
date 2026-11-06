@@ -32,7 +32,11 @@ echo "== 构建 =="
 
 echo
 echo "== 架构守卫（正向）=="
-"$DOTNET" run --project tests/DougongDesktop.Architecture.Checks -c Release --no-build
+# 留住输出：下面要用它核对"反证清单有没有漏项"。
+# 漏项是静默的——脚本照样打印 ALL CHECKS PASS，但漏掉的那几条
+# 从未被证明能变红。本项目已经漏过 4 条（settings-store-is-swappable 等）。
+forward="$("$DOTNET" run --project tests/DougongDesktop.Architecture.Checks -c Release --no-build)"
+echo "$forward"
 
 echo
 echo "== 架构守卫（反证：每条都必须变红）=="
@@ -76,8 +80,27 @@ checks="$checks dsh-tokens-complete dsh-tokens-themes-differ titlebar-tokens-mat
 checks="$checks chat-follow-threshold-is-25 chat-bubble-width-is-two-sided"
 checks="$checks chat-content-width-clamps chat-gaps-are-three-tiered chat-no-fake-streaming-caret"
 checks="$checks chat-colors-come-from-tokens chat-stopped-badge-needs-finished-turn"
-checks="$checks ui-fonts-work-on-macos"
+checks="$checks ui-fonts-work-on-macos titlebar-branches-for-macos"
 checks="$checks sdk-files-stay-contained"
+# P8a 附带的三条行为检查。**曾经漏在这里**：它们一直在正向区 PASS，
+# 却从未进反证清单——脚本照样报 ALL CHECKS PASS，等于这三条从没被验证过。
+checks="$checks settings-store-is-swappable platform-calls-stay-in-adapters"
+checks="$checks run-clock-excludes-failure run-clock-counts-waiting"
+
+# 漏项自保：正向跑出来的每一条都必须出现在上面的清单里。
+# 只靠人眼看清单，下一次加检查时一定还会漏——这个循环会先喊出来。
+missing=""
+for slug in $(echo "$forward" | sed -n 's/^PASS  \([a-z0-9-]*\)$/\1/p'); do
+  case " $checks " in
+    *" $slug "*) ;;
+    *) missing="$missing $slug" ;;
+  esac
+done
+if [ -n "$missing" ]; then
+  echo "FAIL（以下检查没有反证：$missing ）"
+  echo "     加到上面的 checks 清单，否则它们从未被证明能变红。"
+  exit 1
+fi
 
 for check in $checks; do
   printf '%-36s ' "$check"

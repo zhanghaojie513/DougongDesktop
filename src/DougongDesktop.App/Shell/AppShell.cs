@@ -423,6 +423,16 @@ public sealed class AppShell : UserControl
 
         // 形态照 dsh 的 Windows caption：左侧「收起侧栏图标 + 应用 + 编辑」，
         // 右侧窗口按钮。不显示项目名——dsh 那里也没有，标题信息在侧栏品牌行。
+        //
+        // **macOS 要按平台分支**：
+        // - 左侧留出红绿灯安全区，否则系统按钮会压住"收起侧栏"图标；
+        // - 右侧**不自绘**窗口按钮：macOS 系统的红绿灯已经在左边，
+        //   再画一套 —/□/✕ 就是两套按钮，而且位置语义完全不同
+        //   （macOS 的红绿灯从不放右上角）。
+        //
+        // Windows 保持原样：那里的窗口按钮在右上，由我们自绘
+        // （ExtendClientArea 后原生按钮浮在右侧，我们画的是同位置的替代）。
+        var isMac = OperatingSystem.IsMacOS();
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
 
         var left = new StackPanel
@@ -430,7 +440,7 @@ public sealed class AppShell : UserControl
             Orientation = Orientation.Horizontal,
             Spacing = 0,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 0, 0),
+            Margin = new Thickness(isMac ? Columns.MacTrafficLightInset : 8, 0, 0, 0),
             Children =
             {
                 BuildSidebarToggleButton(),
@@ -441,9 +451,12 @@ public sealed class AppShell : UserControl
         Grid.SetColumn(left, 0);
         row.Children.Add(left);
 
-        var buttons = BuildWindowButtons();
-        Grid.SetColumn(buttons, 1);
-        row.Children.Add(buttons);
+        if (!isMac)
+        {
+            var buttons = BuildWindowButtons();
+            Grid.SetColumn(buttons, 1);
+            row.Children.Add(buttons);
+        }
 
         Titlebar.Child = row;
     }

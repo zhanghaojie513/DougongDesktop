@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.VisualTree;
 using DougongDesktop.App.Services;
 using DougongDesktop.App.Shell;
@@ -211,6 +212,27 @@ public sealed class MainWindow : Window
             // 连接后再 dump：第一次 dump 时侧边栏还是占位内容，
             // 用它判断最终状态会误判（实测踩过）
             await Task.Delay(1200);
+
+            // 滚动自检：有些条目在视口外，虚拟化不会构建它们。
+            // 不滚下去就永远看不到"工具卡到底能不能构建"——
+            // 而 `ToolCall 0 张` 在"视口外"和"构建失败"两种情况下完全相同。
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_SCROLL") is "end")
+            {
+                _conversation.Scroll.ScrollToEnd();
+                await Task.Delay(600);
+                Console.Error.WriteLine("[shell] 已滚到底（滚动自检）");
+            }
+
+            // 工具卡自检：把工具条目临时挪到最前面，确保它们进入视口。
+            // 滚到底也覆盖不到中间那 6 张工具卡（视口只有 353px），
+            // 而"看着像没渲染"和"确实没渲染"必须分清。
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_TOOLFIRST") is "1")
+            {
+                _conversation.MoveToolsToFrontForProbe();
+                await Task.Delay(400);
+                Console.Error.WriteLine("[shell] 工具条目已前置（工具卡自检）");
+            }
+
             DumpLayout(layoutSettled: true);
 
             // 目录导航自检：模拟"在右栏点进子目录"。
@@ -1094,8 +1116,13 @@ public sealed class MainWindow : Window
             Console.Error.WriteLine($"[shell] 消息条目数 {_conversation.Count}");
         }
 
+        // 三栏不用 Arc 的 ResizablePanels：dsh 的列宽是"像素 + 求解顺序"，
+        // 而 ResizablePanels 用百分比（见 AppShell.cs 三栏处注释）。
+        // 所以这里数到 0 是**预期**，这条诊断只用来确认没有半路又换回 Arc。
         var panels = shell?.GetVisualDescendants().OfType<ResizablePanel>().ToArray() ?? [];
-        Console.Error.WriteLine($"[shell] ResizablePanel 数量 {panels.Length}（期望 3）");
+        Console.Error.WriteLine(
+            $"[shell] ResizablePanel 数量 {panels.Length}" +
+            (panels.Length == 0 ? "（预期 0：三栏是 Grid+像素求解）" : "（**意外**：三栏应走 Grid）"));
         foreach (var p in panels)
             Report($"  panel:{p.Id}", p);
 
@@ -1257,13 +1284,20 @@ public sealed class MainWindow : Window
 
         // 工具卡片（P5）：确认 Input 真解析出键值对、Duration 真按规则映射。
         // 光看"卡片在"不够——Input 解析失败和"这个工具本来就没参数"在界面上一样。
+        //
+        // **0 张不等于坏了**：消息流是虚拟化的，视口外的条目不构建控件。
+        // 视口只有 353px 时，排在中间的工具卡本来就看不见。
+        // 用 DOUGONG_UI_TOOLFIRST=1 把工具条目前置，才能真正验证构建路径。
         var toolCards = all.OfType<TKCode.Arc.ToolCall>().ToArray();
         var withInput = toolCards.Count(c => c.Item?.Input?.Count > 0);
         var withDuration = toolCards.Count(c => c.Item?.Duration is not null);
         var withSummary = toolCards.Count(c => c.Item?.Summary is { Length: > 0 });
+        var dataTools = _conversation.Items.Count(i => i is IpcToolCallItem);
         Console.Error.WriteLine(
             $"[shell] ToolCall {toolCards.Length} 张" +
-            $"（有 Input {withInput}、有 Duration {withDuration}、有 Summary {withSummary}）");
+            $"（有 Input {withInput}、有 Duration {withDuration}、有 Summary {withSummary}）" +
+            $" / 数据侧工具条目 {dataTools} 条" +
+            (toolCards.Length == 0 && dataTools > 0 ? "（视口外未构建，可加 DOUGONG_UI_TOOLFIRST=1 验证）" : ""));
 
         // 命令面板：光有实例不算数，要确认命令列表真的装上去了
         // （P3a 踩过的坑：控件在、尺寸对、里面是空的）
