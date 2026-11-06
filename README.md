@@ -13,7 +13,7 @@
 [![repository](https://img.shields.io/badge/Dougong_SDK-repository-2f6f5e?style=flat-square)](https://github.com/zhanghaojie513/Dougong)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512bd4?style=flat-square)](https://dotnet.microsoft.com/)
 [![Avalonia](https://img.shields.io/badge/Avalonia-12.1.4-8b44ac?style=flat-square)](https://avaloniaui.net/)
-[![TKCode.Arc](https://img.shields.io/badge/TKCode.Arc-0.3.2--preview.1-e07a5f?style=flat-square)](https://github.com/AIDotNet/TKCode.Arc)
+[![TKCode.Arc](https://img.shields.io/badge/TKCode.Arc-0.4.0--preview.1-e07a5f?style=flat-square)](https://github.com/AIDotNet/TKCode.Arc)
 [![build](https://github.com/zhanghaojie513/DougongDesktop/actions/workflows/build.yml/badge.svg)](https://github.com/zhanghaojie513/DougongDesktop/actions/workflows/build.yml)
 [![license](https://img.shields.io/badge/license-MIT-1f883d?style=flat-square)](LICENSE)
 
@@ -128,17 +128,30 @@ UI 与 SDK 彻底解耦。
 | **P5** | 工具与计划：参数键值对 / 两段耗时 / 推理流 / SDK 计划工具 | ✅ |
 | **P6** | 审批闭环：内联卡片 + 四档决策 + 待决锁 + 过期处理 + 输入区 | ✅ |
 | **P7** | 右栏 dock：文件 / 改动 / 计划（可用的三个），上下文与终端如实标注未实现 | ✅ |
-| **P8a** | 1:1 复刻 dsh：三栏像素求解器 + 响应式断点（基线 dsh 0.2.2-alpha.2） | 🚧 进行中 |
-| P8b–P8f | 斜杠命令 / 设置域 / 会话增强 / 插件体系 / 终端与浏览器 | ⬜ |
+| **P8a** | 1:1 复刻 dsh：三栏像素求解器 + 响应式断点（基线 dsh 0.2.2-alpha.2） | 🟡 |
+| **P8b** | 会话与输入：附件栏 / @ 文件引用 | ✅ |
+| **P8g** | 中区会话域：气泡几何 / 间距 / 贴底 / 空状态 / 运行状态 / 工具卡（10 ✅ / 1 🟡 / 6 ⬜） | 🚧 进行中 |
+| P8c–P8f | 设置域 / 会话增强 / 插件体系 / 终端与浏览器 | ⬜ |
 | P9–P10 | 持久化 / 验收 | ⬜ |
+
+> P8a 剩 3 项：1 项等上游协议、1 项已决定不做、1 项（滚动条）未开工。
+> P8b 有 1 项因 SDK 无数据做不了。逐项在进度清单里。
 
 **已能跑通**：AgentHost 启动 → IPC 连接 → 真实 provider 对话 → 流式回复。
 
-**56 条行为检查全部通过，每条都能用 `--break=<名字>` 反证变红。**
+逐项状态见 [docs/dsh-parity-progress.md](docs/dsh-parity-progress.md)，
+规格与出处见 [docs/dsh-parity-spec.md](docs/dsh-parity-spec.md)。
+
+**83 条行为检查全部通过，每条都能用 `--break=<名字>` 反证变红。**
 从没红过的检查等于没有检查——所以 `scripts/all-checks.sh` 跑的不只是正向。
 
 <details>
 <summary><b>P2 验证了什么</b>（点击展开）</summary>
+
+> **注意这是 2026-10 的记录**，验的是"Arc 包能用"，用的是独立的
+> `ArcProbeWindow` 探针窗口，**不是产品界面**。下表里的 `Card`/`Badge`/
+> `Switch`/`ContextWindow` 至今只在探针里出现过。产品实际接了哪些组件，
+> 见 `docs/dsh-parity-spec.md` §6.14。
 
 用控件树 dump 确认每个组件真的实例化并参与布局（尺寸非零 + 实例数）：
 
@@ -153,7 +166,7 @@ UI 与 SDK 彻底解耦。
 | `ContextWindow` | 617×200 |
 | 深浅主题切换 | `IsDark` False→True |
 
-**结论**：Arc 三个 preview 包真的能用。
+**结论**：Arc 包真的能用（当时的 `0.3.2-preview` 三包；现为 `0.4.0-preview.1` 七个包）。
 </details>
 
 ---
@@ -280,6 +293,21 @@ scripts/
 design-demos/                    设计探索稿（非产品代码）
 prototype/                       交互原型（同上）
 ```
+
+### 文档地图
+
+五份**活的**文档，按"什么时候该读它"排：
+
+| 文档 | 什么时候读 |
+|---|---|
+| [HANDOFF.md](HANDOFF.md) | **换机器 / 新会话接手时先读这份**。构建命令、自检开关、Mac 适配结论、踩过的坑 |
+| [docs/dsh-parity-spec.md](docs/dsh-parity-spec.md) | 要对齐某个 dsh 行为时。每个数字都带 `文件:行号` 出处 |
+| [docs/dsh-parity-progress.md](docs/dsh-parity-progress.md) | 想知道"现在做到哪、下一步做什么"。可勾选的 70 项清单 |
+| [docs/ipc-protocol-readiness.md](docs/ipc-protocol-readiness.md) | 考虑抽 `Dougong.Protocol` 独立包时。含"什么时候该抽"的三条触发条件 |
+| [docs/spyglass-usage.md](docs/spyglass-usage.md) | 要查"这个控件为什么是这个样式"时（仅 Debug） |
+
+> `assets/brand/`、`design-demos/`、`prototype/` 是设计阶段的产物，
+> 按阶段归档，不随代码演进维护。
 
 ---
 

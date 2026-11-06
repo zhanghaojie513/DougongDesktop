@@ -3,7 +3,8 @@
 > **这份文档写给"在 Mac 上重新打开这个项目的下一个会话"**。
 > 目标：读完之后能立刻构建、跑检查、知道现在停在哪、下一步做什么。
 >
-> 写于 2026-11-05。Windows 侧最后一次全绿：82 条；**Mac 上已验证：83 条**。
+> 写于 2026-11-05，2026-11-06 修订（Mac 实测结论 + Arc 0.4.0 + 组件重扫）。
+> **当前状态：83 条检查全绿，构建 0 警告 0 错误。**
 
 ---
 
@@ -220,7 +221,7 @@ Mac 上直接 `./scripts/rebuild.sh` 就是 `permission denied`。
 | 阶段 | 状态 |
 |---|---|
 | P0–P7 | ✅ 完成（含五次复检修正） |
-| P8a 布局骨架 | ✅ 10/12（1 项等上游，1 项明确不做） |
+| P8a 布局骨架 | 🟡 10/13（1 项等上游，1 项明确不做，1 项未开工：滚动条） |
 | P8b 会话与输入 | ✅ 5/6（引用来源无数据） |
 | **P8g 中区会话域** | 🟡 **10 ✅ / 1 🟡 / 6 ⬜ / 6 ➖** |
 | P8c 设置域 | ⬜ 0/8 |
@@ -228,45 +229,21 @@ Mac 上直接 `./scripts/rebuild.sh` 就是 `permission denied`。
 | P8e 插件体系 | 🟡 1/8 |
 | P8f 终端与浏览器 | ⬜ 0/5 |
 
-**总体完成度 46%**（26✅ / 1🟡 / 32⬜，不含 ⏳ 与 ➖）。
+**总体完成度 45%**（26✅ / 1🟡 / 33⬜，不含 ⏳ 与 ➖）。
 
 详见 `docs/dsh-parity-progress.md`（状态清单）与
 `docs/dsh-parity-spec.md`（规格，含 §7.5 中区会话域全部出处行号）。
 
-### P8g 中区：已完成
+### P8g 中区明细
 
-| # | 项 | 实现 |
-|---|---|---|
-| M1 | 用户消息复制 | `MessageActions`：HH:mm + 复制，对勾 1000ms 复原 |
-| M2 | 用户气泡宽度 | `min(列宽×0.702, 82%)` 两条约束取小 |
-| M4 | 消息间距三档 | 4 / 12 / 16 |
-| M5 | 贴底阈值 | **25px**（dsh 常量写 24，调用处 `+1`，实际 25） |
-| M6 | 回到底部按钮 | 34×34，距底 16，滚离才出现 |
-| M7 | 空状态 Hero | logo + "探索未至之境" + 预览版徽章 |
-| M8 | 输入区渐变遮罩 | 36px，叠在消息流底部（不是输入区行内） |
-| M9 | 流式运行状态行 | `RunStatusLine`，"深度求索中，用时 N 秒"，1s 刷新 |
-| M10 | 已停止标记 | 旁挂 `_stoppedAssistantIds`，`_turnRunning` 互斥 |
-| M11 | 工具卡状态视觉 | **Arc `ToolCall` 自带**：运行 shimmer / 失败红色+Retry / 待审批描边 / 拒绝变暗。我们只做 9 种 SDK 状态 → `ToolCallStatus` 的映射 |
+**不在这里重复**。逐项状态、难度、卡点全部维护在
+`docs/dsh-parity-progress.md` §P8g——那份是可勾选的清单，
+这里再抄一份只会漂移（本轮就漂了：M11 转 ✅ 后两边数字对不上过）。
 
-### P8g 中区：剩余
+现在只记一条容易误解的：
 
-| # | 项 | 难度 | 卡在哪 |
-|---|---|---|---|
-| M3 🟡 | 助手动作行（复制/分支/用量/时间） | 中 | **契约无字段**：`HostProtocol` 没有 usage、branch、message id 之外的支撑 |
-| M12 | 代码块复制 + 语言标签 | 中 | **改用 `TKCode.Arc.CodeBlock`**（public）：文件头=语言标签 + 语法高亮 + 复制 + 可选折叠。待确认 `Markdown` 能否把代码块交给它 |
-| M13 | 轮次导航条 | 大 | 右侧 28px 竖排刻度 + hover 预览卡 |
-| M14 | 加载更早 | 中 | 顶部按钮 + 锚点补偿（当前无分页） |
-| M15 | 折叠四层模型 | 大 | 轮次→分组→单条，不可互相绕过 |
-| M16 | 工作详情模式 | 大 | compact/standard/detailed/verbose + 两个偏好 |
-| M17 | 列宽可拖拽 | 中 | min 640、边缘预算 176、localStorage 持久化 |
-
-### 明确不做（dsh 也没有，别照想象补）
-
-M18 流式光标、M19 会话内搜索、M20 mermaid 渲染、
-M21 消息重试/编辑/分享、M22 消息级虚拟化、M23 头像。
-
-> **M22 注意**：dsh 的消息流**没有虚拟化**（`ChatFlow.tsx:52-63` 全量 map），
-> 我们用了 `VirtualizingStackPanel`——这是**超出**不是欠缺。
+> **M22 消息级虚拟化：dsh 没有，我们有。** dsh 的消息流是全量 `map`
+> （`ChatFlow.tsx:52-63`），我们用了 `VirtualizingStackPanel`——这是**超出**而非欠缺。
 > 不拆，但诊断口径必须按"可见容器"算，不能按总条目算
 > （这条踩过两次：反馈条数量、用户气泡数量）。
 
@@ -274,21 +251,31 @@ M21 消息重试/编辑/分享、M22 消息级虚拟化、M23 头像。
 
 ## 六、下一步建议
 
-**推荐顺序**：M12 → M11 → M3（或直接转 P8c）。
+**推荐顺序**：M12 → 换 `FeedbackActions` → M3（或直接转 P8c）。
 
-理由是 M12（代码块复制）出现频率最高——每条含代码的回复都会用到，
-而且 Arc 没有现成件，越晚做越可能被迫改结构。
+M12（代码块复制）出现频率最高——每条含代码的回复都会用到。
+**不再需要自建**：`TKCode.Arc.CodeBlock`（public）自带文件头（=语言标签）、
+语法高亮、复制动作、可选折叠，正是 M12 要的四件事。
+要做的是确认 `Markdown` 的代码块能否交给 `CodeBlock` 渲染，而不是写包装。
 
-**M12 做法**：自建一个薄包装。Arc 的 `Markdown` 渲染代码块时给的是
-`pre`/`code` 结构，可以在 `Markdown` 外面检测子控件，或在 `Markdown.CodeBlockTheme`
-之类钩子上注入。**先查 Arc 源码**——Mac 上需要 clone
-`AIDotNet/TKCode.Arc`（见第七节）。
+### 两个组件可替换自建实现
 
-### 另外两件待办（Mac 本轮新增）
+2026-11-06 重扫组件时发现的，都属"旧结论说没有、其实有"：
 
-1. **人眼看一次红绿灯位置**：80px 安全区是估算值（18px 边距 + 三个 14px 圆点），
-   控件树证明不了"没被压住"。截图权限被系统挡着，需要人工确认或授权终端录屏。
-2. **滚动条样式**（§4.3）：macOS 浮层式与 dsh 常驻细条仍有差异，未处理。
+| 自建的东西 | 可换成的 Arc 组件 | 差异 |
+|---|---|---|
+| `FeedbackBar`（赞/踩） | **`FeedbackActions`**（Special，public） | 我们只有两个拇指；它有原因 chips + 可选备注 + 提交后致谢 + 失败内联报错（`FeedbackHandler` 抛异常会显示）。当初自建是因为 `AiAnswerActions` 是 internal——但 `FeedbackActions` 是 public，那条理由已不成立 |
+| `RunClock`（计时） | 无。`AgentStatusRunClock` 是 **internal**，外部写不出来 | 自建是对的，保持现状 |
+
+> 换 `FeedbackActions` 前先确认它的 `Leading`/`Trailing` 插槽够不够嵌我们现有的
+> 复制按钮与时间戳——它设计成"给自有消息行用"，应该对得上，但没实测过。
+
+### 已关闭的待办
+
+- ~~人眼看红绿灯位置~~ —— **2026-11-06 截图确认**：红绿灯与「收起侧栏」图标
+  之间有明显空隙，未被压住；右侧无残留自绘按钮。80px 够用。
+- 滚动条（§4.3）：**未处理**，解法已明确——`Arc.ScrollArea` 自带细悬浮滚动条
+  + 边缘渐隐，正对上 dsh 的常驻细条。已记为 P8a 的 A13（⬜），不在"待办建议"里重复。
 
 
 ---
@@ -315,7 +302,7 @@ git clone https://github.com/AIDotNet/TKCode.Arc arc-src
 
 ### 8.1 "编译通过"和"检查全绿"都证明不了功能能用
 
-本项目多次出现：编译 0 错误、82 条检查全绿，但功能是坏的。
+本项目多次出现：编译 0 错误、检查全绿，但功能是坏的。
 典型例子——`DesktopProtocol.Json` 定义了却一处没用，桌面端特有消息
 根本发不出去（模型目录一直空），只有读运行时日志才发现。
 
@@ -355,25 +342,52 @@ git clone https://github.com/AIDotNet/TKCode.Arc arc-src
 
 **一次误报会训练人忽略这条输出**，之后真问题也看不见了。
 
+### 8.6 依赖与打包的三个坑（来自已归档的 bootstrap 文档）
+
+1. **子工程不能放进 `dougong/` 子目录**。`Directory.Build.props` /
+   `Directory.Packages.props` 沿目录向上查找，进子目录会继承 SDK 的
+   `ManagePackageVersionsCentrally=true`，而 SDK 的中央版本文件只声明 4 个包，
+   于是 Avalonia 一行行报 NU1008。**必须同级。**
+2. **`Dougong.Cli` 是 `PackAsTool=true`**，包里只有 `tools/` 没有 `lib/`，
+   `PackageReference` 引不到。要用组合能力就引 `Dougong.Hosting`。
+3. **Arc 的发布节奏很快**（0.3.2 → 0.4.0 只隔一周，且 0.4.0 新增了整个
+   PropertyGrid 组件族）。版本写死在 `Directory.Packages.props`，
+   升级时按 §8.7 的流程走。
+
+### 8.7 升 Arc 的验证流程（0.4.0 那次总结的）
+
+"编译通过 + 检查全绿"不够——组件库升级可能只改视觉。实际要做的：
+
+1. 按元数据**逐类型比对**新旧 DLL 的 `public` 顶层类型集合（增/删/改）。
+   只看类型名就能发现"删了东西"，这是最便宜的第一道。
+2. 跑 `all-checks.sh`（83 条，含反证）。
+3. **启动应用截图，与升级前的截图并排比**。0.4.0 那次就是靠这一步
+   确认外观零差异的。
+4. 单独验一遍风险最高的组件（那次是 `ToolCall`：用
+   `DOUGONG_UI_TOOLFIRST=1` 前置工具条目，确认四种状态都渲染）。
+
+> 本次结论：0.4.0 相对 0.3.2 **删除 0 个类型**，新增 25 个全属 `PropertyGrid` 一族
+> （我们用不到），所以外观无变化。详见 `docs/dsh-parity-spec.md` §6.14。
+
 ---
 
 ## 九、文件地图
 
 | 路径 | 作用 |
 |---|---|
-| `src/DougongDesktop.App/Shell/ConversationView.cs` | **中区主体**（~1400 行），条目分派、滚动跟随、空状态 |
+| `src/DougongDesktop.App/Shell/ConversationView.cs` | **中区主体**（1526 行），条目分派、滚动跟随、空状态 |
 | `src/DougongDesktop.App/Shell/MessageActions.cs` | 用户消息时间 + 复制 |
 | `src/DougongDesktop.App/Shell/RunStatusLine.cs` | "深度求索中" 状态行 |
-| `src/DougongDesktop.App/Shell/FeedbackBar.cs` | 赞/踩（Arc `AiAnswerActions` 是 internal，故自建） |
+| `src/DougongDesktop.App/Shell/FeedbackBar.cs` | 赞/踩。**可换成 Arc `FeedbackActions`（public，0.4.0 才有）**，见 §六 |
 | `src/DougongDesktop.App/Shell/ApprovalCard.cs` | 审批四档 + 倒计时 |
 | `src/DougongDesktop.App/Shell/Composer.cs` | 输入区（包装 Arc `AiComposer`） |
 | `src/DougongDesktop.App/Shell/RightDock.cs` | 右栏 5 tab（含目录面包屑导航） |
 | `src/DougongDesktop.App/Shell/DshTheme.cs` | dsh token 取色层 + `MonoFont` |
 | `src/DougongDesktop.Ui.Core/Columns.cs` | **布局与中区常量唯一真源** |
-| `src/DougongDesktop.App/Views/MainWindow.cs` | 装配根（~1400 行），含 `DumpLayout` 诊断 |
-| `tests/DougongDesktop.Architecture.Checks/ConversationChecks.cs` | 中区 8 条检查 |
+| `src/DougongDesktop.App/Views/MainWindow.cs` | 装配根（1318 行），含 `DumpLayout` 诊断 |
+| `tests/DougongDesktop.Architecture.Checks/ConversationChecks.cs` | 中区 9 条检查 |
 | `docs/dsh-parity-spec.md` | 规格，§7.5 是中区全部出处 |
-| `docs/dsh-parity-progress.md` | 状态清单（46→65 项，含维护记录） |
+| `docs/dsh-parity-progress.md` | 状态清单（70 项，含维护记录） |
 
 ### 一条规矩
 
@@ -385,34 +399,17 @@ git clone https://github.com/AIDotNet/TKCode.Arc arc-src
 
 ## 十、提交状态
 
-**改动尚未提交**。Mac 上接手时先看一眼：
+**工作区干净，全部已推送。** 接手时 `git status --short` 应为空。
 
-```bash
-git status --short
-git diff
+最近 5 个提交：
+
+```
+b70fec8 docs: 重新扫描 Arc 0.4.0 全量组件，纠正 4 条用不了的推荐
+a00c727 chore(deps): TKCode.Arc 0.3.2-preview.2 → 0.4.0-preview.1
+290d30e fix(mac): 脚本可执行位 + 反证清单补 4 条 + 标题栏平台分支
+b142d43 feat(p8g): 中区会话域纳入 1:1 复刻范围（9 项）+ 跨平台适配
+f96dab2 feat(p8b): 附件栏——Arc 自带完整链路，删掉多余的抽象
 ```
 
-改动内容（Windows 侧）：
-- SDK 0.1.13 → 0.1.18-alpha.1（契约 165→165 零变更）
-- P8b 复核（目录双向导航 + 面包屑）
-- P8g 中区会话域新增（规格 §7.5 + 9 项实现）
-- 跨平台修复（脚本 tasklist、字体 Consolas）
-- 检查 74 → 82 条
-
-改动内容（Mac 侧，2026-11-05）：
-- 脚本可执行位 `100644 → 100755`（三个脚本）
-- `sync-dsh-tokens.py` 工作区 CRLF → LF
-- `all-checks.sh` 补 4 条漏掉的反证 + 加"漏项自保"（不一致即 exit 1）
-- 标题栏按平台分支：macOS 留 80px 红绿灯安全区、不自绘窗口按钮
-- 新增检查 `titlebar-branches-for-macos`（检查 82 → 83）
-- 修两条误导诊断（`ResizablePanel 期望 3`、`ToolCall 0 张`）
-- 新增 `DOUGONG_UI_SCROLL=end` 与 `DOUGONG_UI_TOOLFIRST=1` 两个自检开关
-
-**新增文件**：
-- `src/.../Shell/MessageActions.cs`
-- `src/.../Shell/RunStatusLine.cs`
-- `tests/.../ConversationChecks.cs`
-- `HANDOFF.md`（本文件）
-
-**Mac 上已跑通 `scripts/all-checks.sh`：83 条全绿，构建 0 警告 0 错误。**
-
+**当前状态**：83 条检查全绿（正向 83 / 反证 83），构建 0 警告 0 错误，
+Arc `0.4.0-preview.1`，Avalonia `12.1.4`，SDK `0.1.18-alpha.1`。
