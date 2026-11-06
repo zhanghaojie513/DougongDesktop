@@ -53,6 +53,9 @@ public sealed class MainWindow : Window
     private readonly EngineClient _engine = new(log: msg => Console.Error.WriteLine($"[ui] {msg}"));
     private readonly Dictionary<string, IDisposable> _handles = new(StringComparer.Ordinal);
     private string? _connectionDetail;
+
+    /// <summary>当前连接状态。设置页要把它翻成中文再显示。</summary>
+    private EngineConnectionState? _connectionState;
     private string? _selectedSessionId;
     private IReadOnlyList<SessionSummary>? _currentSessions;
     private readonly StatusCapsule _capsule = new();
@@ -61,7 +64,31 @@ public sealed class MainWindow : Window
     /// <summary>右栏 dock（P7）。</summary>
     private readonly RightDock _rightDock = new();
 
+    /// <summary>设置面板（P8c），惰性构建——不进设置页就不该付构造成本。</summary>
+    private SettingsView? _settingsView;
+
+    /// <summary>
+    /// 最近一次的模型目录。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须缓存</b>：<c>models/list</c> 在连接后立刻返回，而设置页是惰性构建的。
+    /// 用户完全可能先看会话、过一会儿才点开设置——那时事件早就过去了。
+    /// 不缓存的话设置页会一直显示"—"，看起来像"引擎没报目录"。
+    /// </remarks>
+    private (IReadOnlyList<ModelInfo> Models, IReadOnlyList<string> Providers, string? Current)? _lastCatalog;
+
     private readonly UiExtensionLoader _uiPlugins;
+
+    /// <summary>
+    /// 架构守卫的条数，只用于设置页的"诊断"分区展示。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么写死而不是运行时统计</b>：检查工程不引用 App（守分层），
+    /// App 也拿不到它的结果。这个数字只是给用户看的"确实有守卫在跑"，
+    /// 精确性不影响功能。**但它会随检查数变化**——改检查数时这里要同步，
+    /// `settingsDiagnosticsReportsCheckCount` 那条无头检查会盯着。
+    /// </remarks>
+    private const int ArchitectureCheckCount = 84;
 
     public MainWindow()
     {
@@ -138,6 +165,10 @@ public sealed class MainWindow : Window
             _ = SendFeedbackAsync(itemId, rating, reason);
 
         LoadUiPlugins();
+
+        // 设置页自检：直接切到 settings 面板，省得手动点侧栏。
+        if (Environment.GetEnvironmentVariable("DOUGONG_UI_SETTINGS") is "1")
+            _vm.ActivePanel = "settings";
 
         // 自检模式：没 provider 时也能验证消息流渲染
         if (Environment.GetEnvironmentVariable("DOUGONG_UI_SELFTEST") is "1")
@@ -362,11 +393,61 @@ public sealed class MainWindow : Window
         });
     }
 
+    /// <summary>
+    /// 把连接状态翻成中文，附上细节。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须翻</b>：这个值直接显示在设置页的"诊断"里，混进一个
+    /// <c>Connected</c> 会在满屏中文里格外突兀——而且它不是给开发者看的
+    /// 日志，是给用户看的状态。
+    /// </remarks>
+    private static string DescribeConnection(EngineConnectionState state, string? detail)
+    {
+        var word = state switch
+        {
+            EngineConnectionState.Connected => "已连接",
+            EngineConnectionState.Connecting => "连接中",
+            EngineConnectionState.Starting => "启动中",
+            EngineConnectionState.Failed => "连接失败",
+            EngineConnectionState.Disconnected => "未连接",
+            _ => state.ToString(),
+        };
+
+        return string.IsNullOrWhiteSpace(detail) ? word : $"{word} · {detail}";
+    }
+
+    /// <summary>
+    /// 构建（并补齐数据）设置面板。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要在这里补喂</b>：<c>models/list</c> 只在连接时发一次，
+    /// 而设置页是惰性构建的。用户先看会话、之后再点设置是完全正常的路径——
+    /// 那时缓存里已有目录，补一次就对了。不补的话，首次打开设置页
+    /// 会看到一片"—"，很容易被当成"引擎没报模型目录"。
+    /// </remarks>
+    private Control BuildSettingsPanel()
+    {
+        _settingsView ??= new SettingsView();
+
+        if (_lastCatalog is { } catalog)
+            _settingsView.SetModelCatalog(catalog.Models, catalog.Providers, catalog.Current);
+
+        _settingsView.SetDiagnostics(
+            engineState: _connectionState is { } st ? DescribeConnection(st, _connectionDetail) : "未连接",
+            providerProtocol: Environment.GetEnvironmentVariable("DOUGONG_PROVIDER_PROTOCOL") ?? "openai",
+            checkCount: ArchitectureCheckCount);
+
+        return _settingsView;
+    }
+
     /// <summary>按模块声明构建控件。</summary>
     private Control BuildModule(BuiltInModule module) => module.Kind switch
     {
         // 对话区：真实消息流，不是占位
         _ when module.Id == "builtin.conversation" => _conversation,
+
+        // 设置：真实面板，不是占位（P8c）
+        _ when module.Id == "builtin.settings" => BuildSettingsPanel(),
 
         BuiltInModuleKind.Sidebar => SidebarView.Build(
             _currentSessions, _connectionDetail, _selectedSessionId, OnSidebarSelect),
@@ -422,8 +503,16 @@ public sealed class MainWindow : Window
         {
             Console.Error.WriteLine($"[ui] 引擎状态 {state}{(detail is null ? "" : "：" + detail)}");
             _connectionDetail = detail;
+            _connectionState = state;
             _capsule.SetConnection(state, detail);
             Shell.StatusBar.SetConnection(state, detail);
+
+            // 设置页开着时同步刷新；没开就跳过（下次打开时会补喂一次）。
+            _settingsView?.SetDiagnostics(
+                engineState: DescribeConnection(state, detail),
+                providerProtocol:
+                    Environment.GetEnvironmentVariable("DOUGONG_PROVIDER_PROTOCOL") ?? "openai",
+                checkCount: ArchitectureCheckCount);
         };
 
         _engine.EventReceived += OnEngineEvent;
@@ -472,6 +561,13 @@ public sealed class MainWindow : Window
                     ModelProjection.ToAiModels(listed.Models),
                     ModelProjection.ToProviders(listed.Providers));
                 _conversation.Composer.SelectModel(listed.CurrentModelId);
+
+                // 缓存一份：设置页是惰性构建的，可能在这个事件之后才打开。
+                _lastCatalog = (listed.Models, listed.Providers, listed.CurrentModelId);
+
+                // 设置页复用同一份目录——不为了设置页再发一次 models/list。
+                _settingsView?.SetModelCatalog(
+                    listed.Models, listed.Providers, listed.CurrentModelId);
                 break;
 
             case WorkspaceChangedEvent changed:

@@ -24,6 +24,10 @@
          它的 Avalonia 版本要求与我们一致（12.1.4 精确）。 -->
     <PackageVersion Include="TKCode.Spyglass.Agent" Version="0.2.3" />
 
+    <!-- 无头 UI 检查：Avalonia 的无显示链接渲染。
+         只给 tests/DougongDesktop.Ui.Headless.Checks 用；版本必须与 Avalonia 一致。 -->
+    <PackageVersion Include="Avalonia.Headless" Version="12.1.4" />
+
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
 
     <!-- Dougong SDK：来自 nuget.org。版本写死，与 SDK 仓库的发布节奏解耦——

@@ -8,5 +8,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DougongDesktop.Architecture.Checks/DougongDesktop.Architecture.Checks.csproj" />
+    <Project Path="tests/DougongDesktop.Ui.Headless.Checks/DougongDesktop.Ui.Headless.Checks.csproj" />
   </Folder>
 </Solution>

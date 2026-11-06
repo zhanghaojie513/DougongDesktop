@@ -28,7 +28,15 @@ for name in DougongDesktop.App DougongDesktop.AgentHost; do
 done
 
 echo "== 构建 =="
-"$DOTNET" build DougongDesktop.slnx -c Release
+# **必须显式判断退出码**。`set -e` 在这里不够：下面每个 dotnet run 都带
+# --no-build，构建失败时它们会拿旧产物跑，结果全是绿的——
+# 那就成了"构建坏了但检查全过"，比检查失败更危险。
+# 这条不是理论：给设置页加反证时，构建报 CS1061，而无头检查照样 PASS。
+if ! "$DOTNET" build DougongDesktop.slnx -c Release; then
+  echo
+  echo "FAIL：构建失败。检查不能基于旧产物运行——先修构建。"
+  exit 1
+fi
 
 echo
 echo "== 架构守卫（正向）=="
@@ -37,6 +45,10 @@ echo "== 架构守卫（正向）=="
 # 从未被证明能变红。本项目已经漏过 4 条（settings-store-is-swappable 等）。
 forward="$("$DOTNET" run --project tests/DougongDesktop.Architecture.Checks -c Release --no-build)"
 echo "$forward"
+
+echo
+echo "== 无头 UI 检查（真实构建控件，不依赖显示链接）=="
+"$DOTNET" run --project tests/DougongDesktop.Ui.Headless.Checks -c Release --no-build
 
 echo
 echo "== 架构守卫（反证：每条都必须变红）=="

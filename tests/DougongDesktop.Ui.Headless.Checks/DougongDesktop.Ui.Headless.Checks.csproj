@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 无头 UI 检查：真的实例化 App 的界面控件并断言结构。
+
+       **为什么单独一个工程，而不是塞进 Architecture.Checks**：
+       那个工程刻意不引用 App（见它的 csproj 注释），一旦引用，
+       守卫自己就变成依赖链的一环。这里的性质完全不同——
+       它就是要测 UI 实现，引用 App 是前提。
+
+       Avalonia.Headless 不起窗口、不需要 CVDisplayLink，
+       所以在没有图形会话的机器上也能跑。 -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <Description>无头 UI 检查：设置页等界面结构的运行时断言</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DougongDesktop.App\DougongDesktop.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Headless" />
+  </ItemGroup>
+
+</Project>

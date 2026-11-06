@@ -80,6 +80,19 @@ public sealed class AppShell : UserControl
             ApplyColumns();
         };
 
+        // 设置页独占主区：右栏让位。
+        //
+        // **为什么必须让**：主区在 1280 窗口下只有 424px，而 Arc 的
+        // SettingsPage 默认在 720px 以下退化成"横排 pills + 单列内容"。
+        // 不让位的话，用户看到的永远是最窄的那种形态——左栏导航、
+        // 分区标题、行间距全被压扁，根本不像设置页。
+        // dsh 的设置页也是独占的（进去就盖住会话区）。
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != AppShellViewModel.ActivePanelProperty) return;
+            ApplySettingsLayout();
+        };
+
         // slot 变化后重取模板：ContentControl 不知道注册表内部变了。
         // 只影响 single/keyed——list 由 ObservableCollection 自动通知。
         slots.Changed += slotKey =>
@@ -163,6 +176,40 @@ public sealed class AppShell : UserControl
     /// 中栏是 <c>*</c>，所以它的宽度永远是"剩余"，不需要显式设——
     /// 设了反而会和求解器的结果打架。
     /// </remarks>
+    /// <summary>
+    /// 设置页是否正在显示（它要让右栏让位）。
+    /// </summary>
+    /// <remarks>
+    /// 右栏的占位者仍然注册在 slot 里，只是这一屏不展示。下次切回会话面板时
+    /// <see cref="ApplySettingsLayout"/> 会把宽度还给右栏——所以用户之前
+    /// 拖好的右栏宽度不会丢，这里只是临时借用。
+    /// </remarks>
+    private void ApplySettingsLayout()
+    {
+        var settingsOpen = _vm.ActivePanel is "settings";
+
+        // 借用前的宽度存起来，切走时原样还回去。
+        if (settingsOpen && _rightbarWidthBeforeSettings is null)
+            _rightbarWidthBeforeSettings = _rightbarWidth;
+        else if (!settingsOpen && _rightbarWidthBeforeSettings is { } restore)
+        {
+            _rightbarWidth = restore;
+            _rightbarWidthBeforeSettings = null;
+        }
+
+        var shown = settingsOpen ? false : _rightbarShown;
+        if (shown == _rightbarEffectivelyShown) return;
+
+        _rightbarEffectivelyShown = shown;
+        ApplyColumns();
+    }
+
+    /// <summary>进设置页前的右栏宽度；null 表示当前不在设置页。</summary>
+    private double? _rightbarWidthBeforeSettings;
+
+    /// <summary>本屏右栏是否真的要占列宽（设置页时为 false）。</summary>
+    private bool _rightbarEffectivelyShown = true;
+
     private void ApplyColumns()
     {
         if (_columns is null) return;
@@ -185,7 +232,7 @@ public sealed class AppShell : UserControl
         var solution = Columns.Compute(
             viewport,
             sidebarPreference,
-            _rightbarShown ? _rightbarWidth : 0,
+            _rightbarEffectivelyShown ? _rightbarWidth : 0,
             collapsedWidth: drawer ? 0 : Columns.SidebarCollapsed);
 
         // 收起时侧边栏自己要知道（它要切到图标轨道布局）。
