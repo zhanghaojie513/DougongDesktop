@@ -600,13 +600,19 @@ accent outline with Deny and Allow; a denied one is muted."*——
 我们已经把 9 种 SDK 状态映射到 `ToolCallStatus`，运行时截图确认四种态都渲染正确。
 M11 应记为 ✅（已具备），不是待做。
 
-**2. M12「代码块复制 + 语言标签」有现成组件。**
+**2. M12「代码块复制 + 语言标签」不需要做——Arc 的 `Markdown` 已经带了。**
 旧进度表说"Arc `Markdown` 只有 `CopySelectionAsync`，没有代码块按钮，需自建"。
-但 `TKCode.Arc.CodeBlock`（主包，public）的文档是：
-*"A source viewer with a file-name header, syntax highlighting (TextMate
-grammars), a copy action and optional collapsing."*——
-**文件头（放语言标签）+ 语法高亮 + 复制，正好就是 M12 要的三件事**。
-M12 的结论应从"自建"改为"用 `CodeBlock`，确认 `Markdown` 能否把代码块交给它渲染"。
+实测（2026-11-06，探针窗口渲染 fence 后截图）：
+**`Markdown` 默认就给出 `csharp` 语言标签、语法高亮、复制按钮、
+自动换行开关、12 行折叠**——M12 要的三件事全在。
+
+> 一度以为要用 `TKCode.Arc.CodeBlock` 单独接管，实际不需要：
+> `Markdown.DefaultServices` 里的 `MarkdownHighlightPlugin` 与 `CodeBlock`
+> 用的是同一套 TextMate 语法与角色配色（文档原话："the same way
+> `CodeBlock` does"），外观一致。单独摆 `CodeBlock` 只在"非 Markdown
+> 场景"（如 P8e 文档预览里单独展示一个文件）才有意义。
+
+M12 已结案（✅）。守回归的是 `markdown-codeblock-uses-arc-defaults`。
 
 ### 高价值：直接改善现有实现
 
@@ -614,7 +620,7 @@ M12 的结论应从"自建"改为"用 `CodeBlock`，确认 `Markdown` 能否把�
 |---|---|---|---|
 | **`ToolCallGroup`** | Special | M11 之上更进一步 | **建议采用**。把一轮里的多个工具调用收进**一张**安静卡片，头部显示"Used 4 tools" / "Using 3 tools"（带 shimmer）/ "Waiting for approval"，右侧显示"N failed"或总耗时。我们现在是逐个平铺，轮次一长就淹没消息流 |
 | **`AgentTimeline`** | Special | P8d D4 的 `ui-trajectory` | **用成品**。thinking（淡色）/ tool calls（实心）/ waiting（斜纹）三种段 + 编排者与子 agent 分行 + 可回放。比自建"事件记录表"强得多 |
-| **`CodeBlock`** | Arc | M12 | **用成品**（见上） |
+| **`CodeBlock`** | Arc | P8e 文档预览（单独展示一个文件时） | 可用。但 **M12 用不上**——`Markdown` 自带代码块渲染（见上） |
 | **`SettingsPage` / `SettingsSection` / `SettingsRow` / `SettingsGroup`** | Blocks | P8c C1 设置外壳 | **用成品**。左栏导航 + 滑动选中胶囊 + 脏标记时底部浮出保存条 + 窄容器退化为单列。C1 不必自建外壳 |
 | **`ModelPicker` / `ModelPill` / `ModelMenu` / `ModelSummary`** | Blocks | P8c C2 模型/provider 设置 | **用成品**。胶囊显示当前选择，菜单按 provider 分组 + 推理力度 + 容量/价格摘要。C2 省掉大半 |
 | **`AiCommandPalette`** | Special | 现有 `CommandPaletteDialog` 的增强 | **待评估**（产品决策，非技术）。多出"Tab 切 AI 提问模式 + 答案在面板内流式 + 编号来源"。要不要在 Cmd+K 里直接问 AI，是产品问题 |

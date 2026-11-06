@@ -130,7 +130,7 @@ UI 与 SDK 彻底解耦。
 | **P7** | 右栏 dock：文件 / 改动 / 计划（可用的三个），上下文与终端如实标注未实现 | ✅ |
 | **P8a** | 1:1 复刻 dsh：三栏像素求解器 + 响应式断点（基线 dsh 0.2.2-alpha.2） | 🟡 |
 | **P8b** | 会话与输入：附件栏 / @ 文件引用 | ✅ |
-| **P8g** | 中区会话域：气泡几何 / 间距 / 贴底 / 空状态 / 运行状态 / 工具卡（10 ✅ / 1 🟡 / 6 ⬜） | 🚧 进行中 |
+| **P8g** | 中区会话域：气泡几何 / 间距 / 贴底 / 空状态 / 运行状态 / 工具卡 / 代码块（11 ✅ / 1 🟡 / 5 ⬜） | 🚧 进行中 |
 | P8c–P8f | 设置域 / 会话增强 / 插件体系 / 终端与浏览器 | ⬜ |
 | P9–P10 | 持久化 / 验收 | ⬜ |
 
@@ -142,7 +142,7 @@ UI 与 SDK 彻底解耦。
 逐项状态见 [docs/dsh-parity-progress.md](docs/dsh-parity-progress.md)，
 规格与出处见 [docs/dsh-parity-spec.md](docs/dsh-parity-spec.md)。
 
-**83 条行为检查全部通过，每条都能用 `--break=<名字>` 反证变红。**
+**84 条行为检查全部通过，每条都能用 `--break=<名字>` 反证变红。**
 从没红过的检查等于没有检查——所以 `scripts/all-checks.sh` 跑的不只是正向。
 
 <details>
@@ -202,6 +202,15 @@ src/DougongDesktop.App/bin/Debug/net10.0/DougongDesktop.App.exe
 ```
 
 详见 [docs/spyglass-usage.md](docs/spyglass-usage.md)。Release 构建不含探针。
+
+另有一个轻量的**组件探针窗口**，不需要 Spyglass，用来单独验证某个 Arc 控件：
+
+```bash
+DOUGONG_UI_PROBE=1 src/DougongDesktop.App/bin/Release/net10.0/DougongDesktop.App
+```
+
+它绕开消息流虚拟化——比如验证 `Markdown` 的代码块（语言标签、复制按钮、
+折叠）时，在产品界面里那条消息永远在视口外，只有把控件单独摆出来才看得见。
 
 ### 跑起来
 

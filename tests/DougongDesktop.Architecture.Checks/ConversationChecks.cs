@@ -40,6 +40,8 @@ internal static class ConversationChecks
             slug => FontsPortable(breakMode == slug));
         failures += Case("titlebar-branches-for-macos",
             slug => TitlebarBranchesForMac(breakMode == slug));
+        failures += Case("markdown-codeblock-uses-arc-defaults",
+            slug => MarkdownCodeBlockUsesArcDefaults(breakMode == slug));
 
         return failures;
     }
@@ -444,6 +446,60 @@ internal static class ConversationChecks
         // 安全区必须来自 Columns（唯一真源），不能在 Shell 里写魔数
         if (!source.Contains("Columns.MacTrafficLightInset", StringComparison.Ordinal))
             return "macOS 红绿灯安全区没有引用 Columns.MacTrafficLightInset（不要写字面量 80）";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 助手消息的 Markdown 必须走 Arc 默认服务，不得自己接管代码块渲染。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查替代了 M12 的"自建代码块"</b>。2026-11-06 实测（探针窗口
+    /// 渲染带 fence 的 Markdown 并截图）确认：Arc 的 <c>Markdown</c> 默认
+    /// <c>Markdown.DefaultServices</c> 已经给出
+    /// **语言标签（csharp）、语法高亮、复制按钮、自动换行开关、12 行折叠**——
+    /// M12 要的三件事全都在，不需要 <c>CodeBlock</c> 或自建包装。
+    /// <para>
+    /// 所以 M12 的真实风险不是"没做"，而是**以后有人把它改坏**：
+    /// 设了 <c>Services</c> 却漏掉 <c>MarkdownHighlightPlugin</c>（高亮没了）、
+    /// 或给 <c>Markdown</c> 套一层自己画的代码块（语言标签/复制按钮消失）。
+    /// 这条检查拦的就是这两种。
+    /// </para>
+    /// <para>
+    /// <b>为什么是静态断言</b>：检查工程不引用 Arc（守分层），拿不到真实控件树。
+    /// 运行时的那一半由 `DOUGONG_UI_PROBE=1` 的探针窗口人工看一次补足——
+    /// 静态断言保证"没被改坏"，截图保证"确实在"。
+    /// </para>
+    /// </remarks>
+    private static string? MarkdownCodeBlockUsesArcDefaults(bool inject)
+    {
+        var file = Path.Combine(
+            RepoRoot, "src", "DougongDesktop.App", "Shell", "ConversationView.cs");
+        if (!File.Exists(file)) return $"找不到 {file}";
+
+        var source = File.ReadAllText(file);
+        if (inject)
+        {
+            // 模拟"自作主张接管代码块"：这才是真正的回归形态
+            source = source.Replace(
+                "var markdown = new Markdown();",
+                "var markdown = new Markdown { Services = new MarkdownServices() };");
+        }
+
+        // 1. 助手正文必须用 Arc 的 Markdown（不是自己拼的文本控件）
+        if (!source.Contains("var markdown = new Markdown();", StringComparison.Ordinal))
+        {
+            return "助手正文不是直接 new Markdown()："
+                   + "自己接管会导致代码块的语言标签/复制按钮消失（M12 已由 Arc 自带）";
+        }
+
+        // 2. 不许覆写 Services。Arc 的 DefaultServices 里含 MarkdownHighlightPlugin，
+        //    覆写后若忘记插件，语法高亮会静默变成纯文本——界面上看不出报错。
+        if (source.Contains("Services = new MarkdownServices", StringComparison.Ordinal))
+        {
+            return "覆写了 Markdown.Services：Arc 的 DefaultServices 才带 MarkdownHighlightPlugin，"
+                   + "覆写会让代码块失去语法高亮。真要定制，必须显式加上 new MarkdownHighlightPlugin(...)";
+        }
 
         return null;
     }

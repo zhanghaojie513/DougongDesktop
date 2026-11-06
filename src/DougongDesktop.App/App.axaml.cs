@@ -23,7 +23,17 @@ public sealed class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new Views.MainWindow();
+            // DOUGONG_UI_PROBE=1 打开 P2 的组件探针窗口：单独验证某个 Arc 控件
+            // 的行为，不必启动整个应用、也不必造会话数据。
+            //
+            // **存在的理由**（2026-11-06 加）：验证 M12 时，从产品界面里
+            // 根本看不到代码块——消息流虚拟化 + 视口只有 353px，带代码的
+            // 那条永远在视口外。`CodeBlock 0 个` 因此既可能是"没渲染"，
+            // 也可能是"在视口外"，和当初 `ToolCall 0 张` 是同一个陷阱。
+            // 探针窗口把控件单独摆出来，一次运行就能定论。
+            desktop.MainWindow = Environment.GetEnvironmentVariable("DOUGONG_UI_PROBE") is "1"
+                ? new Views.ArcProbeWindow()
+                : new Views.MainWindow();
         }
 
         base.OnFrameworkInitializationCompleted();

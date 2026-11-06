@@ -52,8 +52,8 @@
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 0 | 7 | 0 | 0 | 8 | 13% |
 | P8f 终端与浏览器 | 0 | 0 | 5 | 0 | 0 | 5 | 0% |
-| **P8g 中区会话域** | **10** | **1** | **6** | **0** | **6** | **23** | **65%** |
-| **合计** | **26** | **1** | **33** | **2** | **8** | **70** | **45%** |
+| **P8g 中区会话域** | **11** | **1** | **5** | **0** | **6** | **23** | **71%** |
+| **合计** | **27** | **1** | **32** | **2** | **8** | **70** | **47%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -221,7 +221,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | M9 | ✅ | 流式运行状态行 | `[自有]` | 鲸鱼尾 + "深度求索中，用时 N ···"，1s 刷新（`RunningStatus.tsx:25-48`） | 自建 `RunStatusLine`，放进**滚动区末尾**（放滚动区外的话用户上滚就看不见）。dump 实测 0→7 秒计时在走 |
 | M10 | ✅ | 已停止标记 | `[自有]` | assistant 尾部 11px 灰底小标签（`AssistantMarkdown.tsx:152-154`） | 旁挂 `_stoppedAssistantIds`（契约无该字段）。`chat-stopped-badge-needs-finished-turn` 断言回合进行中不能标 |
 | M11 | ✅ | 工具卡三态视觉 | `[Arc]` | running 整行 shimmer / error 错误色+结果首行 / stopped 琥珀（`ToolRow.module.css:118-126`） | **2026-11-06 核实：Arc `ToolCall` 自带这四态**（shimmer / 错误+Retry / 审批描边 / 拒绝变暗），代码已映射 9 种 SDK 状态，运行时截图确认。**原判"需覆写或自建"有误** |
-| M12 | ⬜ | 代码块复制+语言标签 | `[Arc]` | 复制 1000ms 复原；语言标签；默认自动换行（`CodeBlock.tsx:157-206`） | **改用 `TKCode.Arc.CodeBlock`**（public）：文件头即语言标签 + 语法高亮 + 复制动作 + 可选折叠，正是 M12 要的三件事。待确认 `Markdown` 能否把代码块交给它 |
+| M12 | ✅ | 代码块复制+语言标签 | `[Arc]` | 复制 1000ms 复原；语言标签；默认自动换行（`CodeBlock.tsx:157-206`） | **Arc 自带，无需自建**。2026-11-06 探针窗口实测：`Markdown.DefaultServices` 渲染 fence 时给出 `csharp` 语言标签、语法高亮、复制按钮、自动换行开关、12 行折叠。新增 `markdown-codeblock-uses-arc-defaults` 防以后被改坏 |
 
 **P2 — 结构较大，延后**
 
@@ -334,3 +334,6 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-06 | **两条旧结论被推翻**。①M11「工具卡三态需自建」→ `ToolCall` 四态全自带（shimmer/错误+Retry/审批描边/拒绝变暗），转 ✅ ②M12「需自建代码块」→ `TKCode.Arc.CodeBlock` 自带文件头+高亮+复制+折叠。另发现 `FeedbackActions`（public）可替换自建的 `FeedbackBar`——当初自建是因为 `AiAnswerActions` 是 internal，但那条理由不适用于 `FeedbackActions` |
 | 2026-11-06 | **"实际接入多少组件"从 15 改回 10**。凭"代码里提到过"会数多：`Switch`/`Card`/`Arc.Badge` 只在 `ArcProbeWindow`（探针窗口）里；`SidebarView.cs` 的 `Badge =` 是 `SidebarItem` 的字符串属性不是 `Arc.Badge` 控件；`ContextWindow` 只出现在注释和一个同名业务属性里 |
 | 2026-11-06 | **文档整理**。`docs/DougongDesktop-bootstrap.md` 是开工前的计划文（工程结构 `Desktop`/`PtyHost` 与实际不符），内容已提炼进 HANDOFF §8.6/§8.7 后删除。HANDOFF §五 不再重复 P8g 明细（两边曾漂移过）。README 加文档地图、修进度表与检查数 |
+| 2026-11-06 | **M12 结案：Arc 自身足够，没写一行实现**。探针窗口实测 `Markdown.DefaultServices` 渲染 fence 时已有 `csharp` 语言标签、语法高亮、复制按钮、自动换行开关、12 行折叠——M12 要的三件事全在。**差点误判为"没做"**：产品界面里带代码的那条消息永远在视口外（虚拟化 + 354px 视口），`CodeBlock 0 个` 与"未渲染"完全同形，和 `ToolCall 0 张` 是同一个陷阱。新增 `markdown-codeblock-uses-arc-defaults` 防回归，检查 83 → **84** |
+| 2026-11-06 | **新增 `DOUGONG_UI_PROBE=1`**：打开 P2 的组件探针窗口而不启动主界面。M12 就是靠它定论的——以后验单个控件（不走真实会话）都用这个入口，不必再造自检数据、也不必改产品代码 |
+| 2026-11-06 | 删掉 `MainWindow.cs.bak`（0 字节，`f9114fd` 误提交的残留）。`git rm` 后仓库里不再有这个空文件 |

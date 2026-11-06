@@ -81,6 +81,8 @@ checks="$checks chat-follow-threshold-is-25 chat-bubble-width-is-two-sided"
 checks="$checks chat-content-width-clamps chat-gaps-are-three-tiered chat-no-fake-streaming-caret"
 checks="$checks chat-colors-come-from-tokens chat-stopped-badge-needs-finished-turn"
 checks="$checks ui-fonts-work-on-macos titlebar-branches-for-macos"
+# M12：助手正文必须走 Arc 默认服务（代码块的语言标签/高亮/复制都是 Arc 给的）
+checks="$checks markdown-codeblock-uses-arc-defaults"
 checks="$checks sdk-files-stay-contained"
 # P8a 附带的三条行为检查。**曾经漏在这里**：它们一直在正向区 PASS，
 # 却从未进反证清单——脚本照样报 ALL CHECKS PASS，等于这三条从没被验证过。
