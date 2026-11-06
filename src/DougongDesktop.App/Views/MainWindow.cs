@@ -432,6 +432,11 @@ public sealed class MainWindow : Window
         if (_lastCatalog is { } catalog)
             _settingsView.SetModelCatalog(catalog.Models, catalog.Providers, catalog.Current);
 
+        // 插件清单：直接读加载器的已加载列表，不另存一份。
+        // 用户在客户端生命周期内装不了新插件（安装链路属 P8e），
+        // 所以这里不需要订阅变化。
+        _settingsView.SetPlugins(_uiPlugins.Loaded);
+
         _settingsView.SetDiagnostics(
             engineState: _connectionState is { } st ? DescribeConnection(st, _connectionDetail) : "未连接",
             providerProtocol: Environment.GetEnvironmentVariable("DOUGONG_PROVIDER_PROTOCOL") ?? "openai",

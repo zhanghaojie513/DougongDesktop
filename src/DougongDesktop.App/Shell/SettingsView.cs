@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using DougongDesktop.Ipc;
+using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
 namespace DougongDesktop.App.Shell;
@@ -32,6 +33,8 @@ public sealed class SettingsView : UserControl
     private readonly TextBlock _modelSummary;
     private readonly TextBlock _engineSummary;
     private readonly TextBlock _checkCount;
+    private readonly TextBlock _pluginSummary;
+    private readonly StackPanel _pluginList;
 
     /// <summary>构造设置面板。</summary>
     public SettingsView()
@@ -40,6 +43,8 @@ public sealed class SettingsView : UserControl
         _modelSummary = Body("—");
         _engineSummary = Body("—");
         _checkCount = Body("—");
+        _pluginSummary = Body("—");
+        _pluginList = new StackPanel { Spacing = 0 };
 
         _page = new SettingsPage
         {
@@ -48,6 +53,7 @@ public sealed class SettingsView : UserControl
             Items =
             {
                 BuildProvidersSection(),
+                BuildPluginsSection(),
                 BuildPermissionsSection(),
                 BuildAppearanceSection(),
                 BuildDiagnosticsSection(),
@@ -144,6 +150,80 @@ public sealed class SettingsView : UserControl
             },
         };
     }
+
+    /// <summary>
+    /// 用已加载的 UI 插件填充"插件"分区。
+    /// </summary>
+    /// <param name="plugins">已加载的插件。</param>
+    /// <remarks>
+    /// <b>只显示"已加载"的，不显示"加载失败"的</b>——失败原因走 stderr 诊断，
+    /// 放进设置页会让普通用户看到一堆他无法处理的报错。这条与
+    /// "加载失败不能让 App 起不来"是同一个取舍。
+    /// <para>
+    /// <b>按 Origin 分组</b>：内置与第三方安装的混在一起，用户分不清
+    /// 哪个能卸。这正是 dsh 插件页的分组依据。
+    /// </para>
+    /// </remarks>
+    public void SetPlugins(IReadOnlyList<LoadedExtension> plugins)
+    {
+        _pluginList.Children.Clear();
+        _pluginSummary.Text = plugins.Count == 0 ? "无" : $"{plugins.Count} 个";
+
+        if (plugins.Count == 0)
+        {
+            _pluginList.Children.Add(Body(
+                "还没有加载任何 UI 插件。用环境变量 DOUGONG_UI_PLUGINS 指定插件目录。"));
+            return;
+        }
+
+        foreach (var group in plugins
+                     .GroupBy(p => p.Origin)
+                     .OrderBy(g => g.Key))
+        {
+            var title = group.Key == SlotOccupantOrigin.BuiltIn ? "内置" : "第三方";
+            _pluginList.Children.Add(new TextBlock
+            {
+                Text = $"{title}（{group.Count()}）",
+                Margin = new Thickness(0, 8, 0, 4),
+                Opacity = 0.6,
+            });
+
+            foreach (var p in group)
+            {
+                var name = string.IsNullOrWhiteSpace(p.Extension.DisplayName)
+                    ? p.Extension.Id
+                    : $"{p.Extension.DisplayName}（{p.Extension.Id}）";
+
+                _pluginList.Children.Add(Row(
+                    name,
+                    $"槽位 {p.Extension.SlotKey}" +
+                    (string.IsNullOrWhiteSpace(p.Extension.SlotKeyValue)
+                        ? ""
+                        : $" / {p.Extension.SlotKeyValue}"),
+                    Body(Path.GetFileName(p.AssemblyFile))));
+            }
+        }
+    }
+
+    /// <summary>插件：已加载的 UI 插件清单（C4）。</summary>
+    private SettingsSection BuildPluginsSection() => new()
+    {
+        Header = "插件",
+        Description = "当前产品内加载的 UI 插件。加载失败的原因走运行时日志，不在这里显示。",
+        Content = new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                new SettingsGroup
+                {
+                    Header = "已加载",
+                    Items = { Row("插件数量", "含内置与第三方", _pluginSummary) },
+                },
+                _pluginList,
+            },
+        },
+    };
 
     /// <summary>权限：审批模式的只读说明（C5 的范围）。</summary>
     /// <remarks>

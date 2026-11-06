@@ -5,6 +5,7 @@ using Avalonia.LogicalTree;
 using Avalonia.VisualTree;
 using DougongDesktop.App.Shell;
 using DougongDesktop.Ipc;
+using DougongDesktop.Ui.Core;
 using TKCode.Arc;
 
 namespace DougongDesktop.Ui.Headless.Checks;
@@ -37,6 +38,7 @@ public static class Program
         failures += Check("settings-key-shows-env-source", KeyShowsEnvironmentSource);
         failures += Check("settings-check-count-matches-guards", CheckCountMatchesGuards);
         failures += Check("settings-shows-chinese-state-words", ShowsChineseStateWords);
+        failures += Check("settings-plugins-lists-loaded-only", PluginsListLoadedOnly);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -128,6 +130,59 @@ public static class Program
             return $"出现了 {boxes.Length} 个密码输入框，但本轮没有持久化——填了会丢";
 
         return null;
+    }
+
+    /// <summary>
+    /// 插件分区必须列出已加载插件，空列表时给出可操作的提示。
+    /// </summary>
+    /// <remarks>
+    /// <b>两个断言，各自防一种回归</b>：
+    /// <list type="number">
+    /// <item>有插件时必须真的列出 Id 与槽位——空列表是"接上了但没渲染"，
+    /// 本项目在命令面板上踩过一次。</item>
+    /// <item>没插件时必须给一句可操作的话（告诉用户 `DOUGONG_UI_PLUGINS`），
+    /// 只显示"0 个"会让用户不知道该怎么装。</item>
+    /// </list>
+    /// </remarks>
+    private static string? PluginsListLoadedOnly()
+    {
+        var view = new SettingsView();
+
+        // 空列表：要给提示，不能只有一个 "0"
+        view.SetPlugins([]);
+        var emptyTexts = CollectTexts(view).ToArray();
+        if (!emptyTexts.Any(t => t.Contains("DOUGONG_UI_PLUGINS", StringComparison.Ordinal)))
+            return "没有插件时，界面没告诉用户怎么加载（应提到 DOUGONG_UI_PLUGINS）";
+
+        // 有插件：要列出 Id 与槽位
+        var fake = new FakeExtension("test.plugin", "测试插件", "shell.trailing");
+        view.SetPlugins([new LoadedExtension(fake, null!, null!, "/tmp/Test.dll", SlotOccupantOrigin.Installed)]);
+
+        var texts = CollectTexts(view).ToArray();
+        if (!texts.Any(t => t.Contains("test.plugin", StringComparison.Ordinal)))
+            return "已加载插件的 Id 没显示出来";
+        if (!texts.Any(t => t.Contains("shell.trailing", StringComparison.Ordinal)))
+            return "已加载插件的槽位没显示出来";
+        if (!texts.Any(t => t.Contains("第三方", StringComparison.Ordinal)))
+            return "没有按 Origin 分组（应显示「第三方」）";
+
+        // 再切回空：确认列表真的被清空，不是追加
+        view.SetPlugins([]);
+        if (CollectTexts(view).Any(t => t.Contains("test.plugin", StringComparison.Ordinal)))
+            return "SetPlugins 第二次调用没有清空上一次的条目（会越积越多）";
+
+        return null;
+    }
+
+    /// <summary>测试用插件，只实现接口不做事。</summary>
+    private sealed class FakeExtension(string id, string name, string slot)
+        : DougongDesktop.Ui.Core.IDesktopUiExtension
+    {
+        public string Id => id;
+        public string DisplayName => name;
+        public string SlotKey => slot;
+        public string? SlotKeyValue => null;
+        public Control Build() => new TextBlock();
     }
 
     /// <summary>
@@ -246,10 +301,30 @@ public static class Program
         return dir?.FullName ?? AppContext.BaseDirectory;
     }
 
-    private static IEnumerable<string> CollectTexts(Visual root) =>
-        root.GetLogicalDescendants()
+    /// <summary>
+    /// 收集界面上所有可见文本。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须同时收 <see cref="SettingsRow.Header"/> 与 <c>Description</c></b>：
+    /// 它们是 ContentControl 的属性，不是 TextBlock 子控件——只扫 TextBlock
+    /// 会漏掉每一行的标题与说明。
+    /// 第一版就漏了，导致"插件 Id 没显示出来"的误报：实际渲染是好的。
+    /// </remarks>
+    private static IEnumerable<string> CollectTexts(Visual root)
+    {
+        var blocks = root.GetLogicalDescendants()
             .OfType<TextBlock>()
             .Select(t => t.Text ?? string.Empty);
+
+        var rows = root.GetLogicalDescendants().OfType<SettingsRow>().ToArray();
+        var rowHeaders = rows.Select(r => r.Header?.ToString() ?? string.Empty);
+        var rowDescriptions = rows.Select(r => r.Description ?? string.Empty);
+
+        return blocks
+            .Concat(rowHeaders)
+            .Concat(rowDescriptions)
+            .Where(t => t.Length > 0);
+    }
 
     private static int Check(string name, Func<string?> body)
     {
