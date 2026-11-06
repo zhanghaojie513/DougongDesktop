@@ -19,9 +19,9 @@
 >
 > **判定要严**：有类名但没接进装配，算 `⬜`；接进装配但没有验证，算 `🟡`。
 
-最后更新：2026-11-05
+最后更新：2026-11-06
 
-**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `0.3.2-preview.2` · SDK `0.1.18-alpha.1`
+**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `0.4.0-preview.1` · SDK `0.1.18-alpha.1`
 
 ---
 

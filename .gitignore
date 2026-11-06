@@ -28,3 +28,6 @@ Thumbs.db
 # UI 插件测试目录
 samples/SampleUiPlugin/bin/
 samples/SampleUiPlugin/obj/
+
+# 编辑器/agent 的本地工作区配置：每台机器自己一份，不该进仓库
+.zcode/

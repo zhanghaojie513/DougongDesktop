@@ -41,15 +41,26 @@ git sparse-checkout set \
 
 | 项 | 值 |
 |---|---|
-| **版本** | `0.3.2-preview.2`（2026-10-30 从 preview.1 升级） |
+| **版本** | `0.4.0-preview.1`（2026-11-06 从 `0.3.2-preview.2` 升级） |
 | **仓库** | https://github.com/AIDotNet/TKCode.Arc |
-| **commit** | `db031ffe`（2026-10-30） |
+| **commit** | `5680bf55`（2026-11-06） |
 | **Avalonia** | 必须精确 `12.1.4` |
-| **包数** | 17 个（我们用了 4 个，另发现 Terminal / Workflow / Icons.Lucide 三个未用） |
+| **包数** | 我们引用 7 个：Arc / Fonts / Special / Blocks / Terminal / Workflow / Icons.Lucide |
 
-**升级记录**：从 `preview.1` → `preview.2`，零警告零错误，57 条检查全过，
-运行时三栏 `280/424/576` 正常，虚拟化仍生效（1000 条 → 7 容器）。
-**preview.2 没有修侧边栏 64px**（`Sidebar.IsCollapsed` 注释仍是 "64px icon rail"），
+**升级记录（`0.3.2-preview.2` → `0.4.0-preview.1`，2026-11-06）**：
+零警告零错误，83 条检查全过（正向 83 / 反证 83）。
+
+- **公开类型集合只增不减**：按元数据逐类型比对**类型全名**，
+  三个包**删除 0 个**，`TKCode.Arc` 新增 25 个。Special / Blocks 的类型集合完全不变。
+  （口径限于类型名；成员签名未逐个比对。）
+- 新增的 25 个全部属于 `PropertyGrid` 一族：`TKCode.Arc` 命名空间下 16 个
+  （`PropertyGrid`、`PropertyGridItem`、`PropertyGridModelAttribute`、
+  `PropertyGridTypeBuilder<T>` 等），`DesignTokens` 下 9 个（`PropertyGridTokenKind`
+  等 token 类型）。我们用不到，**不影响现有代码**。
+- 运行时复核：三栏几何不变、毛玻璃仍 `AcrylicBlur`、标题栏 3 个按钮、
+  ToolCall 5 张（Input 5 / Duration 3 / Summary 3），与升级前逐像素一致。
+
+**`0.4.0-preview.1` 没有修侧边栏 64px**（`Sidebar.IsCollapsed` 注释仍是 "64px icon rail"），
 所以 §9.1 的 8px 偏差依旧存在。
 
 ---
@@ -467,10 +478,14 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ---
 
-## 6.13 Arc 新增的 41 个 AI 组件：哪些用、哪些不用
+## 6.13 Arc 的 AI 组件：哪些用、哪些不用
 
-`0.3.2-preview.2` 的 Special 包里有 **132 个 `Ai*` 类型**（含新增的 41 个组件）。
-我们已经在这个版本上，**不需要升级**。逐个判断：
+> **2026-11-06 校正**：原写"Special 包里有 132 个 `Ai*` 类型"，实测是
+> **158 个 `Ai*` 顶层类型，其中 78 个 public**。原数字口径不明、无法复现，
+> 已按 `TKCode.Arc.Special.dll` 的元数据重数（该包在 preview.2 → 0.4.0 之间未变）。
+> 下表的组件判断本身不受影响——那是对具体类型的取舍，不是对计数的推断。
+
+逐个判断：
 
 ### 值得用的三个
 
@@ -511,8 +526,20 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ## 6.14 全量检索 Arc 组件：按需求对照（2026-10-31）
 
-检索范围：`0.3.2-preview.2` 三个包共 **5463 个公开类型**（Arc 877 / Blocks 1924 / Special 1045，
-过滤掉辅助类后）。按 P8 各阶段的实际需求定向匹配，结论如下。
+> **2026-11-06 校正**：原写"三个包共 5463 个公开类型（Arc 877 / Blocks 1924 / Special 1045）"，
+> 但三个数加起来是 3846，与 5463 自相矛盾，且口径无法复现。
+> 按元数据实测（`0.4.0-preview.1`，public 顶层类型）：
+>
+> | 包 | public 顶层类型 |
+> |---|---|
+> | `TKCode.Arc` | 953 |
+> | `TKCode.Arc.Special` | 862 |
+> | `TKCode.Arc.Blocks` | 1135 |
+> | **合计** | **2950** |
+>
+> 下表的选择结论来自对具体组件的逐个判断，不依赖这个计数，故不受影响。
+
+检索范围：`0.4.0-preview.1` 的 Arc / Special / Blocks 三个包。按 P8 各阶段的实际需求定向匹配，结论如下。
 
 ### 高价值：直接改善现有实现
 

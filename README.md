@@ -22,7 +22,7 @@
 ---
 
 > [!WARNING]
-> **早期开发中。** SDK 处于 `0.1.x-alpha`，TKCode.Arc 处于 `0.3.2-preview`。
+> **早期开发中。** SDK 处于 `0.1.x-alpha`，TKCode.Arc 处于 `0.4.0-preview`。
 > 签名与行为可能在任意提交中变更，不适合作为依赖。
 
 > [!NOTE]
