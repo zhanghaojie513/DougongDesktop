@@ -524,56 +524,150 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 
 ---
 
-## 6.14 全量检索 Arc 组件：按需求对照（2026-10-31）
+## 6.14 全量检索 Arc 组件：按需求对照（2026-11-06 重做）
 
-> **2026-11-06 校正**：原写"三个包共 5463 个公开类型（Arc 877 / Blocks 1924 / Special 1045）"，
-> 但三个数加起来是 3846，与 5463 自相矛盾，且口径无法复现。
-> 按元数据实测（`0.4.0-preview.1`，public 顶层类型）：
+> **本节在 2026-11-06 整节重做**。旧版（2026-10-31）推荐了 4 个组件，
+> 反射核实后**全部是 `internal`，外部程序集无法实例化**：
 >
-> | 包 | public 顶层类型 |
-> |---|---|
-> | `TKCode.Arc` | 953 |
-> | `TKCode.Arc.Special` | 862 |
-> | `TKCode.Arc.Blocks` | 1135 |
-> | **合计** | **2950** |
+> | 旧版推荐 | 实际可见性 | 后果 |
+> |---|---|---|
+> | `AgentStatusRunClock` | `NotPublic` | 旧版写"立刻替换"，实际写不出 `new` |
+> | `AiDiffDocument` | `NotPublic` | 同上 |
+> | `AiDiffText` | `NotPublic` | 同上 |
+> | `AiRelatedQuestions` | `NotPublic` | 同上 |
 >
-> 下表的选择结论来自对具体组件的逐个判断，不依赖这个计数，故不受影响。
+> 这些名字在 XML 文档里有 `<member>` 条目，所以"查文档"会以为存在——
+> **文档不反映可见性**。本次一律按 DLL 元数据的 `Visibility` 判定。
 
-检索范围：`0.4.0-preview.1` 的 Arc / Special / Blocks 三个包。按 P8 各阶段的实际需求定向匹配，结论如下。
+**检索口径**：`0.4.0-preview.1` 全部 **16 个包**的 `lib/net10.0` 程序集，
+按元数据枚举 `Visibility == Public` 的顶层类型，再按基类是 Avalonia 控件
+（`TemplatedControl` / `Control` / `ContentControl` / `ItemsControl` / …）
+筛出**可实例化控件**。
+
+| 包 | public 顶层类型 | 可实例化控件 |
+|---|---|---|
+| `TKCode.Arc` | 951 | 124 |
+| `TKCode.Arc.Blocks` | 1133 | 84 |
+| `TKCode.Arc.Special` | 860 | 65 |
+| `TKCode.Arc.Core` | 147 | 18 |
+| `TKCode.Arc.Terminal` | 77 | 1 |
+| `TKCode.Arc.AdvancedCharts` | 79 | 1 |
+| `TKCode.Arc.Workflow` | 39 | 4 |
+| `TKCode.Arc.Mobile` | 100 | 16 |
+| **合计** | **3386** | **313** |
+| 其余 8 个包（Audio×3 / Themes×2 / Fonts / Icons / Foundation） | 65 | 0 |
+
+> 计数**不含**编译器生成的占位类型（`!AvaloniaResources`、`!XamlLoader`，
+> 每个 XAML 程序集带 2 个）。含它们则为 951+2。这个差别只影响 ±2，
+> 但不说明白，下次复核会以为是数字漂移。
+>
+> Mobile 是触摸优先，桌面端不用；其余 8 个包是基础设施，不含控件。
+
+### 我们当前实际接入的（10 个）
+
+判据：产品代码（`Shell/`、`Views/MainWindow.cs` 等）里真的构造或使用的控件。
+**不含 `ArcProbeWindow`**——那是组件探针窗口，不是产品界面。
+
+| 组件 | 包 | 用在哪 |
+|---|---|---|
+| `Sidebar` | Blocks | 左栏导航（`SidebarView.cs`） |
+| `Tabs` / `TabItem` | Arc | 右栏 dtype 标签（`RightDock.cs`） |
+| `Button` | Arc | 通用按钮 |
+| `ToolCall` | Special | 工具卡（含 9 种 SDK 状态映射） |
+| `CommandPaletteDialog` | Blocks | Cmd+K（`CommandPalette`） |
+| `AgentStatus` / `AgentPlan` / `AgentPlanStep` | Special | 状态胶囊 / 计划面板 |
+| `Markdown` | Arc | 消息正文与流式渲染 |
+| `AiComposer` / `AiAttachment` / `AiCommand` | Blocks | 输入区与斜杠命令 |
+| `LucideIcon` | Icons.Lucide | 图标 |
+
+**三个容易数错的，说明一下**：
+- `Switch` / `Card` / `Arc.Badge` **只在 `ArcProbeWindow` 里出现**，
+  产品界面没用。`SidebarView.cs:186` 那个 `Badge =` 是 `SidebarItem`
+  的字符串属性（显示"3 分钟前"），不是 `Arc.Badge` 控件。
+- `ContextWindow` 只出现在 `Program.cs` 的 `UseArcSpecial()` 注释里，
+  以及一个同名业务属性 `m.ContextWindow`（模型上下文长度）——**同名的巧合**，
+  控件本身没接。
+- 所以真实数字是 **10 个**，不是凭"提到过"数出来的 15+。
+
+### 纠正两条旧结论
+
+**1. M11「工具卡三态视觉」不需要自己做。**
+旧进度表把它记成 ⬜ 待做，理由是"Arc `ToolCall` 默认态，需覆写或自建"。
+实测 `ToolCall` 文档原话：*"A running call shimmers its title next to a spinner;
+a failed one shows its reason and Retry; one that waits for approval sits on an
+accent outline with Deny and Allow; a denied one is muted."*——
+**shimmer / 错误色 + Retry / 审批描边 / 拒绝变暗，四个态都是组件自带的**。
+我们已经把 9 种 SDK 状态映射到 `ToolCallStatus`，运行时截图确认四种态都渲染正确。
+M11 应记为 ✅（已具备），不是待做。
+
+**2. M12「代码块复制 + 语言标签」有现成组件。**
+旧进度表说"Arc `Markdown` 只有 `CopySelectionAsync`，没有代码块按钮，需自建"。
+但 `TKCode.Arc.CodeBlock`（主包，public）的文档是：
+*"A source viewer with a file-name header, syntax highlighting (TextMate
+grammars), a copy action and optional collapsing."*——
+**文件头（放语言标签）+ 语法高亮 + 复制，正好就是 M12 要的三件事**。
+M12 的结论应从"自建"改为"用 `CodeBlock`，确认 `Markdown` 能否把代码块交给它渲染"。
 
 ### 高价值：直接改善现有实现
 
-| 组件 | 包 | 对应我们的需求 | 决策 |
+| 组件 | 包 | 对应 | 决策 |
 |---|---|---|---|
-| **`AgentStatusRunClock`** | Special | 状态胶囊的计时 | **立刻替换**。它的语义是"从运行开始到现在，**扣掉每段 paused 和 failed**"——我们手写的 `StatusCapsule` 只扣了审批等待，漏了失败段 |
-| **`AgentTimeline`** | Special | P8d 的 `ui-trajectory` | **用成品**。原计划自己写"按轮次的事件记录表 + 时间概览"。它把 **thinking（淡色）/ tool calls（实心）/ waiting（斜纹）** 三种段用视觉区分，还带编排者与子 agent 的分行 |
-| **`AiRelatedQuestions`** | Blocks | 消息流末端的"接下来问什么" | **待评估**。dsh 的 `ui-chat` 有这个能力，Arc 也是成品 |
+| **`ToolCallGroup`** | Special | M11 之上更进一步 | **建议采用**。把一轮里的多个工具调用收进**一张**安静卡片，头部显示"Used 4 tools" / "Using 3 tools"（带 shimmer）/ "Waiting for approval"，右侧显示"N failed"或总耗时。我们现在是逐个平铺，轮次一长就淹没消息流 |
+| **`AgentTimeline`** | Special | P8d D4 的 `ui-trajectory` | **用成品**。thinking（淡色）/ tool calls（实心）/ waiting（斜纹）三种段 + 编排者与子 agent 分行 + 可回放。比自建"事件记录表"强得多 |
+| **`CodeBlock`** | Arc | M12 | **用成品**（见上） |
+| **`SettingsPage` / `SettingsSection` / `SettingsRow` / `SettingsGroup`** | Blocks | P8c C1 设置外壳 | **用成品**。左栏导航 + 滑动选中胶囊 + 脏标记时底部浮出保存条 + 窄容器退化为单列。C1 不必自建外壳 |
+| **`ModelPicker` / `ModelPill` / `ModelMenu` / `ModelSummary`** | Blocks | P8c C2 模型/provider 设置 | **用成品**。胶囊显示当前选择，菜单按 provider 分组 + 推理力度 + 容量/价格摘要。C2 省掉大半 |
+| **`AiCommandPalette`** | Special | 现有 `CommandPaletteDialog` 的增强 | **待评估**（产品决策，非技术）。多出"Tab 切 AI 提问模式 + 答案在面板内流式 + 编号来源"。要不要在 Cmd+K 里直接问 AI，是产品问题 |
+| **`JsonViewer`** | Arc | 工具卡 Output 的 JSON 展示 | **建议采用**。可折叠树、按类型着色、搜索高亮、大文档分页。比现在的染色文本强 |
+| **`ScrollArea`** | Arc | 中区消息流滚动条 | **建议评估**。自带细悬浮滚动条 + 边缘渐隐，正好对上 §4.3 记的"macOS 浮层滚动条与 dsh 常驻 5px 细条不同"那条已知偏差 |
+| **`UsageMeter`** | Arc | M3 助手动作行的用量显示 | **待契约**。组件有，但 `HostProtocol` 没有 usage 字段——**卡在数据侧**，同 D3 |
+
+### 可用于 P8f 终端
+
+| 组件 | 包 | 说明 |
+|---|---|---|
+| **`TerminalView`** | Terminal | 已引包、public、原生库随包落地，但**产品代码零实例化**（F1/F2 状态即为"没接进装配"）。F4 就是把它放进右栏 dock tab |
+
+### 可用于 P8e 插件/dock
+
+| 组件 | 包 | 说明 |
+|---|---|---|
+| **`AiSidePanel`** | Blocks | E5 右栏停靠面。注意它的形态是"页面 + 旁边一个助理"（会读整页、以词级 diff 卡片提议修改），**不是通用 tab 宿主**。E5 要的 tab 注册表仍得自建 |
+| `WorkflowCanvas` / `WorkflowNodeCard` / `WorkflowMinimap` / `WorkflowZoomControls` | Workflow | E4 dockkit 画布部分用得上；**分裂标签树**仍要自建 |
+| `AiWorkflow` | Special | 成品工作流卡片（32px 行 + 1px 轨道 + 分支 tab），比拿 `WorkflowCanvas` 自己拼省事 |
 
 ### 中价值：取决于数据而非组件
 
 | 组件 | 包 | 结论 |
 |---|---|---|
-| `AiDiffDocument` / `AiDiffText` | Blocks | **组件能做词级 diff，但我们没数据**。SDK 的 `FileVersion` 只存长度/时间/哈希，不存原文。这与之前 §9 的结论一致：缺口在数据侧，不在 UI 侧 |
-| `AgentMemory` | Blocks | 对应 SDK 的 agent 记忆能力。**排在 P9 之后**，且 SDK 侧尚未接入 |
+| `AgentMemory` | Blocks | 对应 SDK 的 agent 记忆能力。排在 P9 之后，SDK 侧尚未接入 |
+| `AiSidePanel` 的 diff 卡片 | Blocks | 依赖 `AiPanelChangeProposal`，与 D3 同样的数据缺口 |
 
-### 不用
+### 明确不用
 
 | 组件 | 为什么不用 |
 |---|---|
-| `AgentLoop` | "agent 循环的动画解说"（环上三个站点：Gather context / Take action / Verify），是文档演示组件，不是运行时 UI |
+| `AgentLoop` | "agent 循环的动画解说"（Gather context / Take action / Verify 三个站点），文档演示组件，不是运行时 UI |
 | `AgentHandoff` | AI 转人工客服场景，我们不做 |
 | `AgentCursor` | 多人协作编辑光标，单人场景不需要 |
+| `AiMascot` / `CubeMascot` / `GhostMascot` / `PixelMascot` | 用户要求榫灵形象自己设计；`AiMascot` 只能改颜色换不了形体 |
+| `Login` / `SignupForm` / `BillingOverview` / `MetricsDashboard` / `KanbanBoard` 等 SaaS 落地页组件族 | 面向站点/后台产品，桌面端无对应需求 |
+| `DataGrid`（AdvancedCharts 包） | 只有一个控件且是表格；我们的列表需求 `TreeTable` 足够，不值得为此多引一个包 |
+| `TKCode.Arc.Mobile` 全部 | 触摸优先，桌面端不用 |
 
-### 一条方法论
+### 一条方法论（修订）
 
-**有组件 ≠ 能用。** 判断顺序应该是：
-1. 我们有这个**数据**吗？
-2. 组件的**形状**与我们的需求一致吗？
-3. 只有前两条都成立，才考虑接入。
+**有组件 ≠ 能用。** 判断顺序：
+1. **它是 `public` 吗？** —— 先查 DLL 元数据的 `Visibility`。
+   XML 文档里有 `<member>` 条目**不代表**能从外部实例化
+   （旧版 4 条推荐全栽在这里）。
+2. 我们有这个**数据**吗？—— `UsageMeter` / 一切 diff 组件都卡在这一步。
+3. 组件的**形状**与我们的需求一致吗？—— `AiSidePanel` 是"页面 + 助理"，
+   不是通用 tab 宿主；`ResizablePanels` 用百分比，而 dsh 的列宽是像素语义
+   （见 `AppShell.cs` 三栏处注释，这条结论在 0.4.0 仍成立：
+   `ResizablePanels.Sizes` 文档明写 *"two-way, percent"*）。
 
-`AiDiffDocument` 就是第 1 条不成立的反例——组件再好，没有改动前后的原文就没法用。
-
----
+三条都成立才接入。
 
 ## 7. 实施计划
 

@@ -222,13 +222,13 @@ Mac 上直接 `./scripts/rebuild.sh` 就是 `permission denied`。
 | P0–P7 | ✅ 完成（含五次复检修正） |
 | P8a 布局骨架 | ✅ 10/12（1 项等上游，1 项明确不做） |
 | P8b 会话与输入 | ✅ 5/6（引用来源无数据） |
-| **P8g 中区会话域** | 🟡 **8 ✅ / 1 🟡 / 4 ⬜ / 6 ➖** |
+| **P8g 中区会话域** | 🟡 **10 ✅ / 1 🟡 / 6 ⬜ / 6 ➖** |
 | P8c 设置域 | ⬜ 0/8 |
 | P8d 会话增强 | ⬜ 0/7 |
 | P8e 插件体系 | 🟡 1/8 |
 | P8f 终端与浏览器 | ⬜ 0/5 |
 
-**总体完成度 45%**（24✅ / 1🟡 / 30⬜，不含 ⏳ 与 ➖）。
+**总体完成度 46%**（26✅ / 1🟡 / 32⬜，不含 ⏳ 与 ➖）。
 
 详见 `docs/dsh-parity-progress.md`（状态清单）与
 `docs/dsh-parity-spec.md`（规格，含 §7.5 中区会话域全部出处行号）。
@@ -246,14 +246,14 @@ Mac 上直接 `./scripts/rebuild.sh` 就是 `permission denied`。
 | M8 | 输入区渐变遮罩 | 36px，叠在消息流底部（不是输入区行内） |
 | M9 | 流式运行状态行 | `RunStatusLine`，"深度求索中，用时 N 秒"，1s 刷新 |
 | M10 | 已停止标记 | 旁挂 `_stoppedAssistantIds`，`_turnRunning` 互斥 |
+| M11 | 工具卡状态视觉 | **Arc `ToolCall` 自带**：运行 shimmer / 失败红色+Retry / 待审批描边 / 拒绝变暗。我们只做 9 种 SDK 状态 → `ToolCallStatus` 的映射 |
 
 ### P8g 中区：剩余
 
 | # | 项 | 难度 | 卡在哪 |
 |---|---|---|---|
 | M3 🟡 | 助手动作行（复制/分支/用量/时间） | 中 | **契约无字段**：`HostProtocol` 没有 usage、branch、message id 之外的支撑 |
-| M11 | 工具卡三态视觉（running shimmer / error 错误色 / stopped 琥珀） | 中 | Arc `ToolCall` 默认态，需覆写或自建 |
-| M12 | 代码块复制 + 语言标签 | 中 | **Arc `Markdown` 只有 `CopySelectionAsync`，没有代码块按钮**，需自建 |
+| M12 | 代码块复制 + 语言标签 | 中 | **改用 `TKCode.Arc.CodeBlock`**（public）：文件头=语言标签 + 语法高亮 + 复制 + 可选折叠。待确认 `Markdown` 能否把代码块交给它 |
 | M13 | 轮次导航条 | 大 | 右侧 28px 竖排刻度 + hover 预览卡 |
 | M14 | 加载更早 | 中 | 顶部按钮 + 锚点补偿（当前无分页） |
 | M15 | 折叠四层模型 | 大 | 轮次→分组→单条，不可互相绕过 |
