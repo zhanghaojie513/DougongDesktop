@@ -31,11 +31,51 @@ public sealed class IpcServer : IAsyncDisposable
 
     private readonly EngineOptions _options;
 
+    /// <summary>
+    /// 权限预设。**全进程只此一份**。
+    /// </summary>
+    /// <remarks>
+    /// <b>唯一准则（SDK 侧 0.1.20 明确要求）：同一个变量既给引擎也给协议层。</b>
+    /// 建两份的后果是"界面切了、引擎没变"——那正是假控件。
+    /// 所以这里是 readonly 字段，不是每次请求时 new。
+    /// </remarks>
+    private readonly PermissionPresets _presets;
+
+    /// <summary>
+    /// 子 agent 注册表。**全进程只此一份**，理由同上。
+    /// </summary>
+    /// <remarks>
+    /// 建两份会让 <c>subagent/list</c> 永远返回空，而额度照样在烧——
+    /// SDK 侧把这列为"唯一失败模式"。
+    /// </remarks>
+    private readonly SubagentRegistry _subagents = new(maxDepth: 3, maxConcurrent: 4);
+
     public IpcServer(SessionComposer composer, EngineOptions options, string workspace)
     {
         _composer = composer;
         _options = options;
         _workspace = workspace;
+
+        // 从环境变量读初始档位；读不到用交互式（最安全的那档）。
+        _presets = PermissionProjection.CreatePresets(ResolveInitialPolicy());
+    }
+
+    /// <summary>按环境变量决定初始权限档位。</summary>
+    /// <remarks>
+    /// <c>DOUGONG_APPROVAL_POLICY=... </c> 取 <see cref="ApprovalPolicy"/> 的成员名。
+    /// 认不出就用默认（交互式）——**不猜**：猜错会静默放宽或收紧审批。
+    /// </remarks>
+    private static ApprovalPolicy ResolveInitialPolicy()
+    {
+        var raw = Environment.GetEnvironmentVariable("DOUGONG_APPROVAL_POLICY");
+        if (string.IsNullOrWhiteSpace(raw)) return ApprovalPolicy.AskOnRisk;
+
+        if (Enum.TryParse<ApprovalPolicy>(raw, ignoreCase: true, out var parsed)) return parsed;
+
+        Console.Error.WriteLine(
+            $"[host] DOUGONG_APPROVAL_POLICY={raw} 认不出，用默认 {ApprovalPolicy.AskOnRisk}。" +
+            $"可选值：{string.Join(" / ", Enum.GetNames<ApprovalPolicy>())}");
+        return ApprovalPolicy.AskOnRisk;
     }
 
     public async Task RunAsync(int port, CancellationToken cancellationToken)
@@ -175,6 +215,35 @@ public sealed class IpcServer : IAsyncDisposable
 
                 case ListDirectoryCommand list:
                     await ListDirectoryAsync(list, connection, cancellationToken).ConfigureAwait(false);
+                    break;
+
+                case ListPermissionPresetsCommand presets:
+                    await connection.SendAsync(new PermissionPresetListedEvent
+                    {
+                        Sequence = NextStatusSequence(),
+                        RequestId = presets.RequestId,
+                        SessionId = presets.SessionId,
+                        State = PermissionProjection.ToProtocol(_presets, presets.SessionId),
+                    }, cancellationToken).ConfigureAwait(false);
+                    break;
+
+                case SwitchPermissionPresetCommand sw:
+                    await SwitchPermissionAsync(sw, connection, cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
+
+                case WatchPermissionPresetsCommand watch:
+                    // **单窗口阶段不订阅**：自己切自己收响应就够，再推一帧是多余的。
+                    // Dock 浮动窗启用后再打开。这里如实记录，不假装支持也不假装拒绝。
+                    Console.Error.WriteLine(
+                        $"[host] permission/watch enabled={watch.Enabled}（当前实现不广播）");
+                    await connection.SendAsync(new PermissionPresetListedEvent
+                    {
+                        Sequence = NextStatusSequence(),
+                        RequestId = watch.RequestId,
+                        SessionId = watch.SessionId,
+                        State = PermissionProjection.ToProtocol(_presets, watch.SessionId),
+                    }, cancellationToken).ConfigureAwait(false);
                     break;
 
                 case ResyncCommand resync:
@@ -669,6 +738,43 @@ public sealed class IpcServer : IAsyncDisposable
 
     /// <summary>
     /// <summary>
+    /// 切换权限预设。
+    /// </summary>
+    /// <remarks>
+    /// <b>改了预设就真的改审批行为</b>：`_presets` 与 <see cref="CreateApprover"/>
+    /// 里 `PresetApprover` 用的是同一个实例，所以下一次工具调用就按新档位裁决。
+    /// 这不是"存了个值"，SDK 侧已实测（切到 Never 后审批器不再被问）。
+    /// </remarks>
+    private async Task SwitchPermissionAsync(
+        SwitchPermissionPresetCommand cmd, IpcConnection connection, CancellationToken ct)
+    {
+        try
+        {
+            // **SwitchAsync 遇未知键抛异常**（SDK 刻意如此）：
+            // 静默无操作会让用户以为切成功了而策略没变——安全方向上是更坏的结果。
+            var policy = await PermissionProjection.SwitchAsync(_presets, cmd.Key, ct).ConfigureAwait(false);
+            Console.Error.WriteLine($"[host] 权限档位 → {_presets.CurrentKey}（{policy}）");
+        }
+        catch (Exception ex)
+        {
+            // 失败要说清为什么——"点了没反应"是最难排查的形态。
+            // 回给客户端的仍是**真实当前状态**，客户端据此渲染即可。
+            Console.Error.WriteLine(
+                $"[host] 切换权限到 {cmd.Key} 失败：{ex.GetType().Name}: {ex.Message}。" +
+                $"当前仍是 {PermissionProjection.CurrentKey(_presets)}");
+        }
+
+        // 无论成败都回当前真实状态：客户端据此渲染，不需要猜
+        await connection.SendAsync(new PermissionPresetListedEvent
+        {
+            Sequence = NextStatusSequence(),
+            RequestId = cmd.RequestId,
+            SessionId = cmd.SessionId,
+            State = PermissionProjection.ToProtocol(_presets, cmd.SessionId),
+        }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// 建审批器。
     /// </summary>
     /// <param name="connection">IPC 连接，用来把审批推给客户端。</param>
@@ -677,6 +783,17 @@ public sealed class IpcServer : IAsyncDisposable
     /// （审批器会记日志，不让它静默退化）。
     /// </param>
     private IToolApprover CreateApprover(IpcConnection connection, Action? stopTurn = null) =>
+        // **层序不能反**（SDK 侧明确要求）：
+        //   PermissionPolicyApprover 在外层——它先判"这个工具声明为无访问吗"，
+        //     是就直接放行，不再问用户；
+        //   PresetApprover 在内层——它按当前预设决定要不要问、怎么问。
+        // 反过来写，预设拿不到判断机会，切换就变成空转。
+        new PermissionPolicyApprover(
+            new PresetApprover(
+                BuildIpcApprover(connection, stopTurn),
+                _presets));
+
+    private IToolApprover BuildIpcApprover(IpcConnection connection, Action? stopTurn) =>
         new IpcApprover(async (approval, ct) =>
         {
             var pending = new TaskCompletionSource<ApprovalResponse>(

@@ -21,7 +21,7 @@
 
 最后更新：2026-11-06
 
-**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `1.0.0` · SDK `0.1.19-alpha.1`
+**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `1.0.0` · SDK `0.1.20-alpha.1`
 
 ---
 
@@ -48,12 +48,12 @@
 |---|---|---|---|---|---|---|---|
 | P8a 布局骨架 | 10 | 0 | 1 | 1 | 1 | 13 | **91%** |
 | P8b 会话与输入 | 5 | 0 | 0 | 0 | 1 | 6 | **100%** |
-| P8c 设置域 | 2 | 2 | 2 | 1 | 1 | 8 | **67%** |
+| P8c 设置域 | 2 | 3 | 1 | 1 | 1 | 8 | **71%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **25%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **40%** |
 | **P8g 中区会话域** | **11** | **1** | **5** | **0** | **6** | **23** | **71%** |
-| **合计** | **30** | **5** | **24** | **2** | **9** | **70** | **59%** |
+| **合计** | **30** | **6** | **23** | **2** | **9** | **70** | **60%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -148,7 +148,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | C2 | 🟡 | 模型/provider 设置 | `[Arc]` | 复用 `models/list` 数据（不新开协议）显示提供商数/模型数/当前模型 | 运行时 23 家 / 663 个模型。**只做了只读展示**，还不能切换——切换要重开会话 |
 | C3 | 🟡 | 密钥管理 | `[自有]` | **只做了只读展示**：界面如实显示"来自环境变量 DOUGONG_PROVIDER_KEY"，**不给输入框**（不落盘的话填了会丢，比不显示更糟） | 无头检查 `settings-key-shows-env-source` 断言无密码框。三档存储中的钥匙串/会话内存未做 |
 | C4 | ✅ | 插件清单页 | `[Arc]` | 读 `UiExtensionLoader.Loaded`，按 `Origin` 分内置/第三方，显示 Id / 槽位 / 文件名；空列表时提示 `DOUGONG_UI_PLUGINS` | 用真实 `SampleUiPlugin` 验证：`示例插件（sample.ui-plugin）→ shell.trailing`。无头检查 `settings-plugins-lists-loaded-only` |
-| C5 | ⬜ | 权限预设 | `[Arc]` | **契约已到位**（SDK 0.1.19）：`permission/presets` / `permission/switch` / `permission/watch` 三条命令 + `permission/listed` 事件。待做界面接线 | 契约实测可按基类序列化并带判别器 |
+| C5 | 🟡 | 权限预设 | `[Arc]` | **引擎侧已接通**：`PermissionPresets` 单实例注入 `PermissionPolicyApprover(PresetApprover(inner, presets))`，三条命令已实现。**界面未做** | **实测确认不是假控件**：interactive 时内层审批器被问 1 次，切到 unattended 后 0 次（裁决理由「无人值守预设：不询问审批」）。与 SDK 侧给的数字一致 |
 | C6 | ⏳ | Agent preset | `[—]` | **等契约**：`AgentPreset` 在 `Dougong.HostProtocol` 里 **0 处** | 等 SDK 暴露契约 |
 | C7 | ➖ | Agent 循环设置（并行工具上限） | `[—]` | **决定不做**：`ToolConcurrency` 只有两级（串行 / 工作区独占），并发由 `ToolExecutionPlan` 的 `Reads`/`Writes` 资源键自动仲裁，**没有用户可调的并行数**。放一个调了不生效的滑块不如不放 | — |
 | C8 | ⬜ | 子智能体 | `[Arc]` | **契约已到位**（SDK 0.1.19）：`subagent/list` / `subagent/result` / `subagent/cancel` + `subagent/listed` / `subagent/updated` 事件（Started 与 Completed 都推，用 `State` 区分，中间过程不推）。待做界面接线 | 契约实测；`SubagentUpdatedEvent.RequestId` 为 null |
@@ -351,3 +351,5 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-09 | **`Button` 命名冲突**：`using TKCode.Arc;` 后它与 `Avalonia.Controls.Button` 冲突，编译报 CS0104。这正是 llms.txt 警告的那条（"Always write the arc: prefix... otherwise names shared with Avalonia such as Button resolve to Avalonia's own controls"）。已在 RightDock 里加 `using ArcButton = TKCode.Arc.Button;` 别名，并把两处原生按钮显式写成 `Avalonia.Controls.Button` |
 | 2026-11-10 | **SDK 0.1.18 → 0.1.19-alpha.1**。新增的正是 C5（权限预设）与 C8（子 agent）的契约：`permission/presets` / `permission/switch` / `permission/watch` / `subagent/list` / `subagent/result` / `subagent/cancel` 六条命令 + `permission/listed` / `subagent/listed` / `subagent/updated` 三个事件。**与 `fs/list` 那批不同：这一批 SDK 自带多态注册，不需要我们手工 RegisterDerivedType**（实测按基类序列化已带 `method` 判别器）。C5/C8 从 ⏳ 改 ⬜——不再是"等契约"，是"等接线" |
 | 2026-11-10 | **新增判别器存在性断言**（`AssertSdkRegisters`）。多态判别器缺失时是**静默降级**：序列化不抛异常，只是不带 `method` 字段，对端当未知消息丢弃，UI 上表现为"按钮点了没反应"而日志里什么都没有。现改为启动时按基类序列化六条命令、逐个查 `method`，不符就抛并打印实际输出。已验证反证生效 |
+| 2026-11-10 | **C5 引擎侧接通并实测**。`PermissionPresets` 全进程单实例，层序 `PermissionPolicyApprover(PresetApprover(inner, presets))`（外层先判"无访问直接放行"，内层按预设决定问不问）。三条命令 `permission/presets|switch|watch` 实现。**实测：interactive 问 1 次 → unattended 问 0 次**，证明切换真的改审批行为，不是空转开关。新增 `Framework/PermissionProjection.cs`（把 SDK 形状→协议形状的映射收在一处），SDK 引用预算 6 → 7，已复审记录理由 |
+| 2026-11-10 | **向 SDK 侧报错自己是错的：字段命名**。我曾报 `Key`/`Enabled` 是 PascalCase 而 `sessionId` 是 camelCase。复核发现**是我的探针写错了**——那次用了默认 `JsonSerializerOptions`，没传 `HostProtocolContract.Json`。用对配置后全是 camelCase。教训已写进 `DesktopProtocol.DescribeWireFormat` 的注释：**凡验证线上格式，必须用生产同一份序列化配置** |

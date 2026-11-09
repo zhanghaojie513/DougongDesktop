@@ -126,6 +126,36 @@ public static class DesktopProtocol
     public static JsonSerializerOptions Json => HostProtocolContract.Json;
 
     /// <summary>
+    /// 诊断用：确认线上帧的字段命名。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要有这个</b>：2026-11-10 我向 SDK 侧报了一个"字段命名不一致"的问题
+    /// （说 <c>Key</c>/<c>Enabled</c> 是 PascalCase 而 <c>sessionId</c> 是 camelCase）。
+    /// 复核发现是**我的探针写错了**——那次探针用了默认 <c>JsonSerializerOptions</c>，
+    /// 没有传 <see cref="HostProtocolContract.Json"/>。用对配置后全是 camelCase：
+    /// <code>
+    /// 正确：{"method":"permission/switch","sessionId":"s","key":"ask","requestId":"2"}
+    /// 错误：{"method":"permission/switch","SessionId":"s","Key":"ask","RequestId":"2"}
+    /// </code>
+    /// <b>教训</b>：凡是"验证线上格式"的探针，必须用生产同一份 <c>JsonSerializerOptions</c>。
+    /// 用默认配置验证等于验证了一个不存在的实现。
+    /// </remarks>
+    public static string DescribeWireFormat()
+    {
+        var sample = JsonSerializer.Serialize(
+            new SwitchPermissionPresetCommand
+            {
+                RequestId = "probe",
+                SessionId = "probe",
+                Key = "probe",
+            },
+            typeof(ClientCommand),
+            Json);
+
+        return sample;
+    }
+
+    /// <summary>
     /// 已登记的扩展类型，供自检。
     /// </summary>
     /// <remarks>

@@ -253,7 +253,13 @@ public static class Program
         // 变化（实测：改 5 个文件只输出 1 行），必须自己比 FileVersion 的字段；
         // 而那段比对逻辑需要被检查工程断言，检查工程只引用 Framework 不引用
         // 宿主。放到宿主里就无法被测——"不可测的正确"等于没有保证。
-        const int budget = 6;
+        // 2026-11-10 从 6 调到 7：新增 PermissionProjection.cs。
+        // 复审结论：**该引用**。它把"权限预设的 SDK 形状 → 协议形状"这条映射
+        // 收在一处。若不放在 Framework，AgentHost 就要直接引用 SDK 包——
+        // 那会让 AgentHost 从"只认 Ipc + Framework"变成认识 SDK 类型，
+        // 与 SessionRuntime / EngineOptions 的既有分层相反。
+        // 放在 Framework 的额外好处：能被检查工程断言（它只引用 Framework）。
+        const int budget = 7;
 
         var violations = new List<string>();
 
