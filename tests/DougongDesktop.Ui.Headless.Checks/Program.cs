@@ -42,6 +42,8 @@ public static class Program
         failures += Check("terminal-panel-reports-unavailable", TerminalPanelReportsUnavailable);
         failures += Check("titlebar-uses-arc-slots", TitlebarUsesArcSlots);
         failures += Check("dock-mode-builds-split-tree", DockModeBuildsSplitTree);
+        failures += Check("permission-picker-reflects-engine-state", PermissionPickerReflectsEngineState);
+        failures += Check("engine-survives-bad-command", EngineSurvivesBadCommand);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -313,6 +315,84 @@ public static class Program
     /// 会漏掉每一行的标题与说明。
     /// 第一版就漏了，导致"插件 Id 没显示出来"的误报：实际渲染是好的。
     /// </remarks>
+    /// <summary>
+    /// 权限下拉必须反映引擎回报的状态，且切换时发出请求。
+    /// </summary>
+    /// <remarks>
+    /// <b>两个断言，各防一种回归</b>：
+    /// <list type="number">
+    /// <item>喂入引擎状态后，下拉的选项与选中项要跟着变——不验这个，
+    /// "接了但没渲染"会一直绿着。</item>
+    /// <item>用户改选中项要发出请求——不验这个，选择器就成了纯装饰。</item>
+    /// </list>
+    /// <para>
+    /// 还要验**抑制回环**：引擎回报后我们设 <c>SelectedIndex</c>，
+    /// 那会再触发一次 <c>SelectionChanged</c>，若不挡住就会无限往返。
+    /// </para>
+    /// </remarks>
+    private static string? PermissionPickerReflectsEngineState()
+    {
+        var view = new DougongDesktop.App.Shell.SettingsView();
+
+        var requested = new List<string>();
+        view.PermissionPresetRequested += key => requested.Add(key);
+
+        // 1. 引擎回状态 → 下拉要跟着变
+        view.SetPermissionPresets(new PermissionPresetState(
+            CurrentKey: "interactive",
+            CurrentName: "交互式",
+            Options:
+            [
+                new PermissionPresetInfo("interactive", "交互式", "问", true),
+                new PermissionPresetInfo("unattended", "无人值守", "不问", true),
+            ]));
+
+        if (view.SelectedPresetKey != "interactive")
+            return $"回填后选中项是 {view.SelectedPresetKey ?? "(null)"}，期望 interactive";
+
+        // 2. **回填不该发请求**——设 SelectedIndex 若没挡住会触发 SelectionChanged
+        if (requested.Count > 0)
+            return $"回填触发了 {requested.Count} 次切换请求（应为 0）：无限往返的起点";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 引擎收到没有判别器的消息不能崩。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条来自实测事故</b>：探针按具体类型序列化（不带 <c>method</c>），
+    /// 服务端 SDK 抛的是 <c>NotSupportedException</c> 而不是 <c>JsonException</c>。
+    /// 当时只捕了后者，结果**整个引擎进程退出**，之后所有客户端都连不上。
+    /// <para>
+    /// 一条客户端发错的命令不该升级成引擎致命错误——那会把
+    /// "一个客户端写错"放大成"所有人都用不了"。
+    /// 静态断言：<c>HandleAsync</c> 的反序列化必须同时捕获这两种异常。
+    /// </para>
+    /// </remarks>
+    private static string? EngineSurvivesBadCommand()
+    {
+        var path = Path.Combine(
+            FindRepoRoot(), "src", "DougongDesktop.AgentHost", "IpcServer.cs");
+        if (!File.Exists(path)) return $"找不到 {path}";
+
+        var src = File.ReadAllText(path);
+
+        // 定位反序列化那一段
+        var at = src.IndexOf("json.Deserialize<ClientCommand>", StringComparison.Ordinal);
+        if (at < 0) return "找不到反序列化 ClientCommand 的位置";
+
+        // 往后看 600 字符，应该能同时看到两种 catch
+        var window = src.Substring(at, Math.Min(700, src.Length - at));
+        if (!window.Contains("catch (JsonException", StringComparison.Ordinal))
+            return "反序列化没有捕获 JsonException";
+        if (!window.Contains("catch (NotSupportedException", StringComparison.Ordinal))
+            return "反序列化没有捕获 NotSupportedException："
+                   + "缺判别器的消息会让整个引擎退出（实测发生过）";
+
+        return null;
+    }
+
     /// <summary>
     /// <c>DOUGONG_UI_DOCK=1</c> 时右栏必须用 DockLayout，且布局树建出来了（P8e E4）。
     /// </summary>

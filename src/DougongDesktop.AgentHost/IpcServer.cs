@@ -171,6 +171,21 @@ public sealed class IpcServer : IAsyncDisposable
                 .ConfigureAwait(false);
             return;
         }
+        catch (NotSupportedException ex)
+        {
+            // **缺多态判别器时 SDK 抛的是 NotSupportedException，不是 JsonException。**
+            // 只捕 JsonException 会让"客户端发来一条没 method 字段的消息"
+            // 直接杀掉整个引擎进程——实测踩到：探针按具体类型序列化，
+            // 服务端报 "must specify a type discriminator" 后进程退出，
+            // 之后所有客户端都连不上。
+            //
+            // 这类输入是**客户端的问题**，不该升级成引擎致命错误。
+            await SendErrorAsync(
+                connection,
+                $"命令缺少类型判别器（method）：{ex.Message}", cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
 
         if (command is null)
         {

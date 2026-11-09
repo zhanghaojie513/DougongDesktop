@@ -231,24 +231,128 @@ public sealed class SettingsView : UserControl
     /// <c>HostProtocol</c> 没有承载它的字段（与 C8 同一类缺口）。
     /// 放一个切了不生效的开关，比不放更糟。
     /// </remarks>
-    private static SettingsSection BuildPermissionsSection() => new()
+    /// <summary>预设选择器与当前档位（诊断用）。</summary>
+    private readonly ComboBox _presetPicker = new()
     {
-        Header = "权限",
-        Description = "审批在消息流里逐次询问；四档决策见审批卡片。",
-        Content = new SettingsGroup
-        {
-            Header = "当前行为",
-            Items =
-            {
-                Row("工具调用审批",
-                    "每个需要授权的调用单独询问，不记住本次会话的选择",
-                    Body("逐次询问")),
-                Row("拒绝后是否停止回合",
-                    "由审批卡片上的「拒绝并停止」决定，不设全局默认",
-                    Body("每次可选")),
-            },
-        },
+        MinWidth = 180,
+        PlaceholderText = "（等待引擎）",
     };
+
+    private readonly TextBlock _presetState = Body("—");
+
+    /// <summary>用户切换预设。参数是预设 key。</summary>
+    public event Action<string>? PermissionPresetRequested;
+
+    /// <summary>下拉里的 key，与显示名分开存。</summary>
+    private readonly List<string> _presetKeys = [];
+
+    /// <summary>抑制回填时的 SelectionChanged 回环。</summary>
+    private bool _updatingPresets;
+
+    /// <summary>
+    /// 权限分区：预设选择器 + 真实状态。
+    /// </summary>
+    /// <remarks>
+    /// <b>这不是摆设</b>：选中的 key 会经 <c>permission/switch</c> 发给引擎，
+    /// 引擎侧走 <c>PermissionPresets.SwitchAsync</c>，审批链按新档位裁决。
+    /// 实测（2026-11-10）：interactive 时审批器被问 1 次，切到 unattended 后 0 次。
+    /// <para>
+    /// <b>回填时的回环要挡</b>：引擎回 <c>permission/listed</c> 后我们要更新
+    /// 下拉选中项，而设 <c>SelectedIndex</c> 会再触发一次 <c>SelectionChanged</c>，
+    /// 又发一遍 <c>permission/switch</c>——无限往返。用 <c>_updatingPresets</c> 隔开。
+    /// </para>
+    /// </remarks>
+    private SettingsSection BuildPermissionsSection()
+    {
+        _presetPicker.SelectionChanged += (_, _) =>
+        {
+            if (_updatingPresets) return;
+            var i = _presetPicker.SelectedIndex;
+            if (i < 0 || i >= _presetKeys.Count) return;
+
+            PermissionPresetRequested?.Invoke(_presetKeys[i]);
+        };
+
+        return new SettingsSection
+        {
+            Header = "权限",
+            Description = "选一档审批策略；切换后引擎立即按新档位裁决。",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    new SettingsGroup
+                    {
+                        Header = "审批档位",
+                        Items =
+                        {
+                            Row("预设", "由引擎裁决，不是只记一个值", _presetPicker),
+                            Row("当前生效", "以引擎回报为准", _presetState),
+                        },
+                    },
+                    new SettingsGroup
+                    {
+                        Header = "不随预设改变的部分",
+                        Description = "这几条是每次调用都要看的，预设管不到。",
+                        Items =
+                        {
+                            Row("拒绝后是否停止回合",
+                                "由审批卡片上的「拒绝并停止」决定",
+                                Body("每次可选")),
+                            Row("未知权限的工具",
+                                "预设不覆盖：MCP 等来源权限未知时仍逐次询问",
+                                Body("始终询问")),
+                        },
+                    },
+                },
+            },
+        };
+    }
+
+    /// <summary>
+    /// 用引擎回报的权限状态填充下拉。
+    /// </summary>
+    /// <param name="state">引擎回的预设状态。</param>
+    /// <remarks>
+    /// <b>以引擎为准，不用本地猜测</b>：切换失败时引擎回的是**当前真实状态**
+    /// （例如 key 不存在，它仍返回 old），界面照它渲染即可。
+    /// 本地先改再等服务端确认会让失败时显示成成功。
+    /// </remarks>
+    public void SetPermissionPresets(PermissionPresetState state)
+    {
+        _updatingPresets = true;
+        try
+        {
+            _presetKeys.Clear();
+            _presetPicker.Items.Clear();
+
+            foreach (var option in state.Options)
+            {
+                _presetKeys.Add(option.Key);
+                _presetPicker.Items.Add(new ComboBoxItem
+                {
+                    Content = $"{option.Name}（{option.Key}）",
+                    // 派生出来的 custom 之类不可选：选了也没语义
+                    IsEnabled = option.Selectable,
+                });
+            }
+
+            var index = _presetKeys.FindIndex(k => k == state.CurrentKey);
+            _presetPicker.SelectedIndex = index;
+            _presetState.Text = state.CurrentName ?? state.CurrentKey ?? "—";
+        }
+        finally
+        {
+            _updatingPresets = false;
+        }
+    }
+
+    /// <summary>当前下拉选中的 key（诊断/自检用）。</summary>
+    public string? SelectedPresetKey =>
+        _presetPicker.SelectedIndex >= 0 && _presetPicker.SelectedIndex < _presetKeys.Count
+            ? _presetKeys[_presetPicker.SelectedIndex]
+            : null;
 
     /// <summary>外观：主题跟随与字体（有真实来源的两项）。</summary>
     private static SettingsSection BuildAppearanceSection() => new()

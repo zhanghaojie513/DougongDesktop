@@ -77,6 +77,13 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
     /// </remarks>
     private (IReadOnlyList<ModelInfo> Models, IReadOnlyList<string> Providers, string? Current)? _lastCatalog;
 
+    /// <summary>最近一次的权限预设状态。</summary>
+    /// <remarks>
+    /// <b>同样要缓存</b>：<c>permission/listed</c> 在连接后立刻返回，
+    /// 而设置页是惰性构建的。不缓存的话，用户先看会话再点设置会看到空下拉。
+    /// </remarks>
+    private PermissionPresetState? _lastPermissionState;
+
     private readonly UiExtensionLoader _uiPlugins;
 
     /// <summary>
@@ -140,6 +147,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         var shell = new AppShell(_slots, _vm);
         Content = shell;
         Shell = shell;
+
 
         // 标题栏左侧内容注入 ArcWindow 的 TitleBar。
         // 必须在这里做：AppShell 构造时才 BuildTitlebar() 生成内容，
@@ -457,6 +465,16 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
             providerProtocol: Environment.GetEnvironmentVariable("DOUGONG_PROVIDER_PROTOCOL") ?? "openai",
             checkCount: ArchitectureCheckCount);
 
+        // 权限预设：缓存里有就补喂（与模型目录同样的时序问题——
+        // permission/listed 在连接后立刻返回，设置页可能之后才打开）。
+        if (_lastPermissionState is { } presets)
+            _settingsView.SetPermissionPresets(presets);
+
+        // 切预设 → 发命令。绑定在这里而不是构造期：设置页是惰性建的。
+        // **不在本地先改**：以引擎回的 permission/listed 为准，
+        // 否则"切换失败"会显示成"成功"。
+        _settingsView.PermissionPresetRequested += key => _ = SendPermissionSwitchAsync(key);
+
         return _settingsView;
     }
 
@@ -556,6 +574,33 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         {
             RequestId = Guid.NewGuid().ToString("N"),
         });
+
+        // 权限预设：和模型目录一样，连接后拉一次。
+        await _engine.SendAsync(new ListPermissionPresetsCommand
+        {
+            RequestId = Guid.NewGuid().ToString("N"),
+        });
+    }
+
+    /// <summary>把用户选的预设发给引擎。</summary>
+    /// <remarks>
+    /// <b>只发不猜</b>：引擎回 <c>permission/listed</c>（带当前真实状态），
+    /// 界面照它渲染。本地先改再等服务端确认，会把"切换失败"显示成"成功"。
+    /// </remarks>
+    private async Task SendPermissionSwitchAsync(string key)
+    {
+        try
+        {
+            await _engine.SendAsync(new SwitchPermissionPresetCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                Key = key,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 切换权限到 {key} 失败：{ex.Message}");
+        }
     }
 
     private void OnEngineEvent(ServerEvent evt)
@@ -571,6 +616,16 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
             case EngineStatusEvent status:
                 Console.Error.WriteLine($"[ui] 引擎：{status.State} · {status.Detail}");
                 Shell.StatusBar.SetEngineState(status.State, status.ModelName, status.Detail);
+                break;
+
+            case PermissionPresetListedEvent presets:
+                Console.Error.WriteLine(
+                    $"[ui] 权限预设：当前={presets.State.CurrentKey}，" +
+                    $"可选 {presets.State.Options.Count} 档" +
+                    (presets.Error is { Length: > 0 } ? $"（错误：{presets.Error}）" : ""));
+                _lastPermissionState = presets.State;
+                // 只有设置页建过才喂——它是惰性的
+                _settingsView?.SetPermissionPresets(presets.State);
                 break;
 
             case ModelsListedEvent listed:
