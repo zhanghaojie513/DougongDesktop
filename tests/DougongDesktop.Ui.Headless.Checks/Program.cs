@@ -44,6 +44,7 @@ public static class Program
         failures += Check("dock-mode-builds-split-tree", DockModeBuildsSplitTree);
         failures += Check("permission-picker-reflects-engine-state", PermissionPickerReflectsEngineState);
         failures += Check("engine-survives-bad-command", EngineSurvivesBadCommand);
+        failures += Check("subagent-registry-is-single-instance", SubagentRegistryIsSingleInstance);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -315,6 +316,55 @@ public static class Program
     /// 会漏掉每一行的标题与说明。
     /// 第一版就漏了，导致"插件 Id 没显示出来"的误报：实际渲染是好的。
     /// </remarks>
+    /// <summary>
+    /// 子 agent 注册表必须只有一份，且工具拿到的就是协议层看到的那份。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条守的是 SDK 侧明确的"唯一失败模式"</b>：建两份注册表——
+    /// 工具用一个、协议层用一个——会让 <c>subagent/list</c> 永远返回空，
+    /// 而额度照样在烧。用户看到"没有子 agent 在跑"，实际模型已经派了三个出去。
+    /// <para>
+    /// <b>怎么断言"同一份"</b>：静态检查不能证明引用相等，所以查两件事——
+    /// ①<see cref="SubagentProjection.CreateRegistry"/> 是唯一创建入口；
+    /// ②装配处传的是同一个字段 <c>_subagents</c>，不是就地 <c>new</c>。
+    /// 真正的引用相等由端到端验证（`subagent/list` 能看到真在跑的那个）。
+    /// </para>
+    /// </remarks>
+    private static string? SubagentRegistryIsSingleInstance()
+    {
+        var root = FindRepoRoot();
+
+        // ① 只允许通过投影层创建
+        var srcDir = Path.Combine(root, "src");
+        var badNews = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+
+            var text = File.ReadAllText(file);
+            if (text.Contains("new SubagentRegistry(", StringComparison.Ordinal)
+                && !file.EndsWith("SubagentProjection.cs", StringComparison.Ordinal))
+            {
+                badNews.Add(Path.GetFileName(file));
+            }
+        }
+
+        if (badNews.Count > 0)
+            return $"这些文件直接 new SubagentRegistry：{string.Join(", ", badNews)}。"
+                   + "只应经 SubagentProjection.CreateRegistry 创建，否则容易建出第二份";
+
+        // ② 装配处传的是字段而不是就地 new
+        var ipc = Path.Combine(root, "src", "DougongDesktop.AgentHost", "IpcServer.cs");
+        if (!File.Exists(ipc)) return $"找不到 {ipc}";
+
+        var ipcSrc = File.ReadAllText(ipc);
+        if (!ipcSrc.Contains("_subagents,", StringComparison.Ordinal))
+            return "CreateAsync 没有传 _subagents 字段：协议层与工具会用不同的注册表";
+
+        return null;
+    }
+
     /// <summary>
     /// 权限下拉必须反映引擎回报的状态，且切换时发出请求。
     /// </summary>

@@ -259,7 +259,13 @@ public static class Program
         // 那会让 AgentHost 从"只认 Ipc + Framework"变成认识 SDK 类型，
         // 与 SessionRuntime / EngineOptions 的既有分层相反。
         // 放在 Framework 的额外好处：能被检查工程断言（它只引用 Framework）。
-        const int budget = 7;
+        // 2026-11-10 从 7 调到 8：新增 SubagentProjection.cs（C8）。
+        // 复审结论：**该引用**，理由与 PermissionProjection 相同——
+        // 把"子 agent 的 SDK 形状 → 协议形状"收在 Framework，
+        // 否则 AgentHost 要直接引用 SDK 包，破坏既有的两层分层。
+        // 状态映射复用了 SDK 的 ProtocolMapping（"已结束但无结果算取消还是完成"
+        // 是一条只该有一份的判断），这一点也只能在引用 SDK 的层做。
+        const int budget = 8;
 
         var violations = new List<string>();
 

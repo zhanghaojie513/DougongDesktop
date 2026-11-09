@@ -48,12 +48,12 @@
 |---|---|---|---|---|---|---|---|
 | P8a 布局骨架 | 10 | 0 | 1 | 1 | 1 | 13 | **91%** |
 | P8b 会话与输入 | 5 | 0 | 0 | 0 | 1 | 6 | **100%** |
-| P8c 设置域 | 3 | 2 | 1 | 1 | 1 | 8 | **83%** |
+| P8c 设置域 | 3 | 3 | 0 | 1 | 1 | 8 | **100%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **25%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **40%** |
 | **P8g 中区会话域** | **11** | **1** | **5** | **0** | **6** | **23** | **71%** |
-| **合计** | **31** | **5** | **23** | **2** | **9** | **70** | **62%** |
+| **合计** | **31** | **6** | **22** | **2** | **9** | **70** | **63%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -151,7 +151,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | C5 | ✅ | 权限预设 | `[Arc]` | **全链路通**：设置页下拉 → `permission/switch` → 引擎 `SwitchAsync` → 审批链按新档位裁决。预设单实例注入 `PermissionPolicyApprover(PresetApprover(inner, presets))` | ①单元：interactive 问 1 次 → unattended 问 0 次；②端到端：起真引擎往返，`interactive→unattended→interactive` 三态都对；③无头检查 `permission-picker-reflects-engine-state` 守回填与回环 |
 | C6 | ⏳ | Agent preset | `[—]` | **等契约**：`AgentPreset` 在 `Dougong.HostProtocol` 里 **0 处** | 等 SDK 暴露契约 |
 | C7 | ➖ | Agent 循环设置（并行工具上限） | `[—]` | **决定不做**：`ToolConcurrency` 只有两级（串行 / 工作区独占），并发由 `ToolExecutionPlan` 的 `Reads`/`Writes` 资源键自动仲裁，**没有用户可调的并行数**。放一个调了不生效的滑块不如不放 | — |
-| C8 | ⬜ | 子智能体 | `[Arc]` | **契约已到位**（SDK 0.1.19）：`subagent/list` / `subagent/result` / `subagent/cancel` + `subagent/listed` / `subagent/updated` 事件（Started 与 Completed 都推，用 `State` 区分，中间过程不推）。待做界面接线 | 契约实测；`SubagentUpdatedEvent.RequestId` 为 null |
+| C8 | 🟡 | 子智能体 | `[Arc]` | **引擎侧已接**：三条命令实现，`_subagents` 单实例传给工具与协议层；`Started`/`Completed` 都推 `subagent/updated`（RequestId=null，锁内异步投递）。**界面未做** | 端到端验证了三条命令的**错误路径**（不存在的 id 正确报错）。**正常路径未验证**：`SubagentHandle` 没有公开构造函数，句柄只能由引擎真正派发时创建，而本机没有 provider 配置。不能标 ✅ |
 
 ### P8d 会话增强
 
@@ -355,3 +355,5 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-10 | **向 SDK 侧报错自己是错的：字段命名**。我曾报 `Key`/`Enabled` 是 PascalCase 而 `sessionId` 是 camelCase。复核发现**是我的探针写错了**——那次用了默认 `JsonSerializerOptions`，没传 `HostProtocolContract.Json`。用对配置后全是 camelCase。教训已写进 `DesktopProtocol.DescribeWireFormat` 的注释：**凡验证线上格式，必须用生产同一份序列化配置** |
 | 2026-11-10 | **发现并修复一个能让引擎整个退出的生产缺陷**。`HandleAsync` 反序列化只捕获 `JsonException`，但缺多态判别器时 SDK 抛的是 **`NotSupportedException`**——结果一条客户端发错的命令就让引擎进程退出，之后所有客户端都连不上。实测踩到（探针按具体类型序列化，不带 `method`）。已改为两种异常都捕，回错误事件而不是崩。新增检查 `engine-survives-bad-command` 钉住。**这类"一个客户端写错放大成所有人用不了"的缺陷，比功能缺失严重得多** |
 | 2026-11-10 | **C5 界面完成**：设置页权限分区从静态说明改成真下拉。切预设只发请求、**不在本地先改**——以引擎回的 `permission/listed` 为准，否则"切换失败"会显示成"成功"。回填时用 `_updatingPresets` 挡住 `SelectionChanged` 回环（不挡会无限往返），这条也有检查覆盖 |
+| 2026-11-10 | **C8 引擎侧接通**（三条命令 + 推送），但**没标 ✅**。原因：`SubagentHandle` 无公开构造，句柄只能由引擎真正派发子 agent 时创建，而本机无 provider 配置——`subagent/list` 只能验到空列表与错误路径。空列表证明不了链路通，这与 `ToolCall 0 张` 是同一个陷阱。已实现部分：`_subagents` 单实例（检查 `subagent-registry-is-single-instance` 守住"不许就地 new"）、三条命令、`Started`/`Completed` 双事件推送（RequestId=null，锁内异步投递避免死锁） |
+| 2026-11-10 | **SDK 引用预算 7 → 8**：新增 `SubagentProjection.cs`。复审结论：该引用——把子 agent 的 SDK 形状→协议形状收在 Framework，否则 AgentHost 要直接引用 SDK。状态映射复用 SDK 的 `ProtocolMapping`（"已结束但无结果算取消还是完成"只该有一份判断） |

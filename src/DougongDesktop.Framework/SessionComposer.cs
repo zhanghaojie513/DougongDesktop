@@ -354,6 +354,11 @@ public sealed class SessionComposer : IDisposable
     /// 这是 UI 与框架解耦的关键点。
     /// </param>
     /// <param name="emitEngineEvent">引擎级事件出口（不含会话事件）。</param>
+    /// <param name="subagents">
+    /// 子 agent 注册表。**必须与协议层共用同一个实例**——
+    /// 建两份会让 <c>subagent/list</c> 永远返回空而额度照样在烧，
+    /// 那是 SDK 侧明确的"唯一失败模式"。
+    /// </param>
     public async Task<SessionRuntime> CreateAsync(
         string sessionId,
         string title,
@@ -363,6 +368,7 @@ public sealed class SessionComposer : IDisposable
         Func<long> nextSequence,
         int contextWindowTokens,
         int requestOutputReserve,
+        SubagentRegistry subagents,
         CancellationToken cancellationToken = default)
     {
         // 未配置时在建会话这一步失败，而不是在构造时抛——
@@ -414,7 +420,11 @@ public sealed class SessionComposer : IDisposable
                     approver: resolvedApprover,
                     workspace: workspace);
 
-                RegisterBuiltInTools(dispatcher, workspace, resolvedStore);
+                // 子 agent 工具在这里注册，但运行时工厂要用到 createRuntime
+                // 才有的 dispatcherAccessor——用闭包捕获，稍后由 factory 取用。
+                // dispatcher 是同一个对象，不需要等。
+                RegisterBuiltInTools(
+                    dispatcher, workspace, resolvedStore, subagents, sessionId);
                 return Task.FromResult<IToolDispatcher>(dispatcher);
             },
             createRuntime: (dispatcherAccessor, resolvedStore) =>
@@ -497,12 +507,36 @@ public sealed class SessionComposer : IDisposable
     /// （SDK 的 host-layering-decision.md 明确说不进 SDK），
     /// 要等桌面端真正需要时再加，而不是先塞满。
     /// </remarks>
+    /// <summary>
+    /// 注册内置工具。
+    /// </summary>
+    /// <param name="registry">
+    /// 子 agent 注册表。**必须与协议层用的是同一个实例**——
+    /// 传 null 就不注册子 agent 工具（协议层会看到空列表）。
+    /// </param>
+    /// <remarks>
+    /// <b>为什么 registry 要从外面传进来而不是在这里 new</b>：
+    /// SDK 侧明确指出"建两份"是唯一失败模式——工具用一个、协议层用一个，
+    /// <c>subagent/list</c> 就永远返回空，而额度照样在烧。
+    /// 所以本方法的职责只是"把它交给工具"，不是"创建它"。
+    /// </remarks>
     private static void RegisterBuiltInTools(
-        IToolDispatcher dispatcher, string workspace, IStoreAccessor? store)
+        IToolDispatcher dispatcher,
+        string workspace,
+        IStoreAccessor? store,
+        SubagentRegistry registry,
+        string sessionId)
     {
         dispatcher.Register(new ReadFileTool(workspace));
         dispatcher.Register(new ListDirectoryTool(workspace));
         dispatcher.Register(PlanTools.Create());
+
+        // 子 agent 的**列/取结果**两个工具：只读注册表，不需要运行时工厂。
+        // 派发工具（SubagentTool）需要构造独立的子运行时，而那个能力
+        // （dispatcherAccessor）只在 createRuntime 里拿得到；
+        // 所以它在 SessionComposer.CreateAsync 里另行注册。
+        dispatcher.Register(new SubagentListTool(registry));
+        dispatcher.Register(new SubagentResultTool(registry));
     }
 
     public void Dispose() => _client?.Dispose();

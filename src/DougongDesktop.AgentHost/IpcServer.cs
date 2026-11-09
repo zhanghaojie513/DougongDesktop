@@ -58,6 +58,14 @@ public sealed class IpcServer : IAsyncDisposable
 
         // 从环境变量读初始档位；读不到用交互式（最安全的那档）。
         _presets = PermissionProjection.CreatePresets(ResolveInitialPolicy());
+
+        // 子 agent 生命周期推送：Started + Completed 都推 subagent/updated，
+        // 中间的工具轮数变化不推（那是过程，不该漏回主侧）。
+        //
+        // **回调在注册表的锁内执行，不能同步等待注册表**（SDK 明确警告会死锁）。
+        // 所以这里只做一件事：把推送异步投递出去。
+        _subagents.Started += handle => PushSubagentUpdate(handle);
+        _subagents.Completed += handle => PushSubagentUpdate(handle);
     }
 
     /// <summary>按环境变量决定初始权限档位。</summary>
@@ -244,6 +252,28 @@ public sealed class IpcServer : IAsyncDisposable
 
                 case SwitchPermissionPresetCommand sw:
                     await SwitchPermissionAsync(sw, connection, cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
+
+                case ListSubagentsCommand listAgents:
+                    await connection.SendAsync(new SubagentsListedEvent
+                    {
+                        Sequence = NextStatusSequence(),
+                        RequestId = listAgents.RequestId,
+                        SessionId = listAgents.SessionId,
+                        // 直接读注册表的当前快照。它与工具用的是**同一个实例**，
+                        // 所以这里看到的就是引擎实际在跑的那些。
+                        Agents = [.. _subagents.Active().Select(SubagentProjection.ToProtocol)],
+                    }, cancellationToken).ConfigureAwait(false);
+                    break;
+
+                case TakeSubagentResultCommand takeResult:
+                    await TakeSubagentResultAsync(takeResult, connection, cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
+
+                case CancelSubagentCommand cancelAgent:
+                    await CancelSubagentAsync(cancelAgent, connection, cancellationToken)
                         .ConfigureAwait(false);
                     break;
 
@@ -568,6 +598,9 @@ public sealed class IpcServer : IAsyncDisposable
             NextStatusSequence,
             _options.ContextWindowTokens,
             _options.MaxOutputTokens,
+            // **同一个实例**：工具用它登记，协议层也用它查询。
+            // 传两份会让 subagent/list 永远空而额度照样在烧。
+            _subagents,
             cancellationToken).ConfigureAwait(false);
 
         created = runtime;
@@ -752,6 +785,124 @@ public sealed class IpcServer : IAsyncDisposable
     }
 
     /// <summary>
+    /// <summary>
+    /// 推送一条子 agent 状态变化。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须异步投递</b>：本方法由注册表在**锁内**调用，
+    /// 里面同步等待注册表的任何方法都会死锁。所以写成即发即忘，
+    /// 且自己吞掉异常——推送失败不该影响引擎主流程。
+    /// <para>
+    /// <b>没有连接就丢弃</b>：单窗口模型下客户端断开后不会有新的观察者，
+    /// 攒着再补发没有意义（重新连上时用 <c>subagent/list</c> 拉全量）。
+    /// </para>
+    /// </remarks>
+    private void PushSubagentUpdate(SubagentHandle handle)
+    {
+        var connection = _client;
+        if (connection is null) return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await connection.SendAsync(new SubagentUpdatedEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    // **推送类事件的 RequestId 必须是 null**（SDK 契约）：
+                    // 填一个"最近一次请求"的 id 会让客户端配对到错误的命令。
+                    RequestId = null,
+                    SessionId = handle.ParentTurnId ?? string.Empty,
+                    Agent = SubagentProjection.ToProtocol(handle),
+                }, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"[host] 推送子 agent 状态失败（{handle.Id}）：{ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>取一个子 agent 的结果。</summary>
+    /// <remarks>
+    /// <b>取走即注销</b>：调用 <c>UnregisterAsync</c> 后该子 agent 不再出现在列表里。
+    /// 这是 SDK 的语义（结果只能取一次），不是我们加的规则——
+    /// 允许重复取会让内存里一直留着已结束的结果。
+    /// </remarks>
+    private async Task TakeSubagentResultAsync(
+        TakeSubagentResultCommand cmd, IpcConnection connection, CancellationToken ct)
+    {
+        var handle = cmd.SubagentId is { Length: > 0 } id ? _subagents.Find(id) : null;
+        if (handle?.Result is not { } result)
+        {
+            var reason = handle is null
+                ? $"没有这个子 agent：{cmd.SubagentId}"
+                : "该子 agent 还没有结果（仍在运行，或已被取走）。";
+            Console.Error.WriteLine($"[host] subagent/result 未命中：{reason}");
+            await connection.SendAsync(new SubagentsListedEvent
+            {
+                Sequence = NextStatusSequence(),
+                RequestId = cmd.RequestId,
+                SessionId = cmd.SessionId,
+                Agents = [.. _subagents.Active().Select(SubagentProjection.ToProtocol)],
+                Error = reason,
+            }, ct).ConfigureAwait(false);
+            return;
+        }
+
+        await connection.SendAsync(new SubagentsListedEvent
+        {
+            Sequence = NextStatusSequence(),
+            RequestId = cmd.RequestId,
+            SessionId = cmd.SessionId,
+            Agents = [.. _subagents.Active().Select(SubagentProjection.ToProtocol)],
+            Outcome = SubagentProjection.ToProtocol(result),
+        }, ct).ConfigureAwait(false);
+
+        await _subagents.UnregisterAsync(result.Id, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>取消一个子 agent。</summary>
+    /// <remarks>
+    /// <b>取消是"请求"不是"立即生效"</b>：置位的是句柄的取消令牌，
+    /// 子 agent 在自己的下一个检查点退出。所以这里如实回报当前状态，
+    /// 不假装它已经停了。
+    /// </remarks>
+    private async Task CancelSubagentAsync(
+        CancelSubagentCommand cmd, IpcConnection connection, CancellationToken ct)
+    {
+        var handle = cmd.SubagentId is { Length: > 0 } id ? _subagents.Find(id) : null;
+        if (handle is null)
+        {
+            Console.Error.WriteLine($"[host] subagent/cancel 未命中：{cmd.SubagentId}");
+            await connection.SendAsync(new SubagentsListedEvent
+            {
+                Sequence = NextStatusSequence(),
+                RequestId = cmd.RequestId,
+                SessionId = cmd.SessionId,
+                Agents = [.. _subagents.Active().Select(SubagentProjection.ToProtocol)],
+                Error = $"没有这个子 agent：{cmd.SubagentId}",
+            }, ct).ConfigureAwait(false);
+            return;
+        }
+
+        Console.Error.WriteLine(
+            $"[host] 请求取消子 agent {cmd.SubagentId}" +
+            (cmd.Reason is { Length: > 0 } ? $"（{cmd.Reason}）" : ""));
+
+        // 触发取消。句柄会在下一个检查点退出，之后经 Completed 事件回流。
+        handle.Cancel();
+
+        await connection.SendAsync(new SubagentsListedEvent
+        {
+            Sequence = NextStatusSequence(),
+            RequestId = cmd.RequestId,
+            SessionId = cmd.SessionId,
+            Agents = [.. _subagents.Active().Select(SubagentProjection.ToProtocol)],
+        }, ct).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// 切换权限预设。
     /// </summary>
