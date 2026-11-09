@@ -38,8 +38,9 @@ internal static class Program
             .UseArc(arc => arc
                 .UseArcControls()    // 基础控件、主题、令牌（0.3.2 入口，不再是 UseAtomUI）
                 .UseArcSpecial()     // agent 组件：ToolCall/AgentStatus/AgentPlan/ContextWindow
-                .UseArcBlocks())     // Blocks：Sidebar 等复合控件。漏了它 Sidebar 会
+                .UseArcBlocks()      // Blocks：Sidebar 等复合控件。漏了它 Sidebar 会
                                      // 有尺寸但没有视觉子节点（ControlTheme 没应用）——实测踩过
+                .UseArcDock())       // Dock：右栏分裂标签树（P8e E4）。漏了它 DockLayout 没模板，窗口直接空白
             // Spyglass：Avalonia 的 out-of-process 调试器（视觉树/样式级联/绑定/性能）。
             //
             // **只在 Debug 构建里挂**：生产包里不该带调试探针——

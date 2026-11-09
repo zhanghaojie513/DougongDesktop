@@ -50,10 +50,10 @@
 | P8b 会话与输入 | 5 | 0 | 0 | 0 | 1 | 6 | **100%** |
 | P8c 设置域 | 2 | 2 | 0 | 3 | 1 | 8 | **100%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
-| P8e 插件体系 | 1 | 0 | 7 | 0 | 0 | 8 | 13% |
+| P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **25%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **40%** |
 | **P8g 中区会话域** | **11** | **1** | **5** | **0** | **6** | **23** | **71%** |
-| **合计** | **30** | **4** | **23** | **4** | **9** | **70** | **60%** |
+| **合计** | **30** | **5** | **22** | **4** | **9** | **70** | **61%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -176,7 +176,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | E1 | ⬜ | 插件管理页 | `[自有]` | 组合包、行、配置 | 待做 |
 | E2 | ⬜ | 插件市场 | `[自有]` | 索引搜索 + 安装 | 待做 |
 | E3 | ⬜ | NuGet 安装器 | `[自有]` | **SDK 明确不做**：flat container 拉 `.nupkg` → 解包 → `LoadFromDirectoryAsync` | 待做 |
-| E4 | ⬜ | dockkit 分裂标签树 | `[Arc]` | 画布用 `WorkflowCanvas`，分裂树自建 | 待做 |
+| E4 | 🟡 | dockkit 分裂标签树 | `[Arc]` | **用 `TKCode.Arc.Dock`**（1.0.0 才有）：`DockLayout` + 5 个 `DockPane`（4 tool + 1 document），支持拖拽分裂、浮动窗口、自动隐藏、布局序列化 | `DOUGONG_UI_DOCK=1` 启用；无头检查 `dock-mode-builds-split-tree` 断言根=`DockSplit`、5 pane 齐全。**默认未开**——Dock 改变了整条交互路径，要先做视觉验收再切默认 |
 | E5 | ⬜ | 右栏停靠面 + tab 注册表 | `[Arc]` | `AiSidePanel` / `AiPanelColumn` | 待做 |
 | E6 | ✅ | 右侧文件树 | `[自有]` | `fs/list` + `RightDock` 文件 tab；**可进入子目录，面包屑可回退** | 运行时「目录 ''：18 项」→ 进 `src/` 「5 项」；`fs-list-*` 3 条检查 + `dock-directory-nav-is-two-way` |
 | E7 | ⬜ | 文档预览 | `[自有]` | Markdown/代码/图片/PDF/Office | 待做 |
@@ -347,3 +347,5 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-09 | **Arc 升 `0.4.0-preview.1` → `1.0.0`**（正式版）。按元数据逐类型比对：四个包**删除 0 个**，Arc +87 / Special +179 / Blocks +142，纯增量。91 条检查全过，界面逐像素一致，Avalonia 仍锁 `[12.1.4]`。**升级前先验了终端**：同一份 7 行复现仍抛 `NullReferenceException`——1.0.0 没修，F1 继续卡着。盘点见 `docs/arc-1.0-inventory.md` |
 | 2026-11-09 | **标题栏换成 Arc 的 `ArcWindow` + `TitleBar`**（1.0.0 新提供）。先建最小探针窗口验证 macOS 交通灯让位真的由组件处理（截图确认左侧内容距交通灯约 24px，未被压住），再改产品代码。**删掉**：`Columns.MacTrafficLightInset = 80`（截图估的魔数）、`IsMacOS()` 平台分支、`BuildWindowButtons()` + `TitleButton()` 约 100 行死代码、根布局的标题栏行。**踩坑**：第一次改完两套标题栏叠加（`ArcWindow` 一条 + `AppShell` 一条），源码看不出，是运行时「标题栏按钮 7 个」暴露的。新增无头检查 `titlebar-uses-arc-slots` 守这个；检查总数 91 → **92** |
 | 2026-11-09 | **`titlebar-branches-for-macos` 的判据换了，并修掉一处反证失效**。旧判据断言"存在 IsMacOS 分支 + BuildWindowButtons + MacTrafficLightInset"，换 `ArcWindow` 后这些**都该消失**，旧判据会因正确改动而失败。改为断言"继承 ArcWindow + 走 TitleBar.LeftContent + 无自绘按钮痕迹"。**关键**：改完先验反证，发现注入后仍 PASS——因为注入用的 `Replace("private Control BuildWindowButtons()")` 在方法删掉后什么也没做。改成直接给源码追加违规内容才正确变红。**不验反证的检查等于没有检查** |
+| 2026-11-09 | **P8e E4 接上 `TKCode.Arc.Dock`**。用 `DockLayout` + 5 个 `DockPane`（文件/改动/计划/上下文 走 ToolsSource，终端 走 DocumentsSource——工具与文档是 Dock 的固有区分）。运行时实测 `pane 5 个，根=DockSplit`，无头与真实 GUI 都确认了。**用 `DOUGONG_UI_DOCK=1` 开关而非直接切默认**：Dock 多出拖拽区、关闭按钮、浮动窗口，整条交互路径变了，要先做视觉验收。顺带修了一条误导诊断：Dock 模式下没有 `TabItem`，旧诊断照报「tab 0 个（期望 5）」的假警报 |
+| 2026-11-09 | **`Button` 命名冲突**：`using TKCode.Arc;` 后它与 `Avalonia.Controls.Button` 冲突，编译报 CS0104。这正是 llms.txt 警告的那条（"Always write the arc: prefix... otherwise names shared with Avalonia such as Button resolve to Avalonia's own controls"）。已在 RightDock 里加 `using ArcButton = TKCode.Arc.Button;` 别名，并把两处原生按钮显式写成 `Avalonia.Controls.Button` |

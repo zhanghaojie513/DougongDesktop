@@ -114,6 +114,16 @@ Avalonia 仍精确锁 `[12.1.4]`，无需调整。
 **这正好是 P8e 的 E4「dockkit 分裂标签树」。** 进度表原来写的是
 "画布用 `WorkflowCanvas`，分裂树自建"——现在分裂树也有成品了。
 
+**已接入（2026-11-09）**：右栏 5 个面板改成 `DockPane`
+（文件/改动/计划/上下文走 `ToolsSource`，终端走 `DocumentsSource`）。
+运行时实测 `pane 5 个，根=DockSplit`，无头与真实 GUI 都确认。
+用 `DOUGONG_UI_DOCK=1` 开关控制，**默认仍走平铺 `Tabs`**——
+Dock 多出拖拽区、关闭按钮、浮动窗口，交互路径变了，要先做视觉验收再切默认。
+
+踩到一个 `Button` 命名冲突：`using TKCode.Arc;` 之后与
+`Avalonia.Controls.Button` 撞车（CS0104），正是 llms.txt 警告的那条。
+已用 `using ArcButton = TKCode.Arc.Button;` 别名解决。
+
 ### 4.3 `PageViewer` + `IPageSource`（Arc 主包）
 
 缩放、平移、翻页；`IPageSource` 支持按需渲染页面；只画可见页

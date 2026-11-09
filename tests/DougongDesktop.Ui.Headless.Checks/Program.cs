@@ -41,6 +41,7 @@ public static class Program
         failures += Check("settings-plugins-lists-loaded-only", PluginsListLoadedOnly);
         failures += Check("terminal-panel-reports-unavailable", TerminalPanelReportsUnavailable);
         failures += Check("titlebar-uses-arc-slots", TitlebarUsesArcSlots);
+        failures += Check("dock-mode-builds-split-tree", DockModeBuildsSplitTree);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -312,6 +313,58 @@ public static class Program
     /// 会漏掉每一行的标题与说明。
     /// 第一版就漏了，导致"插件 Id 没显示出来"的误报：实际渲染是好的。
     /// </remarks>
+    /// <summary>
+    /// <c>DOUGONG_UI_DOCK=1</c> 时右栏必须用 DockLayout，且布局树建出来了（P8e E4）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么这条要存在</b>：Dock 模式是"接了但默认不开"，最容易被忽略的
+    /// 状态——它不出现在默认界面上，坏了也没人会发现。
+    /// <para>
+    /// 断言：走的是 <c>DockLayout</c>（不是 <c>Tabs</c>）、五个 pane 都在、
+    /// 根节点是分裂或分组结构。
+    /// </para>
+    /// <para>
+    /// <b>为什么在无头里测</b>：这台机器 GUI 时好时坏（CVDisplayLink -6661），
+    /// 而 DockLayout 在无头下能完整建出布局树，不需要真实窗口。
+    /// </para>
+    /// </remarks>
+    private static string? DockModeBuildsSplitTree()
+    {
+        var old = Environment.GetEnvironmentVariable("DOUGONG_UI_DOCK");
+        Environment.SetEnvironmentVariable("DOUGONG_UI_DOCK", "1");
+
+        try
+        {
+            var dock = new DougongDesktop.App.Shell.RightDock();
+
+            if (dock.DockPanes is null)
+                return "DOUGONG_UI_DOCK=1 时没有走 Dock 模式（Content 仍是 Tabs）";
+
+            if (dock.DockPanes.Count != 5)
+                return $"Dock pane 只有 {dock.DockPanes.Count} 个（期望 5）";
+
+            foreach (var key in new[] { "files", "changes", "plan", "context", "terminal" })
+                if (!dock.DockPanes.ContainsKey(key))
+                    return $"缺少 pane「{key}」";
+
+            if (dock.Content is not TKCode.Arc.DockLayout layout)
+                return "Content 不是 DockLayout";
+
+            var rootName = layout.Root?.GetType().Name;
+            if (rootName is null)
+                return "DockLayout.Root 为 null：布局树没建出来";
+            if (rootName is not ("DockSplit" or "DockGroup"))
+                return $"布局根是 {rootName}（期望 DockSplit 或 DockGroup）";
+
+            Console.WriteLine($"      Dock 根={rootName}，panes={dock.DockPanes.Count}");
+            return null;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOUGONG_UI_DOCK", old);
+        }
+    }
+
     /// <summary>
     /// 标题栏必须是 ArcWindow 的 TitleBar，且左侧内容真的注进去了。
     /// </summary>

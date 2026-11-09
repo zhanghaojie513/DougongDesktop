@@ -4,6 +4,11 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using DougongDesktop.Ipc;
 using DougongDesktop.Ui.Core;
+using TKCode.Arc;
+// **必须起别名**：Arc 与 Avalonia 都有 Button。llms.txt 明确要求
+// "Always write the arc: prefix. Otherwise names shared with Avalonia
+// such as Button resolve to Avalonia's own controls."
+using ArcButton = TKCode.Arc.Button;
 
 namespace DougongDesktop.App.Shell;
 
@@ -80,9 +85,79 @@ public sealed class RightDock : UserControl
 
     public RightDock()
     {
-        BuildTabs();
-        Content = _tabs;
+        // 两种承载方式：
+        //  - 默认 `Tabs`：五个平铺 tab，与之前完全一致。
+        //  - `DOUGONG_UI_DOCK=1` 时换 Arc 的 `DockLayout`：支持把 tab 拖出来
+        //    分裂成第二组、浮动成独立窗口、自动隐藏到边缘。
+        //
+        // **为什么默认不开**：Dock 改变了整条交互路径（多出拖拽区、关闭按钮、
+        // 浮动窗口），得先有真实的视觉验收再切默认。这一轮先把能力接上并验证，
+        // 切换与否是下一步的事——与当初 `ArcWindow` 先探针后改产品同一套做法。
+        if (Environment.GetEnvironmentVariable("DOUGONG_UI_DOCK") is "1")
+        {
+            BuildDock();
+            Content = _dock;
+        }
+        else
+        {
+            BuildTabs();
+            Content = _tabs;
+        }
+
         ShowTab(Keys.Files);
+    }
+
+    /// <summary>Dock 模式下的布局（仅 <c>DOUGONG_UI_DOCK=1</c> 时非空）。</summary>
+    private DockLayout? _dock;
+
+    /// <summary>Dock 模式下的 pane（诊断用）。</summary>
+    public IReadOnlyDictionary<string, DockPane>? DockPanes => _dockPanes;
+
+    private readonly Dictionary<string, DockPane> _dockPanes = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 用 Arc 的 <see cref="DockLayout"/> 承载同一批 tab（P8e E4）。
+    /// </summary>
+    /// <remarks>
+    /// <b>它比 <c>Tabs</c> 多什么</b>：标签可以拖出来分裂成第二组、浮动成独立
+    /// 窗口、自动隐藏到边缘，布局还能序列化保存。这正是 dsh 的 ui-dockkit 形态，
+    /// 也是进度表 E4 写的"分裂标签树"。
+    /// <para>
+    /// <b>工具 pane 与文档 pane 分开</b>：`ToolsSource` 是左右两侧的工具面板
+    /// （文件/改动/计划/上下文），`DocumentsSource` 是中间的主文档区（终端）。
+    /// 这个区分是 Dock 的固有语义，不是我们的选择。
+    /// </para>
+    /// </remarks>
+    private void BuildDock()
+    {
+        _dock = new DockLayout();
+
+        var tools = new List<object>();
+        var docs = new List<object>();
+
+        foreach (var (key, label, implemented, isDocument) in new[]
+        {
+            (Keys.Files, "文件", true, false),
+            (Keys.Changes, "改动", true, false),
+            (Keys.Plan, "计划", true, false),
+            (Keys.Context, "上下文（未实现）", false, false),
+            (Keys.Terminal, "终端", true, true),
+        })
+        {
+            var pane = new DockPane
+            {
+                Id = key,
+                Title = label,
+                CanClose = false,   // 这些是我们的常驻面板，关掉就没入口了
+                CanFloat = true,
+            };
+
+            _dockPanes[key] = pane;
+            (isDocument ? docs : tools).Add(pane);
+        }
+
+        _dock.ToolsSource = tools;
+        _dock.DocumentsSource = docs;
     }
 
     /// <summary>
@@ -165,15 +240,24 @@ public sealed class RightDock : UserControl
         return _terminal;
     }
 
-    /// <summary>切换 tab 并加载内容。</summary>
+    /// <summary>切换 tab 并加载内容（两种承载方式都支持）。</summary>
     public void ShowTab(string key)
     {
         ActiveTab = key;
 
-        if (_tabItems.TryGetValue(key, out var item))
+        if (_dockPanes.TryGetValue(key, out var pane))
+            pane.Content = BuildBody(key);
+        else if (_tabItems.TryGetValue(key, out var item))
             item.Content = BuildBody(key);
 
         TabChanged?.Invoke(key);
+    }
+
+    /// <summary>把内容塞给某个 tab——两种承载方式都认。</summary>
+    private void SetTabContent(string key, Control content)
+    {
+        if (_dockPanes.TryGetValue(key, out var pane)) pane.Content = content;
+        else if (_tabItems.TryGetValue(key, out var item)) item.Content = content;
     }
 
     private Control BuildBody(string key) => key switch
@@ -193,8 +277,7 @@ public sealed class RightDock : UserControl
         if (listed.Error is not { Length: > 0 })
             CurrentDirectory = listed.Path ?? string.Empty;
 
-        if (_tabItems.TryGetValue(Keys.Files, out var item))
-            item.Content = BuildFilesTab(listed);
+        SetTabContent(Keys.Files, BuildFilesTab(listed));
     }
 
     /// <summary>把最新的计划填进计划 tab。</summary>
@@ -253,7 +336,7 @@ public sealed class RightDock : UserControl
             // 这一点之前做错了：目录只是不可点的文字，
             // 于是 "@" 引用只能看到根目录那一层，用户引用不了
             // src/App/Shell/X.cs 这种深层文件——功能等于半残。
-            var button = new Button
+            var button = new Avalonia.Controls.Button
             {
                 Content = label,
                 Padding = new Thickness(4, 2),
@@ -334,7 +417,7 @@ public sealed class RightDock : UserControl
     {
         var isCurrent = path == CurrentDirectory;
 
-        var button = new Button
+        var button = new Avalonia.Controls.Button
         {
             Content = new TextBlock
             {

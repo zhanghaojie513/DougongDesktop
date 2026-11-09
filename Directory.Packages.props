@@ -18,6 +18,8 @@
     <PackageVersion Include="TKCode.Arc.Terminal" Version="1.0.0" />
     <PackageVersion Include="TKCode.Arc.Workflow" Version="1.0.0" />
     <PackageVersion Include="TKCode.Arc.Icons.Lucide" Version="1.0.0" />
+    <!-- Dock：IDE 式停靠布局（分裂标签树）。P8e E4 用它，不再自建。 -->
+    <PackageVersion Include="TKCode.Arc.Dock" Version="1.0.0" />
 
     <!-- Spyglass：Avalonia 的 out-of-process 调试器（视觉树/样式/绑定/性能）。
          只给 Debug 构建用：生产包里不该带调试探针。

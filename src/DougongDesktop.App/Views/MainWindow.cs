@@ -1371,11 +1371,25 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
 
         // 右栏 dock（P7）：面板展开不够，要看到 tab 数与内容真的建出来了。
         // P3a 踩过"尺寸全对但里面是空的"，右栏同样可能重演。
-        var tabs = _rightDock.GetVisualDescendants().OfType<TKCode.Arc.TabItem>().ToArray();
-        Console.Error.WriteLine(
-            $"[shell] RightDock tab {tabs.Length} 个（期望 5），" +
-            $"可用 {tabs.Count(t => t.IsEnabled)}，当前={_rightDock.ActiveTab}，" +
-            $"内容={(tabs.FirstOrDefault(t => t.IsSelected)?.Content is null ? "**空**" : "有")}");
+        //
+        // **两种承载方式要分开报**：Dock 模式下根本没有 `TabItem`，
+        // 照旧报"tab 0 个（期望 5）"会把人引向错误结论——第一次跑
+        // DOUGONG_UI_DOCK=1 就出现了这条假警报。
+        if (_rightDock.DockPanes is { } panes)
+        {
+            var dockRoot = (_rightDock.Content as DockLayout)?.Root?.GetType().Name ?? "(null)";
+            Console.Error.WriteLine(
+                $"[shell] RightDock Dock 模式：pane {panes.Count} 个，" +
+                $"根={dockRoot}，当前={_rightDock.ActiveTab}");
+        }
+        else
+        {
+            var tabs = _rightDock.GetVisualDescendants().OfType<TKCode.Arc.TabItem>().ToArray();
+            Console.Error.WriteLine(
+                $"[shell] RightDock tab {tabs.Length} 个（期望 5），" +
+                $"可用 {tabs.Count(t => t.IsEnabled)}，当前={_rightDock.ActiveTab}，" +
+                $"内容={(tabs.FirstOrDefault(t => t.IsSelected)?.Content is null ? "**空**" : "有")}");
+        }
 
         // 审批卡片（P6）：卡片在、尺寸非零、按钮数量正确。
         // 审批坏了的表现是"回合静默卡住"，用户完全看不出是卡片没渲染。
