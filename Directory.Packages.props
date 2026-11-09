@@ -9,15 +9,15 @@
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.4" />
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.4" />
 
-    <PackageVersion Include="TKCode.Arc" Version="0.4.0-preview.1" />
-    <PackageVersion Include="TKCode.Arc.Fonts" Version="0.4.0-preview.1" />
+    <PackageVersion Include="TKCode.Arc" Version="1.0.0" />
+    <PackageVersion Include="TKCode.Arc.Fonts" Version="1.0.0" />
     <!-- agent 组件不在主包：ToolCall/AgentStatus/AgentPlan/ContextWindow 在 Special，
          Sidebar/CommandPalette/ModelPicker 在 Blocks。见 docs/arc-integration.md -->
-    <PackageVersion Include="TKCode.Arc.Special" Version="0.4.0-preview.1" />
-    <PackageVersion Include="TKCode.Arc.Blocks" Version="0.4.0-preview.1" />
-    <PackageVersion Include="TKCode.Arc.Terminal" Version="0.4.0-preview.1" />
-    <PackageVersion Include="TKCode.Arc.Workflow" Version="0.4.0-preview.1" />
-    <PackageVersion Include="TKCode.Arc.Icons.Lucide" Version="0.4.0-preview.1" />
+    <PackageVersion Include="TKCode.Arc.Special" Version="1.0.0" />
+    <PackageVersion Include="TKCode.Arc.Blocks" Version="1.0.0" />
+    <PackageVersion Include="TKCode.Arc.Terminal" Version="1.0.0" />
+    <PackageVersion Include="TKCode.Arc.Workflow" Version="1.0.0" />
+    <PackageVersion Include="TKCode.Arc.Icons.Lucide" Version="1.0.0" />
 
     <!-- Spyglass：Avalonia 的 out-of-process 调试器（视觉树/样式/绑定/性能）。
          只给 Debug 构建用：生产包里不该带调试探针。

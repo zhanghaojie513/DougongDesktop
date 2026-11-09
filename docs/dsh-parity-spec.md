@@ -41,11 +41,24 @@ git sparse-checkout set \
 
 | 项 | 值 |
 |---|---|
-| **版本** | `0.4.0-preview.1`（2026-11-06 从 `0.3.2-preview.2` 升级） |
+| **版本** | `1.0.0`（2026-11-09 从 `0.4.0-preview.1` 升级） |
 | **仓库** | https://github.com/AIDotNet/TKCode.Arc |
 | **commit** | `5680bf55`（2026-11-06） |
 | **Avalonia** | 必须精确 `12.1.4` |
-| **包数** | 我们引用 7 个：Arc / Fonts / Special / Blocks / Terminal / Workflow / Icons.Lucide |
+| **包数** | 我们引用 7 个：Arc / Fonts / Special / Blocks / Terminal / Workflow / Icons.Lucide。另有 `Dock` / `Pdf` 尚未引用，见 `docs/arc-1.0-inventory.md` |
+
+**升级记录（`0.4.0-preview.1` → `1.0.0`，2026-11-09）**：
+零警告零错误，91 条检查全过，界面截图与升级前逐像素一致。
+
+- **纯增量**：四个包删除 **0 个**类型，Arc +87 / Special +179 / Blocks +142。
+  不需要改任何现有代码。Avalonia 仍精确锁 `[12.1.4]`。
+- **`TerminalCore.Create` 的崩溃没有修复**——同一份 7 行最小复现仍抛
+  `NullReferenceException`，F1 继续卡着。升级前先验这一条，
+  免得升完再发现还在。
+- 新增组件里最值得用：`ArcWindow` + `TitleBar`（替代我们手写的标题栏，
+  含 macOS 交通灯）、`TKCode.Arc.Dock`（补 E4 分裂标签树）、
+  `PageViewer`（补 E7 的 PDF 预览）。
+  完整盘点见 `docs/arc-1.0-inventory.md`。
 
 **升级记录（`0.3.2-preview.2` → `0.4.0-preview.1`，2026-11-06）**：
 零警告零错误，83 条检查全过（正向 83 / 反证 83）。

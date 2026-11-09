@@ -21,7 +21,7 @@
 
 最后更新：2026-11-06
 
-**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `0.4.0-preview.1` · SDK `0.1.18-alpha.1`
+**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `1.0.0` · SDK `0.1.18-alpha.1`
 
 ---
 
@@ -344,3 +344,4 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-06 | **无头检查又修了一处取样缺陷**：`CollectTexts` 只扫 `TextBlock`，而 `SettingsRow.Header`/`Description` 是 ContentControl 的属性、不是子控件，导致"插件 Id 没显示出来"的**误报**——实际渲染是好的。已改为 TextBlock + 行标题 + 行说明三路合并。这条是"误报比漏报更伤"的又一例 |
 | 2026-11-06 | **P8f 开工：F2 完成，F1 卡在上游缺陷**。终端 tab 从"未实现"改为可点开，接 `TerminalPanel`（`TerminalView` + 状态说明）。**但 VT 状态机建不起来**：`TerminalCore.Create` 必抛 `NullReferenceException`，栈顶在 `..ctor(IntPtr terminal, ...)` 即终端指针为 null。已在独立控制台工程用 7 行复现（只加包，无我方代码）——**是上游缺陷，不是集成问题**。逐一排除过：原生库在输出目录、`deps.json` 有 runtimeTargets、`ctypes` 能 dlopen、`GhosttyRuntime.Version` 返回 `0.1.0-dev`（握手成功）、`in` 传参与四参数 `TerminalSize` 都试过 |
 | 2026-11-06 | **修订 `dock-unimplemented-tabs-are-labeled`**。原检查无条件要求「终端」tab 标「未实现」且禁用，接终端后误报。但它的**意图是对的**——用户不该点进去才发现是空的。改为两个可接受形态：要么"禁用+标题标注"，要么"可点开+首屏说明原因"。两种都验证过反证能变红 |
+| 2026-11-09 | **Arc 升 `0.4.0-preview.1` → `1.0.0`**（正式版）。按元数据逐类型比对：四个包**删除 0 个**，Arc +87 / Special +179 / Blocks +142，纯增量。91 条检查全过，界面逐像素一致，Avalonia 仍锁 `[12.1.4]`。**升级前先验了终端**：同一份 7 行复现仍抛 `NullReferenceException`——1.0.0 没修，F1 继续卡着。盘点见 `docs/arc-1.0-inventory.md` |

@@ -13,7 +13,7 @@
 [![repository](https://img.shields.io/badge/Dougong_SDK-repository-2f6f5e?style=flat-square)](https://github.com/zhanghaojie513/Dougong)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512bd4?style=flat-square)](https://dotnet.microsoft.com/)
 [![Avalonia](https://img.shields.io/badge/Avalonia-12.1.4-8b44ac?style=flat-square)](https://avaloniaui.net/)
-[![TKCode.Arc](https://img.shields.io/badge/TKCode.Arc-0.4.0--preview.1-e07a5f?style=flat-square)](https://github.com/AIDotNet/TKCode.Arc)
+[![TKCode.Arc](https://img.shields.io/badge/TKCode.Arc-1.0.0-e07a5f?style=flat-square)](https://github.com/AIDotNet/TKCode.Arc)
 [![build](https://github.com/zhanghaojie513/DougongDesktop/actions/workflows/build.yml/badge.svg)](https://github.com/zhanghaojie513/DougongDesktop/actions/workflows/build.yml)
 [![license](https://img.shields.io/badge/license-MIT-1f883d?style=flat-square)](LICENSE)
 
@@ -22,7 +22,7 @@
 ---
 
 > [!WARNING]
-> **早期开发中。** SDK 处于 `0.1.x-alpha`，TKCode.Arc 处于 `0.4.0-preview`。
+> **早期开发中。** SDK 处于 `0.1.x-alpha`，TKCode.Arc 处于 `1.0.0`。
 > 签名与行为可能在任意提交中变更，不适合作为依赖。
 
 > [!NOTE]
@@ -168,7 +168,7 @@ UI 与 SDK 彻底解耦。
 | `ContextWindow` | 617×200 |
 | 深浅主题切换 | `IsDark` False→True |
 
-**结论**：Arc 包真的能用（当时的 `0.3.2-preview` 三包；现为 `0.4.0-preview.1` 七个包）。
+**结论**：Arc 包真的能用（当时的 `0.3.2-preview` 三包；现为 `1.0.0` 七个包）。
 </details>
 
 ---
@@ -307,7 +307,7 @@ prototype/                       交互原型（同上）
 
 ### 文档地图
 
-五份**活的**文档，按"什么时候该读它"排：
+六份**活的**文档，按"什么时候该读它"排：
 
 | 文档 | 什么时候读 |
 |---|---|
@@ -316,6 +316,7 @@ prototype/                       交互原型（同上）
 | [docs/dsh-parity-progress.md](docs/dsh-parity-progress.md) | 想知道"现在做到哪、下一步做什么"。可勾选的 70 项清单 |
 | [docs/ipc-protocol-readiness.md](docs/ipc-protocol-readiness.md) | 考虑抽 `Dougong.Protocol` 独立包时。含"什么时候该抽"的三条触发条件 |
 | [docs/spyglass-usage.md](docs/spyglass-usage.md) | 要查"这个控件为什么是这个样式"时（仅 Debug） |
+| [docs/arc-1.0-inventory.md](docs/arc-1.0-inventory.md) | 想知道"Arc 有哪些组件能用、哪些正好补上缺口"时 |
 
 > `assets/brand/`、`design-demos/`、`prototype/` 是设计阶段的产物，
 > 按阶段归档，不随代码演进维护。
