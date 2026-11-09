@@ -151,7 +151,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | C5 | ✅ | 权限预设 | `[Arc]` | **全链路通**：设置页下拉 → `permission/switch` → 引擎 `SwitchAsync` → 审批链按新档位裁决。预设单实例注入 `PermissionPolicyApprover(PresetApprover(inner, presets))` | ①单元：interactive 问 1 次 → unattended 问 0 次；②端到端：起真引擎往返，`interactive→unattended→interactive` 三态都对；③无头检查 `permission-picker-reflects-engine-state` 守回填与回环 |
 | C6 | ⏳ | Agent preset | `[—]` | **等契约**：`AgentPreset` 在 `Dougong.HostProtocol` 里 **0 处** | 等 SDK 暴露契约 |
 | C7 | ➖ | Agent 循环设置（并行工具上限） | `[—]` | **决定不做**：`ToolConcurrency` 只有两级（串行 / 工作区独占），并发由 `ToolExecutionPlan` 的 `Reads`/`Writes` 资源键自动仲裁，**没有用户可调的并行数**。放一个调了不生效的滑块不如不放 | — |
-| C8 | 🟡 | 子智能体 | `[Arc]` | **引擎侧已接**：三条命令实现，`_subagents` 单实例传给工具与协议层；`Started`/`Completed` 都推 `subagent/updated`（RequestId=null，锁内异步投递）。**界面未做** | 端到端验证了三条命令的**错误路径**（不存在的 id 正确报错）。**正常路径未验证**：`SubagentHandle` 没有公开构造函数，句柄只能由引擎真正派发时创建，而本机没有 provider 配置。不能标 ✅ |
+| C8 | 🟡 | 子智能体 | `[Arc]` | **引擎侧已接**：三条命令 + `SubagentTool` 派发工具（后者曾经漏注册）+ `_subagents` 单实例；`Started`/`Completed` 双事件推送。**界面未做** | **真实派发已验证到"工具被调用"**：模型确实发起 `subagent` 调用（`toolName":"subagent"`）并走到审批。**没跑完整轮**：minimax Token Plan 配额耗尽（429），子 agent 未能执行。不能标 ✅ |
 
 ### P8d 会话增强
 
@@ -357,3 +357,5 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-10 | **C5 界面完成**：设置页权限分区从静态说明改成真下拉。切预设只发请求、**不在本地先改**——以引擎回的 `permission/listed` 为准，否则"切换失败"会显示成"成功"。回填时用 `_updatingPresets` 挡住 `SelectionChanged` 回环（不挡会无限往返），这条也有检查覆盖 |
 | 2026-11-10 | **C8 引擎侧接通**（三条命令 + 推送），但**没标 ✅**。原因：`SubagentHandle` 无公开构造，句柄只能由引擎真正派发子 agent 时创建，而本机无 provider 配置——`subagent/list` 只能验到空列表与错误路径。空列表证明不了链路通，这与 `ToolCall 0 张` 是同一个陷阱。已实现部分：`_subagents` 单实例（检查 `subagent-registry-is-single-instance` 守住"不许就地 new"）、三条命令、`Started`/`Completed` 双事件推送（RequestId=null，锁内异步投递避免死锁） |
 | 2026-11-10 | **SDK 引用预算 7 → 8**：新增 `SubagentProjection.cs`。复审结论：该引用——把子 agent 的 SDK 形状→协议形状收在 Framework，否则 AgentHost 要直接引用 SDK。状态映射复用 SDK 的 `ProtocolMapping`（"已结束但无结果算取消还是完成"只该有一份判断） |
+| 2026-11-10 | **发现 C8 的派发工具根本没收注**。上一轮为了绕开 `dispatcherAccessor` 的时序问题，只注册了 `SubagentListTool` / `SubagentResultTool`（两者只读注册表），**漏了 `SubagentTool`**——模型因此完全没有派发能力，而三条命令照样"工作"（永远返回空列表）。这个组合极其误导：接口都对、日志都干净，功能却不存在。已用延迟解析 `dispatcherAccessorRef` 补上（createDispatcher 先于 createRuntime 执行，用闭包变量绕开）。**教训**：只读工具工作 ≠ 主功能接通 |
+| 2026-11-10 | **用 minimax 真实 provider 验证 C8**。模型确实调用了 `subagent` 工具（`"toolName":"subagent"`，带完整 prompt 参数），说明注册与工具暴露这条链是通的。但整轮未完成：provider 返回 **429「已达到 Token Plan 用量上限」**——配额耗尽，非代码问题。所以 C8 停在 🟡：派发路径验到了"被调用"，没验到"子 agent 真正跑完并回流 Started/Completed 事件"。等配额恢复后补验 |

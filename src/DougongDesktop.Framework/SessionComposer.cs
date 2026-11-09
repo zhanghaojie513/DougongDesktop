@@ -411,6 +411,12 @@ public sealed class SessionComposer : IDisposable
             throw;
         }
 
+        // **延迟解析 dispatcherAccessor**：createDispatcher 先于 createRuntime 执行，
+        // 而派发子 agent 需要一个"按请求造独立运行时"的工厂，那要用到
+        // 只有 createRuntime 才有 accessor。用一个稍后赋值的闭包变量绕开——
+        // 子 agent 只会在回合真正运行时被派发，那时 accessor 早就赋好了。
+        IDispatcherAccessor? dispatcherAccessorRef = null;
+
         var kernelHost = await KernelAgentHost.CreateAsync(
             store,
             createDispatcher: (resolvedApprover, resolvedStore, ct) =>
@@ -420,15 +426,22 @@ public sealed class SessionComposer : IDisposable
                     approver: resolvedApprover,
                     workspace: workspace);
 
-                // 子 agent 工具在这里注册，但运行时工厂要用到 createRuntime
-                // 才有的 dispatcherAccessor——用闭包捕获，稍后由 factory 取用。
-                // dispatcher 是同一个对象，不需要等。
                 RegisterBuiltInTools(
-                    dispatcher, workspace, resolvedStore, subagents, sessionId);
+                    dispatcher, workspace, resolvedStore, subagents, sessionId,
+                    // 子运行时工厂：**与主对话独立、但共享底层 client 与 store**。
+                    // 独立是必须的——共用运行时会让子 agent 的中间消息进入
+                    // 主上下文，正好抵消了这个能力（SDK 明确要求）。
+                    request => new LoopAgentRuntime(
+                        client!,
+                        dispatcherAccessorRef!,
+                        resolvedStore));
                 return Task.FromResult<IToolDispatcher>(dispatcher);
             },
             createRuntime: (dispatcherAccessor, resolvedStore) =>
             {
+                // 给子 agent 工厂用（见上面 dispatcherAccessorRef 的注释）
+                dispatcherAccessorRef = dispatcherAccessor;
+
                 // 三个压缩参数必须一起传。SDK 的 host-layering-decision.md §4.4
                 // 把这件事列为"装配容易漏"的实例：缺一个就**静默不压缩**。
                 //
@@ -525,16 +538,16 @@ public sealed class SessionComposer : IDisposable
         string workspace,
         IStoreAccessor? store,
         SubagentRegistry registry,
-        string sessionId)
+        string sessionId,
+        Func<AgentRunRequest, IAgentRuntime> subagentRuntimeFactory)
     {
         dispatcher.Register(new ReadFileTool(workspace));
         dispatcher.Register(new ListDirectoryTool(workspace));
         dispatcher.Register(PlanTools.Create());
 
-        // 子 agent 的**列/取结果**两个工具：只读注册表，不需要运行时工厂。
-        // 派发工具（SubagentTool）需要构造独立的子运行时，而那个能力
-        // （dispatcherAccessor）只在 createRuntime 里拿得到；
-        // 所以它在 SessionComposer.CreateAsync 里另行注册。
+        // 子 agent 三件套，全部共用**同一个** registry 实例。
+        // parentTurnId 传空串：由运行时按当前回合填，不是固定值。
+        dispatcher.Register(new SubagentTool(registry, subagentRuntimeFactory, sessionId, ""));
         dispatcher.Register(new SubagentListTool(registry));
         dispatcher.Register(new SubagentResultTool(registry));
     }
