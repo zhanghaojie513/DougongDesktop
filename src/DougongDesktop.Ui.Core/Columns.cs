@@ -122,20 +122,12 @@ public static class Columns
     /// <summary>标题栏高度。dsh 的 <c>--dsh-windows-titlebar-height</c> 实测 40px。</summary>
     public const double TitlebarHeight = 40;
 
-    /// <summary>
-    /// macOS 红绿灯（关闭/最小化/最大化）占用的左侧宽度。
-    /// </summary>
-    /// <remarks>
-    /// macOS 上 <c>ExtendClientAreaToDecorationsHint</c> 会让系统按钮**叠在自绘内容上**，
-    /// 位置由系统决定，我们挪不动。18px 左边距 + 三个 14px 圆点 + 间距 ≈ 78px，
-    /// 留 80 保证不压住第一个自绘按钮。
-    /// <para>
-    /// <b>这不是"感觉留点空"</b>：dsh 是 Electron，同样把标题栏交给系统，
-    /// 它的左侧内容也从未顶到最左。Windows 上用 0——那里的窗口按钮在右边，
-    /// 且由我们自绘。
-    /// </para>
-    /// </remarks>
-    public const double MacTrafficLightInset = 80;
+    // macOS 红绿灯安全区（曾在此处的 MacTrafficLightInset = 80）已删除。
+    // 2026-11-09 起窗口是 Arc 的 ArcWindow，它的 TitleBar 用
+    // CaptionButtons=Auto：macOS 走系统交通灯并**自己留出**让位空间。
+    // 我们那个 80px 是照着截图估的（18px 边距 + 三个 14px 圆点 + 间距），
+    // 控件树也证明不了对错；交给组件后不需要这个魔数了。
+    // 实测（最小探针窗口 + 截图）：交通灯与 LeftContent 之间自动留约 24px 空隙。
 
     /// <summary>主区左上角的圆角（dsh 的 <c>--dsh-windows-content-radius: 16px</c>）。</summary>
     public const double ContentCornerRadius = RadiusLg;

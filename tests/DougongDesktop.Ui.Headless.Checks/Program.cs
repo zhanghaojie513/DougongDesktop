@@ -40,6 +40,7 @@ public static class Program
         failures += Check("settings-shows-chinese-state-words", ShowsChineseStateWords);
         failures += Check("settings-plugins-lists-loaded-only", PluginsListLoadedOnly);
         failures += Check("terminal-panel-reports-unavailable", TerminalPanelReportsUnavailable);
+        failures += Check("titlebar-uses-arc-slots", TitlebarUsesArcSlots);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -311,6 +312,43 @@ public static class Program
     /// 会漏掉每一行的标题与说明。
     /// 第一版就漏了，导致"插件 Id 没显示出来"的误报：实际渲染是好的。
     /// </remarks>
+    /// <summary>
+    /// 标题栏必须是 ArcWindow 的 TitleBar，且左侧内容真的注进去了。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条补的是静态检查做不到的部分</b>：架构守卫只能读源码文本，
+    /// 证明"写了 LeftContent ="，证明不了"内容真的挂上了、按钮真的有 3 个"。
+    /// 第一次替换时两套标题栏同时存在，源码里看不出任何异常——
+    /// 是运行时 `标题栏按钮 7 个` 才暴露的（多出 4 个 0x0）。
+    /// </remarks>
+    private static string? TitlebarUsesArcSlots()
+    {
+        // 必须先声明 slot：AppShell 构造时就要往 shell.leading 等槽位注册，
+        // 没声明会直接抛。这与产品的启动顺序一致（Program 里先 DeclareSlots）。
+        var slots = new DougongDesktop.Ui.Core.SlotRegistry();
+        DougongDesktop.App.Shell.AppShell.DeclareSlots(slots);
+        var shell = new DougongDesktop.App.Shell.AppShell(
+            slots, new DougongDesktop.App.Shell.AppShellViewModel());
+
+        // 左侧内容必须存在且含 3 个按钮（收起侧栏 / 应用 / 编辑）
+        if (shell.TitlebarContent is null)
+            return "AppShell.TitlebarContent 为 null：左侧按钮没建出来";
+
+        var buttons = shell.TitlebarContent.GetLogicalDescendants()
+            .OfType<Avalonia.Controls.Button>().Count();
+        if (buttons != 3)
+            return $"左侧内容里按钮 {buttons} 个（期望 3：收起侧栏 / 应用 / 编辑）";
+
+        // 自绘窗口按钮必须彻底消失——它们现在由 Arc 的 TitleBar 按平台处理
+        var hasWindowButtons = typeof(DougongDesktop.App.Shell.AppShell)
+            .GetMethods(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .Any(m => m.Name.Contains("BuildWindowButtons", StringComparison.Ordinal));
+        if (hasWindowButtons)
+            return "AppShell 仍有 BuildWindowButtons 方法：macOS 上会与系统交通灯重复";
+
+        return null;
+    }
+
     /// <summary>
     /// 终端面板必须如实报告"暂不可用"，不能显示一个空白假终端。
     /// </summary>

@@ -19,7 +19,7 @@ namespace DougongDesktop.App.Views;
 /// <b>内置内容也走 slot 注册</b>——不是直接塞进布局。这样关掉某块 = 该 slot 空着，
 /// 将来换成 UI 插件时也不用改外壳。P3b 只不过是把"注册者"从这段代码换成外部程序集。
 /// </remarks>
-public sealed class MainWindow : Window
+public sealed class MainWindow : TKCode.Arc.ArcWindow
 {
     private readonly SlotRegistry _slots = new();
     private readonly AppShellViewModel _vm = new();
@@ -137,8 +137,15 @@ public sealed class MainWindow : Window
             new DiagnosticsLog());
         RegisterBuiltInModules();
 
-        Content = new AppShell(_slots, _vm);
-        Shell = (AppShell)Content;
+        var shell = new AppShell(_slots, _vm);
+        Content = shell;
+        Shell = shell;
+
+        // 标题栏左侧内容注入 ArcWindow 的 TitleBar。
+        // 必须在这里做：AppShell 构造时才 BuildTitlebar() 生成内容，
+        // 而 ArcWindow.TitleBar 在基类构造时就有了。
+        if (TitleBar is { } bar && shell.TitlebarContent is { } left)
+            bar.LeftContent = left;
 
         // 输入区 → 引擎。三段式：确保有会话 → 发回合 → 把本地消息先显示出来
         _conversation.MessageSubmitted += text => _ = SubmitAsync(text);
@@ -1166,19 +1173,26 @@ public sealed class MainWindow : Window
                 string.Join(",", hb.Select(b => $"{b.Bounds.Width:0}x{b.Bounds.Height:0}")));
         }
 
-        // 标题栏：40px 高、与侧栏同色（dsh 的 Windows caption row）
+        // 标题栏：1.0.0 起由 ArcWindow.TitleBar 提供，不再是我们自建的那条。
+        // 断言三件事：它存在、左侧内容已注入、窗口按钮由 Arc 按平台决定。
         if (shell is AppShell barHost)
         {
-            Report("Titlebar", barHost.Titlebar);
-            var btns = barHost.Titlebar.GetVisualDescendants()
-                .OfType<Avalonia.Controls.Button>().ToArray();
+            var tb = TitleBar!;
+            Report("ArcWindow.TitleBar", tb);
             Console.Error.WriteLine(
-                $"[shell] 标题栏按钮 {btns.Length} 个：" +
-                string.Join(", ", btns.Select(b => $"{(b.Bounds.Width):0}x{(b.Bounds.Height):0}")));
-            Console.Error.WriteLine(
-                $"[shell] 标题栏子节点 {barHost.Titlebar.GetVisualChildren().Count()} 个");
+                $"[shell] 标题栏 CaptionButtons={tb.CaptionButtons}（Auto=macOS 用系统交通灯）");
 
-            // 侧栏实际底色（不是设了什么，是渲染成什么）
+            if (tb.LeftContent is null)
+                Console.Error.WriteLine("[shell] 标题栏 LeftContent **(空)**——收起侧栏按钮没注进去");
+            else
+                Console.Error.WriteLine("[shell] 标题栏 LeftContent 已注入");
+
+            // 自绘按钮只应出现在"我们自己塞的左侧内容"里；
+            // 整条标题栏上的窗口按钮由 Arc 管，我们不该再画一套。
+            var ownButtons = barHost.TitlebarContent?.GetVisualDescendants()
+                .OfType<Avalonia.Controls.Button>().Count() ?? 0;
+            Console.Error.WriteLine($"[shell] 标题栏 LeftContent 内按钮 {ownButtons} 个（期望 3）");
+
             var sidebar = _conversation.GetVisualDescendants()
                 .OfType<TKCode.Arc.Sidebar>().FirstOrDefault();
             if (sidebar is not null)
@@ -1188,11 +1202,6 @@ public sealed class MainWindow : Window
                     $"[shell] 侧栏实际底色 {sbBrush?.Color.ToString() ?? "(无)"} " +
                     $"期望 {DshTheme.SidebarFill}");
             }
-            var tb = barHost.Titlebar.Background as Avalonia.Media.ISolidColorBrush;
-            var sb = DshTheme.SidebarFill;
-            Console.Error.WriteLine(
-                $"[shell] 标题栏色 {tb?.Color.ToString() ?? "(无)"} 侧栏色 {sb} " +
-                $"{(tb?.Color == sb ? "一致" : "不一致")}");
         }
 
         // dsh 配色是否真的应用：读实际 Background，不看代码写了什么

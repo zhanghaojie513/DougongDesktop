@@ -157,7 +157,16 @@ public sealed class AppShell : UserControl
     /// <c>-webkit-app-region: drag</c>）。
     /// </para>
     /// </remarks>
-    public Border Titlebar { get; } = new();
+    /// <summary>
+    /// 标题栏左侧内容（收起侧栏 / 应用 / 编辑）。
+    /// </summary>
+    /// <remarks>
+    /// <b>不再是整条标题栏</b>：1.0.0 起标题栏由 <c>ArcWindow</c> 的
+    /// <c>TitleBar</c> 提供，它用 <c>CaptionButtons=Auto</c> 处理平台差异——
+    /// macOS 用系统交通灯并自己留位，Windows 走系统 caption（含 Aero Snap）。
+    /// 这换掉了我们原先手写的平台分支与"截图估出来的 80px 安全区"。
+    /// </remarks>
+    public Control? TitlebarContent { get; private set; }
 
     /// <summary>侧边栏偏好宽度（像素）。0 表示收起。</summary>
     private double _sidebarWidth = Columns.SidebarDefault;
@@ -434,15 +443,16 @@ public sealed class AppShell : UserControl
         //
         // 主区左上角要圆角，所以中栏所在的那块用 Border 包一层
         // （dsh 是 `.centerCol { border-radius: 16px 0 0 0 }`）。
-        var stack = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto") };
+        // **标题栏行已删除**：1.0.0 起窗口是 Arc 的 `ArcWindow`，
+        // 它自己带一条 `TitleBar`（含交通灯/窗口按钮/拖拽）。
+        // AppShell 只负责往 `ArcWindow.TitleBar.LeftContent` 里塞控件，
+        // 不再自建第二条——两条叠在一起正是第一次替换时的现象。
+        var stack = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
 
-        Grid.SetRow(Titlebar, 0);
-        stack.Children.Add(Titlebar);
-
-        Grid.SetRow(_columns, 1);
+        Grid.SetRow(_columns, 0);
         stack.Children.Add(_columns);
 
-        Grid.SetRow(bottom, 2);
+        Grid.SetRow(bottom, 1);
         stack.Children.Add(bottom);
         BottomBar = bottom;
 
@@ -465,29 +475,25 @@ public sealed class AppShell : UserControl
     /// </remarks>
     private void BuildTitlebar()
     {
-        Titlebar.Height = Columns.TitlebarHeight;
-        Titlebar.Background = DshTheme.Brush(DshTheme.SidebarFill);
+        // **只填左侧内容，不设 Height/Background**：那是 ArcWindow 的 TitleBar
+        // 自己的事，我们设了反而会盖掉它按平台算出的高度与配色。
 
-        // 形态照 dsh 的 Windows caption：左侧「收起侧栏图标 + 应用 + 编辑」，
-        // 右侧窗口按钮。不显示项目名——dsh 那里也没有，标题信息在侧栏品牌行。
+        // 形态照 dsh 的 Windows caption：左侧「收起侧栏图标 + 应用 + 编辑」。
+        // 不显示项目名——dsh 那里也没有，标题信息在侧栏品牌行。
         //
-        // **macOS 要按平台分支**：
-        // - 左侧留出红绿灯安全区，否则系统按钮会压住"收起侧栏"图标；
-        // - 右侧**不自绘**窗口按钮：macOS 系统的红绿灯已经在左边，
-        //   再画一套 —/□/✕ 就是两套按钮，而且位置语义完全不同
-        //   （macOS 的红绿灯从不放右上角）。
+        // **窗口按钮交给 Arc 的 TitleBar**（1.0.0 起）：
+        // 它的 CaptionButtons 是 Auto，在 macOS 选 System（用系统交通灯并
+        // 自己留出让位的空间），在 Windows/Linux 选 Drawn（自绘 —/□/✕）。
+        // 这正是我们原先手写的那段平台分支，但比我们做得全——
+        // 它还处理了 Windows 的系统菜单与 Snap Layouts。
         //
-        // Windows 保持原样：那里的窗口按钮在右上，由我们自绘
-        // （ExtendClientArea 后原生按钮浮在右侧，我们画的是同位置的替代）。
-        var isMac = OperatingSystem.IsMacOS();
-        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-
-        var left = new StackPanel
+        // 所以这里既不再判断 IsMacOS，也不再有 MacTrafficLightInset
+        // 那个"截图估出来的 80px"。左侧内容由 TitleBar 自动放在交通灯右边。
+        TitlebarContent = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 0,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(isMac ? Columns.MacTrafficLightInset : 8, 0, 0, 0),
             Children =
             {
                 BuildSidebarToggleButton(),
@@ -495,17 +501,35 @@ public sealed class AppShell : UserControl
                 BuildMenuButton("编辑"),
             },
         };
-        Grid.SetColumn(left, 0);
-        row.Children.Add(left);
+    }
 
-        if (!isMac)
+    /// <summary>标题栏的纯图标按钮。</summary>
+    private static Avalonia.Controls.Button TitleBarIconButton(
+        TKCode.Arc.Icons.Lucide.LucideIconKind kind, double size)
+    {
+        var button = new Avalonia.Controls.Button
         {
-            var buttons = BuildWindowButtons();
-            Grid.SetColumn(buttons, 1);
-            row.Children.Add(buttons);
-        }
+            Content = new TKCode.Arc.Icons.Lucide.LucideIcon
+            {
+                Kind = kind,
+                Size = 16,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+            Width = Columns.SidebarControlRowHeight,
+            Height = Columns.SidebarControlRowHeight,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0, 0, 4, 0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(Columns.RadiusSm),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
 
-        Titlebar.Child = row;
+        button.PointerEntered += (_, _) => button.Background = DshTheme.Brush(DshTheme.Layer3);
+        button.PointerExited += (_, _) => button.Background = Brushes.Transparent;
+
+        return button;
     }
 
     /// <summary>
@@ -569,112 +593,6 @@ public sealed class AppShell : UserControl
         {
             e.Handled = true;
             Console.Error.WriteLine($"[ui] 菜单「{label}」尚未实现（P9 设置域）");
-        };
-
-        return button;
-    }
-
-    /// <summary>标题栏的纯图标按钮。</summary>
-    private static Avalonia.Controls.Button TitleBarIconButton(
-        TKCode.Arc.Icons.Lucide.LucideIconKind kind, double size)
-    {
-        var button = new Avalonia.Controls.Button
-        {
-            Content = new TKCode.Arc.Icons.Lucide.LucideIcon
-            {
-                Kind = kind,
-                Size = 16,
-                VerticalAlignment = VerticalAlignment.Center,
-            },
-            Width = Columns.SidebarControlRowHeight,
-            Height = Columns.SidebarControlRowHeight,
-            Padding = new Thickness(0),
-            Margin = new Thickness(0, 0, 4, 0),
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(Columns.RadiusSm),
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center,
-        };
-
-        button.PointerEntered += (_, _) => button.Background = DshTheme.Brush(DshTheme.Layer3);
-        button.PointerExited += (_, _) => button.Background = Brushes.Transparent;
-
-        return button;
-    }
-
-    /// <summary>
-    /// 自绘窗口按钮：最小化 / 最大化 / 关闭。
-    /// </summary>
-    /// <remarks>
-    /// <b>为什么必须自绘</b>：扩展客户区后原生标题栏消失，系统按钮也一起没了。
-    /// 不自绘就没法最小化或关闭窗口。
-    /// <para>
-    /// <b>按钮尺寸 46×40</b>：Windows 11 原生 caption button 的尺寸。
-    /// 尺寸不同会让"这个窗口看起来不像 Windows 程序"。
-    /// </para>
-    /// <para>
-    /// <b>关闭按钮悬停变红</b>：那是 Windows 的既有习惯，破坏它会让用户
-    /// 在误点前多犹豫一次。
-    /// </para>
-    /// </remarks>
-    private Control BuildWindowButtons()
-    {
-        var panel = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        panel.Children.Add(TitleButton("—", 12, window => window.WindowState = WindowState.Minimized));
-
-        panel.Children.Add(TitleButton("□", 12, window => window.WindowState =
-            window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized));
-
-        panel.Children.Add(TitleButton("✕", 12, window => window.Close(), isClose: true));
-
-        return panel;
-    }
-
-    private static Avalonia.Controls.Button TitleButton(string glyph, double fontSize, Action<Window> action, bool isClose = false)
-    {
-        var button = new Avalonia.Controls.Button
-        {
-            Content = new TextBlock
-            {
-                Text = glyph,
-                FontSize = fontSize,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            },
-            Width = 46,
-            Height = Columns.TitlebarHeight,
-            Padding = new Thickness(0),
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(0),
-        };
-
-        // 悬停态：普通按钮是淡灰，关闭是红底白字
-        if (isClose)
-        {
-            button.PointerEntered += (_, _) =>
-                button.Background = DshTheme.Brush(DshTheme.Danger);
-        }
-        else
-        {
-            button.PointerEntered += (_, _) =>
-                button.Background = DshTheme.Brush(DshTheme.Layer3);
-        }
-
-        button.PointerExited += (_, _) => button.Background = Brushes.Transparent;
-
-        button.Click += (_, e) =>
-        {
-            // 不要让点击冒泡到 Titlebar——那会触发拖拽
-            e.Handled = true;
-
-            if (TopLevel.GetTopLevel(button) is Window window) action(window);
         };
 
         return button;

@@ -88,9 +88,22 @@ Avalonia 仍精确锁 `[12.1.4]`，无需调整。
 `RightContent` 三个插槽加 `CaptionButtons`，Windows 上还会走系统标题栏
 （系统菜单、Aero Snap、Snap Layouts）。
 
-**建议**：换掉 `MainWindow : Window` 与 `AppShell.BuildTitlebar` 里手写的那套。
-预计能删掉平台分支与 80px 常量，并去掉一处"靠截图估算"的技术债。
-**没实测过**，换之前要单独验一次 macOS 红绿灯位置。
+**已采用（2026-11-09）**。实测过程与结果：
+
+1. 先建**最小探针窗口**（只 new 一个 `ArcWindow`，塞 LEFT/CENTER/RIGHT）验证可行性。
+   截图确认：交通灯在最左、`LEFT` 在其右侧约 24px 处未被压住、无自绘 —/□/✕。
+2. 再改产品代码，把 `MainWindow` 的基类换成 `ArcWindow`。
+
+**删掉的东西**：
+- `Columns.MacTrafficLightInset = 80`（截图估的魔数）
+- `AppShell.BuildTitlebar` 里的 `OperatingSystem.IsMacOS()` 平台分支
+- `BuildWindowButtons()` 与 `TitleButton()`（约 100 行自绘窗口按钮，全成死代码）
+- `AppShell` 根布局里的标题栏行（`Auto,*,Auto` → `*,Auto`）
+
+**踩到的坑（值得记）**：第一次改完是**两套标题栏叠在一起**——`ArcWindow`
+自带一条，`AppShell` 又建了一条。源码里看不出异常，是运行时诊断
+`标题栏按钮 7 个`（多出 4 个 0x0）暴露的。已加无头检查
+`titlebar-uses-arc-slots` 守这个。
 
 ### 4.2 `DockLayout` / `DockSplit` / `DockGroup`（`TKCode.Arc.Dock`）
 

@@ -412,40 +412,77 @@ internal static class ConversationChecks
     }
 
     /// <summary>
-    /// 标题栏必须按平台分支：macOS 留红绿灯安全区、不自绘窗口按钮。
+    /// 标题栏必须交给 Arc 的 ArcWindow/TitleBar，不得再自绘窗口按钮。
     /// </summary>
     /// <remarks>
-    /// <b>这条检查存在的理由</b>：Windows 上自绘 —/□/✕ 是对的（原生标题栏被
-    /// <c>ExtendClientAreaToDecorationsHint</c> 抹掉后需要替代按钮）。
-    /// 但 macOS 的红绿灯由系统画在**左上角**，我们挪不动、也不该再画一套。
-    /// 不分支的结果是两套按钮同时出现，而且左侧图标被红绿灯压住——
-    /// 这正是 HANDOFF §4.1 标为"风险最高"的那一处。
+    /// <b>这条检查的判据换过一次，值得记为什么。</b>
     /// <para>
-    /// 静态检查只能断言"分支存在"，不能证明"看起来对"。
-    /// 真正见过界面之后再补一条运行时断言，才算了结。
+    /// <b>旧判据（2026-11-06 ~ 11-09）</b>：断言 AppShell 里有
+    /// <c>OperatingSystem.IsMacOS()</c> 平台分支、<c>BuildWindowButtons()</c>
+    /// 包在 <c>if (!isMac)</c> 里、且安全区引用 <c>Columns.MacTrafficLightInset</c>。
+    /// 那时窗口是原生 <c>Window</c> + 手写标题栏，这些确实是必要条件。
+    /// </para>
+    /// <para>
+    /// <b>为什么换掉</b>：Arc 1.0.0 提供 <c>ArcWindow</c> + <c>TitleBar</c>，
+    /// 其 <c>CaptionButtons=Auto</c> 在 macOS 选 System（用系统交通灯并自己留位）、
+    /// 在 Windows 选 Drawn。我们手写的那套连同 80px 估算值一起删掉了。
+    /// 旧判据此时会**因为正确的改动而失败**——它断言的东西已经不该存在。
+    /// </para>
+    /// <para>
+    /// <b>新判据守的是同一件事</b>：不能让 macOS 上出现两套窗口按钮、
+    /// 也不能让左侧内容被交通灯压住。现在由组件保证，所以检查断言：
+    /// 窗口基类是 <c>ArcWindow</c>、标题栏内容走 <c>TitleBar.LeftContent</c>、
+    /// 且**没有任何自绘窗口按钮的痕迹**（BuildWindowButtons / 那个 80px 常量）。
     /// </para>
     /// </remarks>
     private static string? TitlebarBranchesForMac(bool inject)
     {
-        var shell = Path.Combine(RepoRoot, "src", "DougongDesktop.App", "Shell", "AppShell.cs");
-        if (!File.Exists(shell)) return $"找不到 {shell}";
+        var appDir = Path.Combine(RepoRoot, "src", "DougongDesktop.App");
+        var shellPath = Path.Combine(appDir, "Shell", "AppShell.cs");
+        var windowPath = Path.Combine(appDir, "Views", "MainWindow.cs");
+        var columnsPath = Path.Combine(RepoRoot, "src", "DougongDesktop.Ui.Core", "Columns.cs");
 
-        var source = File.ReadAllText(shell);
-        if (inject) source = source.Replace("if (!isMac)", "if (true)");
+        foreach (var f in new[] { shellPath, windowPath, columnsPath })
+            if (!File.Exists(f)) return $"找不到 {f}";
 
-        if (!source.Contains("OperatingSystem.IsMacOS()", StringComparison.Ordinal))
-            return "AppShell 没有按平台分支：macOS 上红绿灯会压住左侧图标，且会出现两套窗口按钮";
+        var shell = File.ReadAllText(shellPath);
+        var window = File.ReadAllText(windowPath);
+        var columns = File.ReadAllText(columnsPath);
 
-        // 自绘窗口按钮必须包在 !isMac 里。只查 "if (!isMac)" 不够——
-        // 那行删掉后 BuildWindowButtons() 仍在，两套按钮就回来了。
-        var guarded = source.Contains("if (!isMac)", StringComparison.Ordinal)
-                      && source.Contains("BuildWindowButtons()", StringComparison.Ordinal);
-        if (!guarded)
-            return "BuildWindowButtons 没有按平台守卫：macOS 上会与系统红绿灯重复";
+        // 反证注入：模拟"又退回自绘窗口按钮"——这才是真正的回归形态。
+        //
+        // **必须在读完源码后直接构造违规内容**，不要依赖 Replace 原文件里的
+        // 某一行。第一版就是拿 `private Control BuildWindowButtons()` 去 Replace，
+        // 但那段代码已经删了，Replace 什么也没做，于是反证静默失效。
+        if (inject)
+            shell += "\nprivate Control BuildWindowButtons() => new StackPanel();\n";
 
-        // 安全区必须来自 Columns（唯一真源），不能在 Shell 里写魔数
-        if (!source.Contains("Columns.MacTrafficLightInset", StringComparison.Ordinal))
-            return "macOS 红绿灯安全区没有引用 Columns.MacTrafficLightInset（不要写字面量 80）";
+        // 1. 窗口必须是 ArcWindow —— 平台差异由它处理
+        if (!window.Contains(": TKCode.Arc.ArcWindow", StringComparison.Ordinal))
+            return "MainWindow 不再继承 ArcWindow：标题栏会退回手写，"
+                   + "macOS 上要自己处理交通灯让位与不自绘窗口按钮";
+
+        // 2. 标题栏内容必须走 TitleBar 的插槽
+        if (!window.Contains("bar.LeftContent", StringComparison.Ordinal)
+            && !window.Contains("TitleBar.LeftContent", StringComparison.Ordinal))
+            return "没有把内容注入 ArcWindow.TitleBar.LeftContent："
+                   + "左侧按钮会与交通灯重叠或干脆不显示";
+
+        // 3. 不许再自绘窗口按钮
+        if (shell.Contains("BuildWindowButtons()", StringComparison.Ordinal))
+            return "AppShell 仍在自绘窗口按钮：macOS 上会与系统交通灯重复";
+
+        // 4. 那个"截图估出来的 80px"不该回来。
+        //
+        // **只认真正的声明**（`public const double ... = <数字>`），
+        // 不认注释里的提及。第一版用纯字符串 Contains，
+        // 结果被 Columns.cs 里那句"曾在此处的 MacTrafficLightInset"说明文字
+        // 误判成违规——注释解释一个已删除的常量，不该算它回来了。
+        var declared = System.Text.RegularExpressions.Regex.IsMatch(
+            columns, @"public\s+const\s+double\s+MacTrafficLightInset\s*=");
+        if (declared)
+            return "MacTrafficLightInset 常量又声明了：交通灯让位已由 Arc 的 TitleBar 处理，"
+                   + "再写一个估算值只会在换字号/换主题时错位";
 
         return null;
     }
