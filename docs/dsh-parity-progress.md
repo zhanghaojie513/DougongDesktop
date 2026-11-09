@@ -21,7 +21,7 @@
 
 最后更新：2026-11-06
 
-**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `1.0.0` · SDK `0.1.18-alpha.1`
+**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `1.0.0` · SDK `0.1.19-alpha.1`
 
 ---
 
@@ -48,12 +48,12 @@
 |---|---|---|---|---|---|---|---|
 | P8a 布局骨架 | 10 | 0 | 1 | 1 | 1 | 13 | **91%** |
 | P8b 会话与输入 | 5 | 0 | 0 | 0 | 1 | 6 | **100%** |
-| P8c 设置域 | 2 | 2 | 0 | 3 | 1 | 8 | **100%** |
+| P8c 设置域 | 2 | 2 | 2 | 1 | 1 | 8 | **67%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **25%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **40%** |
 | **P8g 中区会话域** | **11** | **1** | **5** | **0** | **6** | **23** | **71%** |
-| **合计** | **30** | **5** | **22** | **4** | **9** | **70** | **61%** |
+| **合计** | **30** | **5** | **24** | **2** | **9** | **70** | **59%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -148,10 +148,10 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | C2 | 🟡 | 模型/provider 设置 | `[Arc]` | 复用 `models/list` 数据（不新开协议）显示提供商数/模型数/当前模型 | 运行时 23 家 / 663 个模型。**只做了只读展示**，还不能切换——切换要重开会话 |
 | C3 | 🟡 | 密钥管理 | `[自有]` | **只做了只读展示**：界面如实显示"来自环境变量 DOUGONG_PROVIDER_KEY"，**不给输入框**（不落盘的话填了会丢，比不显示更糟） | 无头检查 `settings-key-shows-env-source` 断言无密码框。三档存储中的钥匙串/会话内存未做 |
 | C4 | ✅ | 插件清单页 | `[Arc]` | 读 `UiExtensionLoader.Loaded`，按 `Origin` 分内置/第三方，显示 Id / 槽位 / 文件名；空列表时提示 `DOUGONG_UI_PLUGINS` | 用真实 `SampleUiPlugin` 验证：`示例插件（sample.ui-plugin）→ shell.trailing`。无头检查 `settings-plugins-lists-loaded-only` |
-| C5 | ⏳ | 权限预设 | `[—]` | **等契约**：`PermissionPreset` 在 `Dougong.HostProtocol` 里 **0 处**（与 C8 同一类缺口——能力在引擎、到不了桌面端）。当前只做只读说明（见设置页「权限」分区） | 等 SDK 暴露契约 |
+| C5 | ⬜ | 权限预设 | `[Arc]` | **契约已到位**（SDK 0.1.19）：`permission/presets` / `permission/switch` / `permission/watch` 三条命令 + `permission/listed` 事件。待做界面接线 | 契约实测可按基类序列化并带判别器 |
 | C6 | ⏳ | Agent preset | `[—]` | **等契约**：`AgentPreset` 在 `Dougong.HostProtocol` 里 **0 处** | 等 SDK 暴露契约 |
 | C7 | ➖ | Agent 循环设置（并行工具上限） | `[—]` | **决定不做**：`ToolConcurrency` 只有两级（串行 / 工作区独占），并发由 `ToolExecutionPlan` 的 `Reads`/`Writes` 资源键自动仲裁，**没有用户可调的并行数**。放一个调了不生效的滑块不如不放 | — |
-| C8 | ⏳ | 子智能体设置 | `[—]` | **等 SDK**：`dsh-capability-gap.md` P2 #15（台账 #13）。**0.1.18 实测更新**：SDK 库内已有 `SubagentRegistry` + `subagent`/`subagent_list`/`subagent_result` 工具（0.1.17 引入），但 `Dougong.HostProtocol` 的 119 个顶层类型里 **0 处提及 subagent**——能力在引擎里、到不了桌面端。等待对象从"等能力"改成**"等契约暴露"** | — |
+| C8 | ⬜ | 子智能体 | `[Arc]` | **契约已到位**（SDK 0.1.19）：`subagent/list` / `subagent/result` / `subagent/cancel` + `subagent/listed` / `subagent/updated` 事件（Started 与 Completed 都推，用 `State` 区分，中间过程不推）。待做界面接线 | 契约实测；`SubagentUpdatedEvent.RequestId` 为 null |
 
 ### P8d 会话增强
 
@@ -349,3 +349,5 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-09 | **`titlebar-branches-for-macos` 的判据换了，并修掉一处反证失效**。旧判据断言"存在 IsMacOS 分支 + BuildWindowButtons + MacTrafficLightInset"，换 `ArcWindow` 后这些**都该消失**，旧判据会因正确改动而失败。改为断言"继承 ArcWindow + 走 TitleBar.LeftContent + 无自绘按钮痕迹"。**关键**：改完先验反证，发现注入后仍 PASS——因为注入用的 `Replace("private Control BuildWindowButtons()")` 在方法删掉后什么也没做。改成直接给源码追加违规内容才正确变红。**不验反证的检查等于没有检查** |
 | 2026-11-09 | **P8e E4 接上 `TKCode.Arc.Dock`**。用 `DockLayout` + 5 个 `DockPane`（文件/改动/计划/上下文 走 ToolsSource，终端 走 DocumentsSource——工具与文档是 Dock 的固有区分）。运行时实测 `pane 5 个，根=DockSplit`，无头与真实 GUI 都确认了。**用 `DOUGONG_UI_DOCK=1` 开关而非直接切默认**：Dock 多出拖拽区、关闭按钮、浮动窗口，整条交互路径变了，要先做视觉验收。顺带修了一条误导诊断：Dock 模式下没有 `TabItem`，旧诊断照报「tab 0 个（期望 5）」的假警报 |
 | 2026-11-09 | **`Button` 命名冲突**：`using TKCode.Arc;` 后它与 `Avalonia.Controls.Button` 冲突，编译报 CS0104。这正是 llms.txt 警告的那条（"Always write the arc: prefix... otherwise names shared with Avalonia such as Button resolve to Avalonia's own controls"）。已在 RightDock 里加 `using ArcButton = TKCode.Arc.Button;` 别名，并把两处原生按钮显式写成 `Avalonia.Controls.Button` |
+| 2026-11-10 | **SDK 0.1.18 → 0.1.19-alpha.1**。新增的正是 C5（权限预设）与 C8（子 agent）的契约：`permission/presets` / `permission/switch` / `permission/watch` / `subagent/list` / `subagent/result` / `subagent/cancel` 六条命令 + `permission/listed` / `subagent/listed` / `subagent/updated` 三个事件。**与 `fs/list` 那批不同：这一批 SDK 自带多态注册，不需要我们手工 RegisterDerivedType**（实测按基类序列化已带 `method` 判别器）。C5/C8 从 ⏳ 改 ⬜——不再是"等契约"，是"等接线" |
+| 2026-11-10 | **新增判别器存在性断言**（`AssertSdkRegisters`）。多态判别器缺失时是**静默降级**：序列化不抛异常，只是不带 `method` 字段，对端当未知消息丢弃，UI 上表现为"按钮点了没反应"而日志里什么都没有。现改为启动时按基类序列化六条命令、逐个查 `method`，不符就抛并打印实际输出。已验证反证生效 |

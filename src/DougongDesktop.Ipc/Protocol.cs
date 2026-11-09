@@ -70,6 +70,47 @@ public static class DesktopProtocol
             new JsonDerivedType(typeof(WorkspaceChangedEvent), "fs/changed"));
         HostProtocolContract.RegisterDerivedType<ServerEvent>(
             new JsonDerivedType(typeof(ModelsListedEvent), "models/listed"));
+
+        // P8c C5 / P8c C8：权限预设与子 agent（SDK 0.1.19 起的契约）。
+        //
+        // **这一批不需要注册**——实测按基类 `ClientCommand` 序列化时，
+        // 判别器已由 SDK 自带（输出带 `"method":"permission/switch"`）。
+        // 与 `fs/list` 那批不同：那几个是我们自己定义的类型，必须手工注册。
+        //
+        // 这里只做**存在性断言**，防止有一天 SDK 把它们挪出多态根之后
+        // 静默失效——那种失败在线上表现为"消息发不出去"，排查很费劲。
+        AssertSdkRegisters("permission/presets", new ListPermissionPresetsCommand
+            { RequestId = "probe", SessionId = "probe" });
+        AssertSdkRegisters("permission/switch", new SwitchPermissionPresetCommand
+            { RequestId = "probe", SessionId = "probe", Key = "probe" });
+        AssertSdkRegisters("permission/watch", new WatchPermissionPresetsCommand
+            { RequestId = "probe", SessionId = "probe", Enabled = true });
+        AssertSdkRegisters("subagent/list", new ListSubagentsCommand
+            { RequestId = "probe", SessionId = "probe" });
+        AssertSdkRegisters("subagent/result", new TakeSubagentResultCommand
+            { RequestId = "probe", SessionId = "probe", SubagentId = "probe" });
+        AssertSdkRegisters("subagent/cancel", new CancelSubagentCommand
+            { RequestId = "probe", SessionId = "probe", SubagentId = "probe", Reason = "probe" });
+    }
+
+    /// <summary>
+    /// 断言某条命令按基类序列化时带上了期望的判别器。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要主动查而不是等出错</b>：多态判别器缺失时的表现是**静默降级**——
+    /// 序列化不抛异常，只是不带 <c>method</c> 字段，对端读到就当成未知消息丢弃。
+    /// 那在 UI 上表现为"按钮点了没反应"，而日志里什么都没有。
+    /// </remarks>
+    private static void AssertSdkRegisters(string expectedMethod, ClientCommand command)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(command, typeof(ClientCommand), Json);
+        if (!json.Contains($"\"method\":\"{expectedMethod}\"", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"SDK 契约里 {command.GetType().Name} 没有注册判别器 {expectedMethod}。"
+                + "序列化会静默降级成没有 method 字段的 JSON，对端会把它当未知消息丢弃。"
+                + $"实际输出：{json}");
+        }
     }
 
     private static bool _registered;
