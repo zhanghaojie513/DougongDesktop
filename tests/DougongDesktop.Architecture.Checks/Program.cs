@@ -29,8 +29,8 @@ public static class Program
     /// <list type="bullet">
     /// <item><b>引擎包</b>（本清单）：跑 agent loop 的实现。任何非 Framework 层
     /// 解析出它们，换框架时就都要改。</item>
-    /// <item><b>契约包</b>（<see cref="ContractPackage"/>）：只有消息类型。
-    /// 不含 loop、不含 UI、不含 provider。</item>
+    /// <item><b>契约包</b>：只有消息类型。本仓库已不再依赖任何 SDK 契约包——
+    /// 线上契约自持在 <c>src/DougongDesktop.Ipc/Contract.cs</c>。</item>
     /// </list>
     /// <para>
     /// 两者混成一个清单会得到一条测不出真话的检查：要么把契约包也禁掉
@@ -48,26 +48,6 @@ public static class Program
         "Dougong.Kernel",
         "Dougong.Cli",
     ];
-
-    /// <summary>
-    /// 唯一允许出现在非 Framework 层的 SDK 包：纯消息契约。
-    /// </summary>
-    /// <remarks>
-    /// <b>这是一个决策，不是遗漏。</b> <c>Ipc</c> 与 <c>App</c> 都解析出它
-    /// （<c>Dougong.HostProtocol</c>），用的是其中的 <c>ClientCommand</c> /
-    /// <c>ServerEvent</c> / <c>ConversationItem</c> 等词汇表。
-    /// <para>
-    /// <b>代价要说清</b>：线上有哪些条目类型、字段叫什么，由 SDK 版本决定。
-    /// 换 agent 框架时，新引擎的事件仍要投影成这些类型才能过线 ——
-    /// 也就是说"换引擎"成立，但"换词汇表"不成立。
-    /// </para>
-    /// <para>
-    /// <b>要真正拿回词汇表</b>，需要在 <c>DougongDesktop.Ipc</c> 里自己声明
-    /// <c>ConversationItem</c> 及其子类型并自建多态登记，然后删掉这个例外。
-    /// 那是一次独立迁移，不是把这项加进白名单。
-    /// </para>
-    /// </remarks>
-    private const string ContractPackage = "Dougong.HostProtocol";
 
     /// <summary>SDK 侧工程禁止出现的 UI 技术栈（与 SDK 的边界测试同款）。</summary>
     private static readonly string[] ForbiddenUiPrefixes =
@@ -108,6 +88,9 @@ public static class Program
         // 序号缺口 → 重同步。P3 复检补的：原来只有检测没有处置。
         failures += ResyncChecks.Run(breakMode);
 
+        // 读取循环的容错：一条认不出的消息不该让整条连接失效。
+        failures += ReadLoopChecks.Run(breakMode);
+
         // P5：两段耗时、推理流隔离、计划全量替换
         failures += ToolChecks.Run(breakMode);
 
@@ -140,16 +123,16 @@ public static class Program
     /// <remarks>
     /// 这是整个解耦的地基：UI 只依赖 IPC 契约，换掉 SDK 时 UI 一行不改。
     /// <para>
-    /// <b>为什么允许 <see cref="ContractPackage"/></b>：<c>App</c> 有十个文件直接
-    /// 用它的类型（<c>ConversationView</c> 的条目 switch、<c>SettingsView</c> 的
-    /// 模型清单、<c>CommandPalette</c> 的会话摘要等）。这不是意外泄漏，
-    /// 是"线上词汇表来自 SDK"这一决策的必然结果 —— 见 <see cref="ContractPackage"/>
-    /// 上关于代价的说明。
+    /// <b>断言的是"一个 SDK 包都不许"</b>：<c>App</c> 用的那些类型
+    /// （<c>ConversationView</c> 的条目 switch、<c>SettingsView</c> 的模型清单、
+    /// <c>CommandPalette</c> 的会话摘要）现在全部来自 <c>DougongDesktop.Ipc</c>，
+    /// 而那个工程是 <c>App</c> 自己的 <c>ProjectReference</c>，不在本检查的禁止范围内。
+    /// 曾经这里有一个 <c>Dougong.HostProtocol</c> 的例外——契约搬进本仓库后它被删掉了。
     /// </para>
     /// <para>
-    /// <b>读 <c>project.assets.json</c> 而不是 csproj</b>：App 那条
-    /// <c>Dougong.HostProtocol</c> 也来自 <c>Directory.Build.props</c>，
-    /// 旧读法看不见。理由同 <see cref="IpcDependsOnNothingButBcl"/>。
+    /// <b>读 <c>project.assets.json</c> 而不是 csproj</b>：从 props 注入的引用
+    /// 在 csproj 文本里看不见，而那种注入正是这条检查曾经漏报的原因。
+    /// 理由同 <see cref="IpcDependsOnNothingButBcl"/>。
     /// </para>
     /// </remarks>
     private static string? AppDoesNotReferenceSdk(bool injectViolation)
@@ -169,10 +152,9 @@ public static class Program
         foreach (var name in declared)
         {
             if (name.StartsWith("DougongDesktop.", StringComparison.OrdinalIgnoreCase)) continue;
-            if (string.Equals(name, ContractPackage, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!name.StartsWith("Dougong.", StringComparison.OrdinalIgnoreCase)) continue;
 
-            if (EnginePackagePrefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
-                violations.Add($"{name}（引擎包）");
+            violations.Add($"{name}（SDK 包）");
         }
 
         // ② csproj 文本：查跨仓工程引用。
@@ -197,10 +179,10 @@ public static class Program
 
         if (violations.Count > 0)
         {
-            return "App 不得引用 SDK 引擎包："
+            return "App 不得引用任何 SDK 包："
                 + string.Join("；", violations)
                 + "\n  UI 与引擎只通过 DougongDesktop.Ipc 相接（实施方案 §3.2）；"
-                + "\n  契约包 " + ContractPackage + " 是已登记例外，引擎包不是";
+                + "\n  线上契约由本仓库自持（src/DougongDesktop.Ipc/Contract.cs），不来自 SDK";
         }
 
         return null;
@@ -243,18 +225,23 @@ public static class Program
     }
 
     /// <summary>
-    /// Ipc 只能依赖 BCL 与已登记的契约包，**不得依赖引擎包**。
+    /// Ipc 只能依赖 BCL，**不得依赖任何 SDK 包**。
     /// </summary>
     /// <remarks>
-    /// <b>这条检查原先断言的是"只依赖 BCL"，那是错的</b>——Ipc 从设计上就
-    /// 依赖 <c>Dougong.HostProtocol</c>，<c>Protocol.cs</c> 的注释论证过
-    /// "通用契约归 SDK、桌面端只留 UI 形态"。检查之所以一直绿，
-    /// 是因为它读 csproj 文本，而那条引用写在 <c>Directory.Build.props</c> 里。
+    /// <b>这条检查曾经既读错了地方、也断言错了内容</b>：
+    /// <list type="number">
+    /// <item>读的地方错：只读 csproj 文本，而 <c>Dougong.HostProtocol</c> 来自
+    /// <c>Directory.Build.props</c> 的全局引用——看不见，于是一直绿。</item>
+    /// <item>断言的内容错：那时它允许"契约包"，理由是"通用契约归 SDK"。
+    /// 后来那条理由被推翻了——契约现在自持，所以正确断言是 BCL 之外全不许。</item>
+    /// </list>
+    /// 两处都是"检查在说一件它没验证过的事"，这类错误比漏检查更难发现。
     /// <para>
     /// <b>现在断言什么</b>：
     /// <list type="number">
     /// <item>不得出现任何 <see cref="EnginePackagePrefixes"/> 里的引擎包</item>
-    /// <item>除 <see cref="ContractPackage"/> 外不得出现其它非 BCL 包</item>
+    /// <item>不得出现任何 SDK 包（含契约包——契约已自持）</item>
+    /// <item>不得出现其它未登记的非 BCL 包</item>
     /// </list>
     /// 第 2 条让"新增一个非 BCL 依赖"必须改这个文件，而不是悄悄通过。
     /// </para>
@@ -283,24 +270,20 @@ public static class Program
             if (name.StartsWith("DougongDesktop.", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            if (string.Equals(name, ContractPackage, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var isEngine = EnginePackagePrefixes.Any(
-                p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+            var isEngine = name.StartsWith("Dougong.", StringComparison.OrdinalIgnoreCase);
 
             // 判失败的理由要分开写：引擎包是"越界"，其它包是"未登记"。
             // 混成一句话会让人以为随便加个包也算越界，然后去删检查。
             violations.Add(isEngine
-                ? $"{name}（引擎包，{project} 不得引用）"
+                ? $"{name}（SDK 包，{project} 不得引用）"
                 : $"{name}（未登记的非 BCL 依赖）");
         }
 
-        if (injectViolation) violations.Add("(反证注入) Dougong.Agent（引擎包）");
+        if (injectViolation) violations.Add("(反证注入) Dougong.Agent（SDK 包）");
 
         if (violations.Count > 0)
         {
-            return "Ipc 只允许 BCL 与 " + ContractPackage + "；实际声明："
+            return "Ipc 只允许依赖 BCL；实际声明："
                 + string.Join("；", violations)
                 + "\n  引擎包进 Ipc 会让「换 agent 框架」波及契约层；"
                 + "\n  其它包要在 Program.cs 里显式登记并写明理由";
@@ -423,10 +406,10 @@ public static class Program
     /// 而且这种扩散是渐进的：每次只多一个文件，没人会注意到，
     /// 直到某天要换框架时发现到处都要改。
     /// <para>
-    /// <b>这条检查覆盖的是引擎包，不是契约包。</b> 契约包
-    /// （<see cref="ContractPackage"/>）的类型本来就允许出现在 Ipc / App 层——
-    /// <c>App</c> 有十个文件在用 <c>ConversationItem</c> 等类型，靠的是
-    /// <c>Directory.Build.props</c> 的全局 using，源码里没有 <c>using Dougong.</c> 那一行。
+    /// <b>这条检查覆盖的是 SDK 包。</b> 我们自持的契约
+    /// 的类型本来就在 Ipc / App 层用——但那些类型现在是**我们自己的**
+    /// （<c>DougongDesktop.Ipc</c>），不是 SDK 的，所以本预算管不到它们。
+    /// 全局 using 指向 <c>DougongDesktop.Ipc</c>，源码里不会出现 <c>using Dougong.</c>。
     /// </para>
     /// <para>
     /// <b>它数的是源码文本，不是还原结果</b>，所以看不见全局 using 带来的类型使用。

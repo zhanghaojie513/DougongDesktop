@@ -1,8 +1,12 @@
 using System.Text.Json;
 using Dougong.Agent;
 using DougongDesktop.Ipc;
-using IpcSessionSummary = Dougong.HostProtocol.SessionSummary;
+
 using Microsoft.Extensions.AI;
+
+// SDK 的 Dougong.Agent 也有一个 SessionSummary，名字撞了。
+// 我们的契约类型不带别名，SDK 那个也不需要——本文件只用前者。
+using SessionSummary = DougongDesktop.Ipc.SessionSummary;
 
 namespace DougongDesktop.Framework;
 
@@ -100,7 +104,7 @@ public sealed class SessionRuntime : IAsyncDisposable
         }
     }
 
-    public IpcSessionSummary Summary() => new(
+    public SessionSummary Summary() => new(
         SessionId,
         Title,
         Workspace,

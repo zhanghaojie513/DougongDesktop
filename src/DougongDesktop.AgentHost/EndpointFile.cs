@@ -35,7 +35,7 @@ internal static class EndpointFile
             hostInstanceId = Guid.NewGuid().ToString("N"),
             startedAt = DateTimeOffset.UtcNow,
             pid = Environment.ProcessId,
-            protocolVersion = HostProtocolContract.Version,
+            protocolVersion = DesktopContract.Version,
         };
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions

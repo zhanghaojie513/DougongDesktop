@@ -14,4 +14,12 @@
     <PackageReference Include="Avalonia" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 全局 using 指向 DougongDesktop.Ipc（见 Directory.Build.props），
+         因此这里必须引用它——using 不能凭空引入一个程序集里没有的命名空间。
+         目前 Ui.Core 的源码没用到任何契约类型，但 using 是编译期生效的，
+         少了这条引用会 CS0246。 -->
+    <ProjectReference Include="..\DougongDesktop.Ipc\DougongDesktop.Ipc.csproj" />
+  </ItemGroup>
+
 </Project>

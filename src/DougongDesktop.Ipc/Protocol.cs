@@ -8,122 +8,49 @@ namespace DougongDesktop.Ipc;
 /// 桌面端特有的消息。
 /// </summary>
 /// <remarks>
-/// <b>通用契约现在全部来自 SDK 的 <c>Dougong.HostProtocol</c></b>，
-/// 不在本仓库维护。这里只剩真正桌面端独有的：
+/// <b>通用契约现在由本仓库自持</b>，见 <see cref="DesktopContract"/>。
+/// 这里只剩真正桌面端独有的：
 /// <list type="bullet">
 /// <item><b>目录浏览</b>（<c>fs/list</c>、<c>fs/listed</c>）——右栏文件树的 UI 形态</item>
 /// <item><b>工作区改动</b>（<c>fs/changed</c>）——"改动 tab"，且"怎么算变更"
 /// 是一种实现选择（桌面端用文件版本指纹比对，给不出行级 diff）</item>
 /// </list>
 /// <para>
-/// <b>模型目录不在其中</b>：它曾经在这里，但那个取舍（只传上下文窗口与输出上限、
-/// 不传 wire format 细节）对任何客户端都成立，不是桌面端独有。
-/// 已收进 SDK 契约（<c>model/list</c> / <c>model/listed</c>）。
+/// <b>判别器全部挂在 <see cref="DesktopContract"/> 的根类型特性上</b>。
+/// 曾经的做法是调用 SDK 的 <c>RegisterDerivedType</c>，因为基类在 SDK 程序集里、
+/// 挂不了特性。根搬进本仓库后那个绕法不再需要——特性就在声明处，
+/// 不可能出现"注册了但没生效"，因为不注册就编译不过。
 /// </para>
 /// <para>
-/// <b>判别器由 <see cref="RegisterMessages"/> 登记</b>，不用 <c>[JsonDerivedType]</c>：
-/// 那个特性必须挂在基类上，而基类在 SDK 程序集里。
+/// <b><see cref="RegisterMessages"/> 保留为空操作</b>：<c>AppShell</c> 的静态构造
+/// 与检查工程都在调它。删掉会牵连五处调用点，而那些调用点本身没有错——
+/// 它们表达的是"在连接之前把协议准备好"这个意图，将来若引入
+/// 需要运行时组装的机制（比如按引擎能力裁剪判别器），这个入口正好是落点。
+/// 现在它是空操作，但保留调用点的成本为零。
 /// </para>
 /// </remarks>
 public static class DesktopProtocol
 {
     /// <summary>
-    /// 把桌面端特有的消息登记到 SDK 的共享配置里。
+    /// 协议准备。现在是空操作——判别器已由特性声明。
     /// </summary>
     /// <remarks>
-    /// <b>用 SDK 的 <c>RegisterDerivedType</c> 而不是自己克隆一份配置。</b>
-    /// 之前这里克隆 SDK 的 <c>Json</c> 再挂修饰器，那是绕法；
-    /// SDK 补了这个口之后不再需要。
-    /// <para>
-    /// <b>克隆的问题</b>（SDK 文档的原文理由）：绕开"同一份配置"这条，
-    /// 两侧的 <c>DefaultIgnoreCondition</c> 一旦不同，"字段不存在"与
-    /// "字段是 null"在线上就无法区分。
-    /// </para>
-    /// <para>
-    /// <b>基线类型必须显式给泛型参数</b>，不靠反射推断——SDK 文档说明了原因：
-    /// 派生类型的 <c>BaseType</c> 未必就是要挂的多态根（可能有中间基类），
-    /// 猜错时类型能编译、特性也都在，只是序列化时不走、反序列化时不认，
-    /// 两端都不报错。
-    /// </para>
-    /// <para>
-    /// <b>必须在首次序列化之前调用</b>。之后调用 SDK 会抛
-    /// <see cref="InvalidOperationException"/> 而不是静默忽略——
-    /// 静默忽略会让人对着"消息发不出去"排查半天。
-    /// 所以由 <c>AppShell</c> 的静态构造调，早于任何连接。
-    /// </para>
+    /// 见类注释：保留是因为调用点表达"连接前先备好协议"这一意图。
     /// </remarks>
     public static void RegisterMessages()
     {
-        if (_registered) return;
-        _registered = true;
-
-        HostProtocolContract.RegisterDerivedType<ClientCommand>(
-            new JsonDerivedType(typeof(ListDirectoryCommand), "fs/list"));
-        HostProtocolContract.RegisterDerivedType<ClientCommand>(
-            new JsonDerivedType(typeof(ListModelsCommand), "models/list"));
-        HostProtocolContract.RegisterDerivedType<ClientCommand>(
-            new JsonDerivedType(typeof(SubmitFeedbackCommand), "feedback/submit"));
-
-        HostProtocolContract.RegisterDerivedType<ServerEvent>(
-            new JsonDerivedType(typeof(DirectoryListedEvent), "fs/listed"));
-        HostProtocolContract.RegisterDerivedType<ServerEvent>(
-            new JsonDerivedType(typeof(WorkspaceChangedEvent), "fs/changed"));
-        HostProtocolContract.RegisterDerivedType<ServerEvent>(
-            new JsonDerivedType(typeof(ModelsListedEvent), "models/listed"));
-
-        // P8c C5 / P8c C8：权限预设与子 agent（SDK 0.1.19 起的契约）。
-        //
-        // **这一批不需要注册**——实测按基类 `ClientCommand` 序列化时，
-        // 判别器已由 SDK 自带（输出带 `"method":"permission/switch"`）。
-        // 与 `fs/list` 那批不同：那几个是我们自己定义的类型，必须手工注册。
-        //
-        // 这里只做**存在性断言**，防止有一天 SDK 把它们挪出多态根之后
-        // 静默失效——那种失败在线上表现为"消息发不出去"，排查很费劲。
-        AssertSdkRegisters("permission/presets", new ListPermissionPresetsCommand
-            { RequestId = "probe", SessionId = "probe" });
-        AssertSdkRegisters("permission/switch", new SwitchPermissionPresetCommand
-            { RequestId = "probe", SessionId = "probe", Key = "probe" });
-        AssertSdkRegisters("permission/watch", new WatchPermissionPresetsCommand
-            { RequestId = "probe", SessionId = "probe", Enabled = true });
-        AssertSdkRegisters("subagent/list", new ListSubagentsCommand
-            { RequestId = "probe", SessionId = "probe" });
-        AssertSdkRegisters("subagent/result", new TakeSubagentResultCommand
-            { RequestId = "probe", SessionId = "probe", SubagentId = "probe" });
-        AssertSdkRegisters("subagent/cancel", new CancelSubagentCommand
-            { RequestId = "probe", SessionId = "probe", SubagentId = "probe", Reason = "probe" });
+        // 不再需要注册：判别器在 DesktopContract 的类型声明上。
+        // 这里刻意保留一个方法体而不是删掉整个入口。
     }
 
     /// <summary>
-    /// 断言某条命令按基类序列化时带上了期望的判别器。
+    /// 序列化配置：本仓库自持，与 SDK 的逐项对齐。
     /// </summary>
     /// <remarks>
-    /// <b>为什么要主动查而不是等出错</b>：多态判别器缺失时的表现是**静默降级**——
-    /// 序列化不抛异常，只是不带 <c>method</c> 字段，对端读到就当成未知消息丢弃。
-    /// 那在 UI 上表现为"按钮点了没反应"，而日志里什么都没有。
+    /// 见 <see cref="DesktopContract.Json"/> 的说明——包括为什么必须自己建一份
+    /// 而不能借用 SDK 的。
     /// </remarks>
-    private static void AssertSdkRegisters(string expectedMethod, ClientCommand command)
-    {
-        var json = System.Text.Json.JsonSerializer.Serialize(command, typeof(ClientCommand), Json);
-        if (!json.Contains($"\"method\":\"{expectedMethod}\"", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"SDK 契约里 {command.GetType().Name} 没有注册判别器 {expectedMethod}。"
-                + "序列化会静默降级成没有 method 字段的 JSON，对端会把它当未知消息丢弃。"
-                + $"实际输出：{json}");
-        }
-    }
-
-    private static bool _registered;
-
-    /// <summary>
-    /// 序列化配置：直接用 SDK 的共享实例。
-    /// </summary>
-    /// <remarks>
-    /// <b>不再克隆</b>：桌面端消息已经通过 <c>RegisterDerivedType</c>
-    /// 进到 SDK 那份配置里，两端用同一个 <c>JsonSerializerOptions</c>，
-    /// "同一份配置"这条从机制上成立，不靠约定。
-    /// </remarks>
-    public static JsonSerializerOptions Json => HostProtocolContract.Json;
+    public static JsonSerializerOptions Json => DesktopContract.Json;
 
     /// <summary>
     /// 诊断用：确认线上帧的字段命名。
@@ -131,8 +58,8 @@ public static class DesktopProtocol
     /// <remarks>
     /// <b>为什么要有这个</b>：2026-11-10 我向 SDK 侧报了一个"字段命名不一致"的问题
     /// （说 <c>Key</c>/<c>Enabled</c> 是 PascalCase 而 <c>sessionId</c> 是 camelCase）。
-    /// 复核发现是**我的探针写错了**——那次探针用了默认 <c>JsonSerializerOptions</c>，
-    /// 没有传 <see cref="HostProtocolContract.Json"/>。用对配置后全是 camelCase：
+    /// 复核发现是**我的探针写错了**——那次探针用了默认 <c>JsonSerializerOptions</c>。
+    /// 用对配置后全是 camelCase：
     /// <code>
     /// 正确：{"method":"permission/switch","sessionId":"s","key":"ask","requestId":"2"}
     /// 错误：{"method":"permission/switch","SessionId":"s","Key":"ask","RequestId":"2"}
@@ -154,16 +81,6 @@ public static class DesktopProtocol
 
         return sample;
     }
-
-    /// <summary>
-    /// 已登记的扩展类型，供自检。
-    /// </summary>
-    /// <remarks>
-    /// SDK 暴露这个清单就是为了让宿主能断言"我的注册真的进去了"——
-    /// 注册失败是静默的（编译过、序列化不报错，只是那条消息用错配置）。
-    /// </remarks>
-    public static IReadOnlyList<(Type BaseType, JsonDerivedType Derived)> RegisteredExtensions =>
-        HostProtocolContract.RegisteredExtensions;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -299,11 +216,13 @@ public sealed record SubmitFeedbackCommand : ClientCommand
 // 模型目录
 // ─────────────────────────────────────────────────────────────
 
-// **这三个类型已改由 SDK 的 Dougong.HostProtocol 提供**：
+// **这三个类型现在在 Contract.cs 里，由本仓库自持**：
 // ModelInfo、ListModelsCommand（判别器 model/list）、ModelsListedEvent（model/listed）。
 //
-// 此前这里各自定义了一份，判别器写成 models/list——与契约不一致。
-// 实测同一类型挂两个判别器时，序列化只用第一个，第二个反序列化直接抛
-// JsonException。也就是说两份定义并存时，写出去和读回来用的不是同一个值。
+// 历史：它们一度由 SDK 的 Dougong.HostProtocol 提供；更早之前这里各自定义过一份，
+// 判别器写成 models/list——与契约不一致。实测同一类型挂两个判别器时，
+// 序列化只用第一个，第二个反序列化直接抛 JsonException。也就是说两份定义并存时，
+// 写出去和读回来用的不是同一个值。
 //
-// 现在删掉本地定义，直接用契约的。判别器统一为 model/list 与 model/listed。
+// 现在统一在 Contract.cs 声明，判别器为 model/list 与 model/listed。
+// 本文件不出现它们，就是为了不再有"第二份定义"的可能。

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Reflection;
+using System.Text.Json.Serialization;
 using DougongDesktop.Framework;
 using DougongDesktop.Ipc;
 
@@ -585,17 +587,33 @@ internal static class DockChecks
                      || typeof(ServerEvent).IsAssignableFrom(t))
             .ToArray();
 
-        var registered = DesktopProtocol.RegisteredExtensions
-            .Select(r => r.Derived.DerivedType)
+        // **登记方式是特性，不是运行时注册**：判别器挂在根类型的
+        // [JsonDerivedType] 上。所以这里读特性——它编译期就在，
+        // 不可能出现"注册代码跑了但没生效"。
+        var registered = PolyRegistrations(typeof(ClientCommand))
+            .Concat(PolyRegistrations(typeof(ServerEvent)))
+            .Select(r => r.DerivedType)
             .ToHashSet();
 
         var missing = expected.Where(t => inject || !registered.Contains(t)).ToArray();
 
         if (missing.Length == 0) return null;
 
-        return $"以下消息没有在 RegisterMessages 里登记（发得出去、收不回来）：" +
-               string.Join("、", missing.Select(t => t.Name));
+        return $"以下消息没有在根类型上挂 [JsonDerivedType]（发得出去、收不回来）："
+             + string.Join("、", missing.Select(t => t.Name));
     }
+
+    /// <summary>
+    /// 读某个多态根上的全部 <see cref="JsonDerivedTypeAttribute"/> 登记。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么直读特性而不是问某个 API</b>：判别器的唯一权威来源就是
+    /// 这个特性——<c>System.Text.Json</c> 运行时读的也是它。
+    /// 走中间层（比如 SDK 的 <c>RegisteredExtensions</c>）会让检查依赖那个层，
+    /// 而那层不在了就查不到；特性永远在。
+    /// </remarks>
+    private static IEnumerable<JsonDerivedTypeAttribute> PolyRegistrations(Type root) =>
+        ((MemberInfo)root).GetCustomAttributes<JsonDerivedTypeAttribute>();
 
     /// <summary>
     /// 桌面端消息必须真的进了 SDK 的多态登记，不只是"写了注册代码"。
@@ -612,30 +630,27 @@ internal static class DockChecks
     /// </remarks>
     private static string? ActuallyRegistered(bool inject)
     {
-        var registered = DesktopProtocol.RegisteredExtensions;
-
         if (inject) return "反证注入：注册清单为空";
 
         var expected = new (Type Derived, Type Base, string Discriminator)[]
         {
             (typeof(ListDirectoryCommand), typeof(ClientCommand), "fs/list"),
-            (typeof(ListModelsCommand), typeof(ClientCommand), "models/list"),
+            (typeof(ListModelsCommand), typeof(ClientCommand), "model/list"),
             (typeof(DirectoryListedEvent), typeof(ServerEvent), "fs/listed"),
             (typeof(WorkspaceChangedEvent), typeof(ServerEvent), "fs/changed"),
-            (typeof(ModelsListedEvent), typeof(ServerEvent), "models/listed"),
+            (typeof(ModelsListedEvent), typeof(ServerEvent), "model/listed"),
         };
 
         foreach (var (derived, baseType, discriminator) in expected)
         {
-            // JsonDerivedType 是 struct，不能拿 null 判断"有没有"，
-            // 只能先 Any 再取第一个。
-            if (!registered.Any(r => r.Derived.DerivedType == derived && r.BaseType == baseType))
-                return $"{derived.Name} 没有进 SDK 的注册清单（基线 {baseType.Name}）";
+            var hit = PolyRegistrations(baseType)
+                .FirstOrDefault(r => r.DerivedType == derived);
 
-            var hit = registered.First(r => r.Derived.DerivedType == derived && r.BaseType == baseType);
+            if (hit is null)
+                return $"{derived.Name} 没有挂在 {baseType.Name} 的 [JsonDerivedType] 上";
 
-            if (hit.Derived.TypeDiscriminator as string != discriminator)
-                return $"{derived.Name} 的判别器应为 {discriminator}，实际 {hit.Derived.TypeDiscriminator}";
+            if (hit.TypeDiscriminator as string != discriminator)
+                return $"{derived.Name} 的判别器应为 {discriminator}，实际 {hit.TypeDiscriminator}";
         }
 
         return null;
