@@ -46,7 +46,7 @@ public sealed class AppShell : UserControl
             _rightbarShown = _slots.Resolve(ReservedSlots.RightBar) is not null;
 
             if (_rightbarShown && _rightbarWidth <= 0 && Bounds.Width > 0)
-                _rightbarWidth = Columns.RightbarDefault(Bounds.Width);
+                _rightbarWidth = PreferredRightbarWidth(Bounds.Width);
 
             ApplyColumns();
         }, Avalonia.Threading.DispatcherPriority.Loaded);
@@ -75,7 +75,7 @@ public sealed class AppShell : UserControl
 
             // 首次测量：右栏若有占位者，按 45% 给个初始宽
             if (_rightbarWidth <= 0 && _rightbarShown)
-                _rightbarWidth = Columns.RightbarDefault(e.NewSize.Width);
+                _rightbarWidth = PreferredRightbarWidth(e.NewSize.Width);
 
             ApplyColumns();
         };
@@ -113,7 +113,7 @@ public sealed class AppShell : UserControl
             {
                 var hasOccupant = slots.Resolve(slotKey) is not null;
                 if (hasOccupant && !_rightbarShown && Bounds.Width > 0)
-                    _rightbarWidth = Columns.RightbarDefault(Bounds.Width);
+                    _rightbarWidth = PreferredRightbarWidth(Bounds.Width);
 
                 _rightbarShown = hasOccupant;
                 ApplyColumns();
@@ -141,6 +141,20 @@ public sealed class AppShell : UserControl
 
     /// <summary>右栏列的承载控件。</summary>
     private Control _rightbarHost = null!;
+
+    /// <summary>
+    /// 右栏左边界的分隔条：拖动它改右栏宽度（P8g M17）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么用叠加层而不是塞进三列 Grid</b>：Grid 是 `像素|*|像素`，
+    /// 加一列会把求解器（<see cref="Columns.Compute"/>）的输入打乱。
+    /// 叠加层只负责"显示位置 + 接手势"，宽度值仍走同一个求解器——
+    /// 这样边界规则（右栏先让步、中栏最低 400）不会被绕过。
+    /// </remarks>
+    private Border? _splitter;
+
+    /// <summary>拖动中的临时宽度（松手才写盘）。</summary>
+    private double? _draggingWidth;
 
     /// <summary>中栏承载控件（带左上圆角）。</summary>
     private Border _centerHost = null!;
@@ -261,6 +275,16 @@ public sealed class AppShell : UserControl
         _columns.ColumnDefinitions[2].Width = new GridLength(solution.Rightbar, GridUnitType.Pixel);
 
         _rightbarHost.IsVisible = solution.Rightbar > 0;
+
+        // 分隔条跟着右栏左边界走。右栏收起时不显示（没有可拖的东西）。
+        if (_splitter is not null)
+        {
+            // 位置 = 右栏左边界的 x 坐标；手柄宽 6 居中压在那条线上
+            var x = solution.Sidebar + solution.Center;
+            _splitter.Margin = new Thickness(x - 3, 0, 0, 0);
+            _splitter.IsVisible = solution.Rightbar > 0;
+        }
+
         Layout = solution;
     }
 
@@ -458,9 +482,124 @@ public sealed class AppShell : UserControl
 
         var root = new Grid { Background = DshTheme.Brush(DshTheme.SidebarFill) };
         root.Children.Add(stack);
+
+        // 右栏分隔条：叠加在 stack 之上，位置由 ApplyColumns 更新。
+        _splitter = BuildRightSplitter();
+        root.Children.Add(_splitter);
+
         root.Children.Add(overlay);
 
         return root;
+    }
+
+    /// <summary>
+    /// 右栏首次打开时的宽度：优先用用户拖过并存下的值。
+    /// </summary>
+    /// <remarks>
+    /// <b>仍要过一遍求解器</b>：存的值可能是在更宽的窗口下拖的，
+    /// 换到窄窗口后直接套用会挤掉中栏。<see cref="Columns.Compute"/>
+    /// 会按当前视口夹取，所以这里只负责"给个偏好值"。
+    /// </remarks>
+    private double PreferredRightbarWidth(double viewport) =>
+        _settings.RightbarWidth ?? Columns.RightbarDefault(viewport);
+
+    /// <summary>
+    /// 右栏左边界的分隔条（P8g M17：列宽可拖拽）。
+    /// </summary>
+    /// <remarks>
+    /// <b>宽度不在这里算</b>：拖动只改 <see cref="_rightbarWidth"/>，
+    /// 再交给 <see cref="Columns.Compute"/> 裁决。这样边界规则
+    /// （右栏先让步、中栏最低 400、右栏上限 45%）与响应式断点
+    /// 全部沿用同一份逻辑，不会出现"拖拽绕过了保护"这种分叉。
+    /// <para>
+    /// <b>为什么做成 6px 宽</b>：dsh 的拖拽区是 6px（宽容度），
+    /// 视觉上是 1px 线。太窄了抓不住，太宽了会挡住内容点击。
+    /// 平时透明，悬停/拖动时才显示高亮。
+    /// </para>
+    /// </remarks>
+    private Border BuildRightSplitter()
+    {
+        var splitter = new Border
+        {
+            Width = 6,
+            Background = Avalonia.Media.Brushes.Transparent,
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.SizeWestEast),
+            IsVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            // 只贴右侧，不撑满——它跟着右栏左边界走
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Child = new Border
+            {
+                Width = 1,
+                Background = DshTheme.Brush(DshTheme.BorderL3),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            },
+        };
+
+        var startX = 0.0;
+        var startWidth = 0.0;
+        var dragging = false;
+
+        splitter.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(splitter).Properties.IsLeftButtonPressed) return;
+            dragging = true;
+            startX = e.GetPosition(this).X;
+            startWidth = _rightbarWidth;
+            e.Pointer.Capture(splitter);
+            e.Handled = true;
+        };
+
+        splitter.PointerMoved += (_, e) =>
+        {
+            if (!dragging) return;
+
+            // 往左拖 = 右栏变宽，所以取反
+            var delta = startX - e.GetPosition(this).X;
+            _draggingWidth = startWidth + delta;
+
+            // 立刻反馈，但**不写盘**——松手才持久化，避免拖动过程里
+            // 每帧都落一次文件（磁盘 IO 会拖慢手势）
+            _rightbarWidth = _draggingWidth.Value;
+            ApplyColumns();
+            e.Handled = true;
+        };
+
+        splitter.PointerReleased += (_, e) =>
+        {
+            if (!dragging) return;
+            dragging = false;
+            e.Pointer.Capture(null);
+            e.Handled = true;
+
+            // 松手才持久化。存的是**实际生效的宽度**（solution.Rightbar），
+            // 不是用户拖到的原始值——被边界夹过之后，下次启动该还原成
+            // 夹取后的结果，否则用户会看到"我拖到 200，重启变回 580"。
+            SaveRightbarWidth(Layout.Rightbar);
+        };
+
+        splitter.PointerCaptureLost += (_, _) => dragging = false;
+
+        return splitter;
+    }
+
+    /// <summary>把右栏宽度写进界面偏好。</summary>
+    /// <remarks>
+    /// <b>失败不抛</b>：与 <see cref="AppSettings"/> 的既有原则一致——
+    /// 存不下布局不该打断用户。
+    /// </remarks>
+    private void SaveRightbarWidth(double width)
+    {
+        try
+        {
+            var current = AppSettings.Load(_store);
+            new AppSettings { PaneSizes = current.PaneSizes, RightbarWidth = width }
+                .Save(_store);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[shell] 保存右栏宽度失败：{ex.Message}");
+        }
     }
 
     /// <summary>

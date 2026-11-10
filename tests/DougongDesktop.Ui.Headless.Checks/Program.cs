@@ -49,6 +49,8 @@ public static class Program
         failures += Check("model-list-shows-capabilities-not-a-fake-picker", ModelListShowsCapabilities);
         failures += Check("key-diagnostics-never-leak-the-secret", KeyDiagnosticsNeverLeakSecret);
         failures += Check("current-model-stays-visible-when-buried", CurrentModelStaysVisibleWhenBuried);
+        failures += Check("drag-resize-cannot-bypass-column-limits", DragResizeCannotBypassLimits);
+        failures += Check("saved-rightbar-width-is-revalidated", SavedWidthIsRevalidated);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -357,6 +359,87 @@ public static class Program
             return "没有按 provider 分组";
 
         return null;
+    }
+
+    /// <summary>
+    /// 拖动列宽不能绕过求解器的边界（P8g M17）。
+    /// </summary>
+    /// <remarks>
+    /// <b>拖拽最容易出的问题是"变成第二条计算路径"</b>：手柄自己算宽度、
+    /// 自己夹取，于是 dsh 的让步规则（右栏先让步、中栏最低 400、
+    /// 右栏上限 45%）被绕过。用户把右栏拖到 900 而中栏只剩 100 时，
+    /// 界面看起来"能用"，但已经不符合规格了。
+    /// <para>
+    /// 断言：把用户拖到的原始值（无论多离谱）喂进 `Columns.Compute`，
+    /// 输出的中栏都不能低于 <c>CenterMin</c>、右栏不能超过上限。
+    /// </para>
+    /// </remarks>
+    private static string? DragResizeCannotBypassLimits()
+    {
+        const double viewport = 1280;
+
+        // 模拟"用户把右栏拖得很宽"
+        foreach (var crazy in new[] { 900.0, 2000.0, viewport })
+        {
+            var sol = DougongDesktop.Ui.Core.Columns.Compute(viewport, 280, crazy);
+            if (sol.Center < DougongDesktop.Ui.Core.Columns.CenterMin)
+                return $"拖动到 {crazy} 后中栏只剩 {sol.Center}（低于下限 "
+                       + $"{DougongDesktop.Ui.Core.Columns.CenterMin}）——边界被绕过了";
+        }
+
+        // 模拟"用户把右栏拖得很窄"
+        var narrow = DougongDesktop.Ui.Core.Columns.Compute(viewport, 280, 10);
+        if (narrow.Rightbar is > 0 and < DougongDesktop.Ui.Core.Columns.RightbarMin)
+            return $"拖动到 10 后右栏变成 {narrow.Rightbar}（低于 {DougongDesktop.Ui.Core.Columns.RightbarMin}）"
+                   + "——应该要么收起要么夹到下限";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 存下来的坏宽度必须在读取时被丢弃。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查的第一版是错的</b>：它查源码里有没有 `IsNaN` 这个字符串，
+    /// 而 `PaneSizes` 的校验里也有 `IsNaN`——把 `RightbarWidth` 的校验删掉后
+    /// 检查照样通过。字符串匹配证明不了"这段逻辑管的是这个字段"。
+    /// <para>
+    /// 现在改成**真正的行为验证**：写一份含坏宽度的 JSON 到内存存储，
+    /// 调 `AppSettings.Load`，断言读回来的是 null。
+    /// </para>
+    /// </remarks>
+    private static string? SavedWidthIsRevalidated()
+    {
+        // 坏值：负数 / NaN / 0 都应被丢弃
+        var cases = new (string Json, string Label)[]
+        {
+            ("""{"rightbarWidth":-100}""", "负数"),
+            ("""{"rightbarWidth":0}""", "零"),
+            ("""{"rightbarWidth":"NaN"}""", "NaN"),
+        };
+
+        foreach (var (json, label) in cases)
+        {
+            var store = new MemoryStore(json);
+            var loaded = DougongDesktop.Ui.Core.AppSettings.Load(store);
+            if (loaded.RightbarWidth is not null)
+                return $"坏宽度（{label}）没有被丢弃：读回来是 {loaded.RightbarWidth}，"
+                       + "会让右栏消失或布局崩溃";
+        }
+
+        // 正常值必须保留
+        var ok = DougongDesktop.Ui.Core.AppSettings.Load(new MemoryStore("""{"rightbarWidth":576}"""));
+        if (ok.RightbarWidth is not 576)
+            return $"正常的 576 没被读回来（得到 {ok.RightbarWidth?.ToString() ?? "null"}）";
+
+        return null;
+    }
+
+    /// <summary>内存存储，用于测 AppSettings 的读写而不碰磁盘。</summary>
+    private sealed class MemoryStore(string json) : DougongDesktop.Ui.Core.ISettingsStore
+    {
+        public string? Read(string name) => json;
+        public bool Write(string name, string content) => true;
     }
 
     /// <summary>

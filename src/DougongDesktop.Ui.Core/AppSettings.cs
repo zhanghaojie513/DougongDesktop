@@ -50,6 +50,20 @@ public sealed class AppSettings
     [JsonPropertyName("paneSizes")]
     public double[]? PaneSizes { get; init; }
 
+    /// <summary>
+    /// 右栏宽度（像素）。null 表示没存过，用 <c>Columns.RightbarDefault</c>。
+    /// </summary>
+    /// <remarks>
+    /// <b>存像素而不是百分比</b>：dsh 的列宽语义就是像素
+    /// （见 <c>Columns.Compute</c> 的注释）。存百分比会在换窗口尺寸后漂移。
+    /// <para>
+    /// <b>存"夹取后的实际值"</b>：用户拖到 200 但被 <c>RightbarMin</c> 挡住时，
+    /// 存下来的应该是夹取后的结果，重启后才和当时看到的一致。
+    /// </para>
+    /// </remarks>
+    [JsonPropertyName("rightbarWidth")]
+    public double? RightbarWidth { get; init; }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -76,14 +90,30 @@ public sealed class AppSettings
             var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)
                          ?? new AppSettings();
 
-            // 坏数据当没存过——否则会把布局还原成 0 宽度。
-            // 单栏为 0 是合法的（折叠的栏占比就是 0），但全为 0 说明文件坏了。
-            if (loaded.PaneSizes is { Length: 3 } sizes
-                && sizes.All(s => s >= 0 && !double.IsNaN(s) && !double.IsInfinity(s))
-                && sizes.Any(s => s > 0))
-                return loaded;
+            // **两个字段各自独立校验**。
+            //
+            // 第一版把 RightbarWidth 的校验嵌在 "PaneSizes 有效" 的分支里，
+            // 结果是**只存宽度、没存 PaneSizes 时整份设置被丢弃**——
+            // 拖动列宽永远还原不了。检查抓到后才发现（正常值 576 读回来是 null）。
+            //
+            // PaneSizes：单栏为 0 合法（折叠），全为 0 说明文件坏了。
+            var paneSizesOk = loaded.PaneSizes is { Length: 3 } sizes
+                              && sizes.All(s => s >= 0 && !double.IsNaN(s) && !double.IsInfinity(s))
+                              && sizes.Any(s => s > 0);
 
-            return new AppSettings();
+            // 右栏宽度：0/负数会让右栏消失，NaN/Infinity 会让布局崩。
+            // 坏就单独丢弃这个字段，不牵连 PaneSizes。
+            var width = loaded.RightbarWidth;
+            var widthOk = width is { } w
+                          && !double.IsNaN(w) && !double.IsInfinity(w) && w > 0;
+
+            if (!paneSizesOk && !widthOk) return new AppSettings();
+
+            return new AppSettings
+            {
+                PaneSizes = paneSizesOk ? loaded.PaneSizes : null,
+                RightbarWidth = widthOk ? width : null,
+            };
         }
         catch
         {
