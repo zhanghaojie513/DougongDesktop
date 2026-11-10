@@ -1246,7 +1246,12 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
             // 整条标题栏上的窗口按钮由 Arc 管，我们不该再画一套。
             var ownButtons = barHost.TitlebarContent?.GetVisualDescendants()
                 .OfType<Avalonia.Controls.Button>().Count() ?? 0;
-            Console.Error.WriteLine($"[shell] 标题栏 LeftContent 内按钮 {ownButtons} 个（期望 3）");
+            // 期望值按平台分：dsh 的「应用/编辑」只在 Windows 有
+            // （preload-windows.ts 在非 win32 直接 return）。
+            var expected = OperatingSystem.IsWindows() ? 3 : 1;
+            Console.Error.WriteLine(
+                $"[shell] 标题栏 LeftContent 内按钮 {ownButtons} 个（期望 {expected}：" +
+                (OperatingSystem.IsWindows() ? "收起侧栏 + 应用 + 编辑）" : "仅收起侧栏）"));
 
             var sidebar = _conversation.GetVisualDescendants()
                 .OfType<TKCode.Arc.Sidebar>().FirstOrDefault();

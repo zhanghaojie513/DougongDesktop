@@ -41,6 +41,7 @@ public static class Program
         failures += Check("settings-plugins-lists-loaded-only", PluginsListLoadedOnly);
         failures += Check("terminal-panel-reports-unavailable", TerminalPanelReportsUnavailable);
         failures += Check("titlebar-uses-arc-slots", TitlebarUsesArcSlots);
+        failures += Check("titlebar-menus-are-windows-only", TitlebarMenusAreWindowsOnly);
         failures += Check("dock-mode-builds-split-tree", DockModeBuildsSplitTree);
         failures += Check("permission-picker-reflects-engine-state", PermissionPickerReflectsEngineState);
         failures += Check("engine-survives-bad-command", EngineSurvivesBadCommand);
@@ -740,6 +741,54 @@ public static class Program
     }
 
     /// <summary>
+    /// 「应用 / 编辑」菜单必须只在 Windows 上出现（照 dsh 的实际行为）。
+    /// </summary>
+    /// <remarks>
+    /// <b>依据是 dsh 源码，不是猜测</b>（<c>apps/desktop/src/preload-windows.ts</c>）：
+    /// <code>
+    /// export function syncWindowsAppearance(): void {
+    ///   if (process.platform !== 'win32') return
+    /// </code>
+    /// 那个菜单是给 Windows 自绘标题栏配的——Windows 上
+    /// <c>titleBarStyle: 'hidden'</c> 抹掉了原生标题栏，菜单得自己画。
+    /// macOS 是 <c>hiddenInset</c>，原生交通灯还在、菜单栏在屏幕顶部，
+    /// 标题栏里不该再放一份。
+    /// <para>
+    /// <b>防的是"两边都画"</b>：不分支的话 macOS 上会多出两个本属于
+    /// Windows 的菜单，既重复又挤掉交通灯旁边的空间。
+    /// </para>
+    /// </remarks>
+    private static string? TitlebarMenusAreWindowsOnly()
+    {
+        var path = Path.Combine(
+            FindRepoRoot(), "src", "DougongDesktop.App", "Shell", "AppShell.cs");
+        if (!File.Exists(path)) return $"找不到 {path}";
+
+        var src = File.ReadAllText(path);
+
+        var appMenu = src.IndexOf("BuildMenuButton(\"应用\")", StringComparison.Ordinal);
+        var editMenu = src.IndexOf("BuildMenuButton(\"编辑\")", StringComparison.Ordinal);
+        if (appMenu < 0 || editMenu < 0)
+            return "找不到「应用」或「编辑」菜单的构建调用";
+
+        // 从「应用」的调用往前找最近的平台守卫；没有就是没分支
+        var before = src[..appMenu];
+        var guard = before.LastIndexOf("OperatingSystem.IsWindows()", StringComparison.Ordinal);
+        if (guard < 0)
+            return "「应用/编辑」没有按平台分支：macOS 上会出现本属于 Windows 的菜单";
+
+        // 守卫之后到「应用」调用之间，必须能同时看到该调用与「编辑」。
+        // 不去数花括号距离——那对格式太敏感（换行/空格不同就误报）。
+        var guardedRegion = src[guard..(appMenu + 200)];
+        if (!guardedRegion.Contains("BuildMenuButton(\"应用\")", StringComparison.Ordinal))
+            return "「应用」不在 OperatingSystem.IsWindows() 守卫之后";
+        if (!guardedRegion.Contains("BuildMenuButton(\"编辑\")", StringComparison.Ordinal))
+            return "「编辑」不在 OperatingSystem.IsWindows() 守卫之后";
+
+        return null;
+    }
+
+    /// <summary>
     /// 标题栏必须是 ArcWindow 的 TitleBar，且左侧内容真的注进去了。
     /// </summary>
     /// <remarks>
@@ -761,10 +810,15 @@ public static class Program
         if (shell.TitlebarContent is null)
             return "AppShell.TitlebarContent 为 null：左侧按钮没建出来";
 
+        // **期望值按平台分**：dsh 的「应用/编辑」只在 Windows 有
+        // （preload-windows.ts 里 `if (process.platform !== 'win32') return`）。
+        // macOS 上只剩「收起侧栏」一个。写死 3 会让 Mac 上的正确实现变红。
+        var expected = OperatingSystem.IsWindows() ? 3 : 1;
         var buttons = shell.TitlebarContent.GetLogicalDescendants()
             .OfType<Avalonia.Controls.Button>().Count();
-        if (buttons != 3)
-            return $"左侧内容里按钮 {buttons} 个（期望 3：收起侧栏 / 应用 / 编辑）";
+        if (buttons != expected)
+            return $"左侧内容里按钮 {buttons} 个（期望 {expected}：" +
+                   (OperatingSystem.IsWindows() ? "收起侧栏 / 应用 / 编辑）" : "仅收起侧栏）");
 
         // 自绘窗口按钮必须彻底消失——它们现在由 Arc 的 TitleBar 按平台处理
         var hasWindowButtons = typeof(DougongDesktop.App.Shell.AppShell)

@@ -628,18 +628,37 @@ public sealed class AppShell : UserControl
         //
         // 所以这里既不再判断 IsMacOS，也不再有 MacTrafficLightInset
         // 那个"截图估出来的 80px"。左侧内容由 TitleBar 自动放在交通灯右边。
-        TitlebarContent = new StackPanel
+        // **「应用 / 编辑」只在 Windows 上有**——这是 dsh 的实际行为，
+        // 不是我们的取舍。证据（dsh `apps/desktop/src/preload-windows.ts`）：
+        //
+        //   export function syncWindowsAppearance(): void {
+        //     if (process.platform !== 'win32') return   // ← macOS 直接返回
+        //
+        // 那个菜单（`installWindowsMenu`）正是给 Windows 自绘标题栏配的：
+        // Windows 上 `titleBarStyle: 'hidden'` 抹掉了原生标题栏，所以菜单、
+        // 拖拽区、窗口按钮都得自己画。macOS 上是 `titleBarStyle: 'hiddenInset'`
+        // ——原生交通灯还在，菜单栏在屏幕顶部（系统菜单栏），标题栏里不需要
+        // 也不该再放一份「应用 / 编辑」。
+        //
+        // 同时 macOS 也没有 `data-windows-titlebar` 标记（同文件）：
+        // 那 40px 自绘标题栏只在 Windows 生效。macOS 交给系统交通灯，
+        // 左栏内容贴着它排。
+        var content = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 0,
             VerticalAlignment = VerticalAlignment.Center,
-            Children =
-            {
-                BuildSidebarToggleButton(),
-                BuildMenuButton("应用"),
-                BuildMenuButton("编辑"),
-            },
         };
+
+        content.Children.Add(BuildSidebarToggleButton());
+
+        if (OperatingSystem.IsWindows())
+        {
+            content.Children.Add(BuildMenuButton("应用"));
+            content.Children.Add(BuildMenuButton("编辑"));
+        }
+
+        TitlebarContent = content;
     }
 
     /// <summary>标题栏的纯图标按钮。</summary>
