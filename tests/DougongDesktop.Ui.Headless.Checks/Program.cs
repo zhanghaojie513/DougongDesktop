@@ -45,6 +45,7 @@ public static class Program
         failures += Check("permission-picker-reflects-engine-state", PermissionPickerReflectsEngineState);
         failures += Check("engine-survives-bad-command", EngineSurvivesBadCommand);
         failures += Check("subagent-registry-is-single-instance", SubagentRegistryIsSingleInstance);
+        failures += Check("subagent-dispatch-tool-is-registered", SubagentDispatchToolIsRegistered);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -316,6 +317,46 @@ public static class Program
     /// 会漏掉每一行的标题与说明。
     /// 第一版就漏了，导致"插件 Id 没显示出来"的误报：实际渲染是好的。
     /// </remarks>
+    /// <summary>
+    /// 三个子 agent 工具必须**全部**注册，特别是派发工具本身。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条来自一次真实漏注册</b>：2026-11-10 为了绕开
+    /// `dispatcherAccessor` 的时序问题，只注册了两个只读工具
+    /// （`SubagentListTool` / `SubagentResultTool`），漏了 `SubagentTool`。
+    /// <para>
+    /// 后果极其误导：三条命令都正常返回（空列表、正确报错）、日志干净、
+    /// 检查全绿——**但模型完全没有派发子 agent 的能力**。
+    /// 只读工具能工作，不代表主功能接通。
+    /// </para>
+    /// <para>
+    /// 所以这条断言"三个都要有"，而不是"至少有一个"。
+    /// </para>
+    /// </remarks>
+    private static string? SubagentDispatchToolIsRegistered()
+    {
+        var path = Path.Combine(
+            FindRepoRoot(), "src", "DougongDesktop.Framework", "SessionComposer.cs");
+        if (!File.Exists(path)) return $"找不到 {path}";
+
+        var src = File.ReadAllText(path);
+
+        var required = new (string Type, string Why)[]
+        {
+            ("new SubagentTool(", "派发工具——没有它模型无法派子 agent"),
+            ("new SubagentListTool(", "列表工具"),
+            ("new SubagentResultTool(", "取结果工具"),
+        };
+
+        foreach (var (type, why) in required)
+        {
+            if (!src.Contains(type, StringComparison.Ordinal))
+                return $"SessionComposer 没有注册 {type.TrimEnd('(')}（{why}）";
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// 子 agent 注册表必须只有一份，且工具拿到的就是协议层看到的那份。
     /// </summary>
