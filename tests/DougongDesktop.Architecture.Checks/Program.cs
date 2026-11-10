@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace DougongDesktop.Architecture.Checks;
@@ -19,8 +20,25 @@ public static class Program
 {
     private static readonly string RepoRoot = FindRepoRoot();
 
-    /// <summary>禁止 App 出现的前缀：SDK 包与工程。</summary>
-    private static readonly string[] ForbiddenSdkPrefixes =
+    /// <summary>
+    /// 引擎包前缀——这些是"换 agent 框架"真正要换掉的东西。
+    /// </summary>
+    /// <remarks>
+    /// <b>与 <see cref="EnginePackagePrefixes"/> 是同一条清单</b>，只是多了
+    /// "契约包单独登记"这一层：
+    /// <list type="bullet">
+    /// <item><b>引擎包</b>（本清单）：跑 agent loop 的实现。任何非 Framework 层
+    /// 解析出它们，换框架时就都要改。</item>
+    /// <item><b>契约包</b>（<see cref="ContractPackage"/>）：只有消息类型。
+    /// 不含 loop、不含 UI、不含 provider。</item>
+    /// </list>
+    /// <para>
+    /// 两者混成一个清单会得到一条测不出真话的检查：要么把契约包也禁掉
+    /// （而 <c>Ipc</c> 的 <c>Protocol.cs</c> 明确论述过通用契约就该来自 SDK），
+    /// 要么整个放行（那引擎泄漏就再也拦不住）。
+    /// </para>
+    /// </remarks>
+    private static readonly string[] EnginePackagePrefixes =
     [
         "Dougong.Agent",
         "Dougong.Ai",
@@ -30,6 +48,26 @@ public static class Program
         "Dougong.Kernel",
         "Dougong.Cli",
     ];
+
+    /// <summary>
+    /// 唯一允许出现在非 Framework 层的 SDK 包：纯消息契约。
+    /// </summary>
+    /// <remarks>
+    /// <b>这是一个决策，不是遗漏。</b> <c>Ipc</c> 与 <c>App</c> 都解析出它
+    /// （<c>Dougong.HostProtocol</c>），用的是其中的 <c>ClientCommand</c> /
+    /// <c>ServerEvent</c> / <c>ConversationItem</c> 等词汇表。
+    /// <para>
+    /// <b>代价要说清</b>：线上有哪些条目类型、字段叫什么，由 SDK 版本决定。
+    /// 换 agent 框架时，新引擎的事件仍要投影成这些类型才能过线 ——
+    /// 也就是说"换引擎"成立，但"换词汇表"不成立。
+    /// </para>
+    /// <para>
+    /// <b>要真正拿回词汇表</b>，需要在 <c>DougongDesktop.Ipc</c> 里自己声明
+    /// <c>ConversationItem</c> 及其子类型并自建多态登记，然后删掉这个例外。
+    /// 那是一次独立迁移，不是把这项加进白名单。
+    /// </para>
+    /// </remarks>
+    private const string ContractPackage = "Dougong.HostProtocol";
 
     /// <summary>SDK 侧工程禁止出现的 UI 技术栈（与 SDK 的边界测试同款）。</summary>
     private static readonly string[] ForbiddenUiPrefixes =
@@ -97,43 +135,72 @@ public static class Program
     }
 
     /// <summary>
-    /// App 不得引用任何 Dougong.* 包或工程。
+    /// App 不得引用任何**引擎** SDK 包或工程；契约包是已登记的例外。
     /// </summary>
     /// <remarks>
     /// 这是整个解耦的地基：UI 只依赖 IPC 契约，换掉 SDK 时 UI 一行不改。
+    /// <para>
+    /// <b>为什么允许 <see cref="ContractPackage"/></b>：<c>App</c> 有十个文件直接
+    /// 用它的类型（<c>ConversationView</c> 的条目 switch、<c>SettingsView</c> 的
+    /// 模型清单、<c>CommandPalette</c> 的会话摘要等）。这不是意外泄漏，
+    /// 是"线上词汇表来自 SDK"这一决策的必然结果 —— 见 <see cref="ContractPackage"/>
+    /// 上关于代价的说明。
+    /// </para>
+    /// <para>
+    /// <b>读 <c>project.assets.json</c> 而不是 csproj</b>：App 那条
+    /// <c>Dougong.HostProtocol</c> 也来自 <c>Directory.Build.props</c>，
+    /// 旧读法看不见。理由同 <see cref="IpcDependsOnNothingButBcl"/>。
+    /// </para>
     /// </remarks>
     private static string? AppDoesNotReferenceSdk(bool injectViolation)
     {
-        var csproj = Path.Combine(RepoRoot, "src", "DougongDesktop.App", "DougongDesktop.App.csproj");
+        var project = "DougongDesktop.App";
+        var csproj = Path.Combine(RepoRoot, "src", project, $"{project}.csproj");
         if (!File.Exists(csproj)) return $"找不到 {csproj}";
 
-        var doc = XDocument.Load(csproj);
         var violations = new List<string>();
 
+        // ① 还原后的包依赖：能看见 props 注入的引用。
+        var declared = ResolvedPackages(project);
+        if (declared is null)
+            return $"{project} 没有还原结果（找不到或读不懂 obj/project.assets.json）。"
+                 + "\n  先跑一次 dotnet restore / build —— 读不到依赖图时只能判失败。";
+
+        foreach (var name in declared)
+        {
+            if (name.StartsWith("DougongDesktop.", StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(name, ContractPackage, StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (EnginePackagePrefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                violations.Add($"{name}（引擎包）");
+        }
+
+        // ② csproj 文本：查跨仓工程引用。
+        //
+        // 这一项必须留在 csproj 上：跨仓 ProjectReference 若指向一个**没有还原成功**
+        // 的路径，依赖图里根本不会出现它，反而查不到。
+        // 而 "..\..\dougong\src\Dougong.Agent\..." 这种 Include 不以 "Dougong." 开头，
+        // 只看前缀会漏 —— 所以按路径片段判断。
+        var doc = XDocument.Load(csproj);
         foreach (var reference in doc.Descendants("PackageReference").Concat(doc.Descendants("ProjectReference")))
         {
             var include = (string?)reference.Attribute("Include") ?? string.Empty;
 
-            // 两种越界形态都要拦：
-            // 1) 包引用 Dougong.Agent
-            // 2) 跨仓工程引用 ..\..\dougong\src\Dougong.Agent\...
-            //    第二种的 Include 不以 "Dougong." 开头，只看前缀会漏。
-            var isSdkPackage = ForbiddenSdkPrefixes.Any(p => include.StartsWith(p, StringComparison.OrdinalIgnoreCase));
             var isSdkPath = include.Contains("dougong" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
                             || include.Contains("dougong/", StringComparison.OrdinalIgnoreCase)
                             || include.Contains(@"\dougong\", StringComparison.OrdinalIgnoreCase);
 
-            if (isSdkPackage || isSdkPath)
-                violations.Add(include);
+            if (isSdkPath) violations.Add($"{include}（跨仓工程引用）");
         }
 
-        if (injectViolation) violations.Add("(反证注入) Dougong.Agent");
+        if (injectViolation) violations.Add("(反证注入) Dougong.Agent（引擎包）");
 
         if (violations.Count > 0)
         {
-            return "App 不得引用 SDK："
+            return "App 不得引用 SDK 引擎包："
                 + string.Join("；", violations)
-                + "\n  UI 与 SDK 只通过 DougongDesktop.Ipc 相接（实施方案 §3.2）";
+                + "\n  UI 与引擎只通过 DougongDesktop.Ipc 相接（实施方案 §3.2）；"
+                + "\n  契约包 " + ContractPackage + " 是已登记例外，引擎包不是";
         }
 
         return null;
@@ -176,29 +243,150 @@ public static class Program
     }
 
     /// <summary>
-    /// Ipc 工程只能依赖 BCL——它是纯契约，连 SDK 都不该引。
+    /// Ipc 只能依赖 BCL 与已登记的契约包，**不得依赖引擎包**。
     /// </summary>
+    /// <remarks>
+    /// <b>这条检查原先断言的是"只依赖 BCL"，那是错的</b>——Ipc 从设计上就
+    /// 依赖 <c>Dougong.HostProtocol</c>，<c>Protocol.cs</c> 的注释论证过
+    /// "通用契约归 SDK、桌面端只留 UI 形态"。检查之所以一直绿，
+    /// 是因为它读 csproj 文本，而那条引用写在 <c>Directory.Build.props</c> 里。
+    /// <para>
+    /// <b>现在断言什么</b>：
+    /// <list type="number">
+    /// <item>不得出现任何 <see cref="EnginePackagePrefixes"/> 里的引擎包</item>
+    /// <item>除 <see cref="ContractPackage"/> 外不得出现其它非 BCL 包</item>
+    /// </list>
+    /// 第 2 条让"新增一个非 BCL 依赖"必须改这个文件，而不是悄悄通过。
+    /// </para>
+    /// <para>
+    /// <b>读 <c>project.assets.json</c> 而不是 csproj</b>：见
+    /// <see cref="ResolvedPackages"/> 的说明。这一改动本身就是修 bug——
+    /// 旧读法看不见 props 注入的引用。
+    /// </para>
+    /// </remarks>
     private static string? IpcDependsOnNothingButBcl(bool injectViolation)
     {
-        var csproj = Path.Combine(RepoRoot, "src", "DougongDesktop.Ipc", "DougongDesktop.Ipc.csproj");
+        var project = "DougongDesktop.Ipc";
+        var csproj = Path.Combine(RepoRoot, "src", project, $"{project}.csproj");
         if (!File.Exists(csproj)) return $"找不到 {csproj}";
 
-        var doc = XDocument.Load(csproj);
-        var refs = doc.Descendants("PackageReference")
-            .Select(p => (string?)p.Attribute("Include") ?? string.Empty)
-            .Where(n => n.Length > 0)
-            .ToList();
+        var declared = ResolvedPackages(project);
+        if (declared is null)
+            return $"{project} 没有还原结果（找不到或读不懂 obj/project.assets.json）。"
+                 + "\n  先跑一次 dotnet restore / build——读不到依赖图时，"
+                 + "这条检查既不能通过也不能失败，只能判失败。";
 
-        if (injectViolation) refs.Add("(反证注入) Dougong.Agent");
+        var violations = new List<string>();
 
-        if (refs.Count > 0)
+        foreach (var name in declared)
         {
-            return "Ipc 必须是纯契约，只能依赖 BCL；实际引用："
-                + string.Join("；", refs)
-                + "\n  一旦引入依赖，UI 与框架就不再只共享消息类型";
+            if (name.StartsWith("DougongDesktop.", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (string.Equals(name, ContractPackage, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var isEngine = EnginePackagePrefixes.Any(
+                p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+
+            // 判失败的理由要分开写：引擎包是"越界"，其它包是"未登记"。
+            // 混成一句话会让人以为随便加个包也算越界，然后去删检查。
+            violations.Add(isEngine
+                ? $"{name}（引擎包，{project} 不得引用）"
+                : $"{name}（未登记的非 BCL 依赖）");
+        }
+
+        if (injectViolation) violations.Add("(反证注入) Dougong.Agent（引擎包）");
+
+        if (violations.Count > 0)
+        {
+            return "Ipc 只允许 BCL 与 " + ContractPackage + "；实际声明："
+                + string.Join("；", violations)
+                + "\n  引擎包进 Ipc 会让「换 agent 框架」波及契约层；"
+                + "\n  其它包要在 Program.cs 里显式登记并写明理由";
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 读某个工程**自己声明**的包依赖（<c>projectFileDependencyGroups</c> 段）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么读这一段而不是 csproj</b>：<c>project.assets.json</c> 是还原产物，
+    /// 它记录的是"这个工程最终声明了什么"——包括从 <c>Directory.Build.props</c>、
+    /// <c>Directory.Packages.props</c>、targets 文件注入的引用。
+    /// csproj 文本只记录"这个 csproj 写了什么"，两者不等价。
+    /// <para>
+    /// <b>本仓库正是靠这一点漏了 <c>Dougong.HostProtocol</c></b>：
+    /// 它来自 <c>Directory.Build.props</c> 的全局 <c>PackageReference</c>，
+    /// 旧版检查读 csproj 时完全看不见，于是 <c>Ipc</c> 明明解析出了 SDK 契约包，
+    /// 检查却是绿的。
+    /// </para>
+    /// <para>
+    /// <b>为什么读"声明"而不是 <c>libraries</c>（完整传递闭包）</b>：
+    /// 传递闭包会把"我依赖 A、A 依赖 B"里的 B 也算成我的依赖。
+    /// 对"这一层引入了什么"这个问题，声明集才是答案 ——
+    /// 否则任何包只要间接带到 SDK，检查就会误报。
+    /// </para>
+    /// <para>
+    /// <b>只保留 <c>type == package</c></b>：同一段里还有工程引用
+    /// （<c>DougongDesktop.Ipc</c> 之类），混进来会把我们自己的工程报成违规包。
+    /// 条目格式是 <c>Name &gt;= Version</c> 或 <c>Name/Version</c>，这里统一切掉版本。
+    /// </para>
+    /// <para>
+    /// <b>读不到时返回 null 而不是空列表</b>：空列表意味着"没有依赖"，
+    /// 会让检查静默通过；读不到必须是一个能被看见的失败。
+    /// </para>
+    /// </remarks>
+    private static List<string>? ResolvedPackages(string project)
+    {
+        var path = Path.Combine(RepoRoot, "src", project, "obj", "project.assets.json");
+        if (!File.Exists(path)) return null;
+
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var doc = JsonDocument.Parse(stream);
+
+            if (!doc.RootElement.TryGetProperty("projectFileDependencyGroups", out var groups))
+                return null;
+
+            // 按 TFM 分组（"net10.0"、"任意框架" 之类）。本仓库只有一个 TFM，
+            // 但仍按全部分组收集——多 TFM 时漏读一个分支就是漏判。
+            var names = new List<string>();
+            foreach (var group in groups.EnumerateObject())
+            {
+                foreach (var entry in group.Value.EnumerateArray())
+                {
+                    var text = entry.GetString();
+                    if (string.IsNullOrEmpty(text)) continue;
+
+                    // "/" 用于传递依赖的写法，" >= " 用于声明。两种都切。
+                    var cut = text.IndexOfAny([' ', '/', '>', '=']);
+                    var name = cut > 0 ? text[..cut] : text;
+
+                    // 工程引用形如 DougongDesktop.Ipc：不带 ">= "，但会出现在
+                    // 别的分组里；这里按"是否是 package"过滤不了（该段不标 type），
+                    // 所以改用前缀判断——本仓库自己的工程全以 DougongDesktop. 开头。
+                    if (name.StartsWith("DougongDesktop.", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    names.Add(name);
+                }
+            }
+
+            return names;
+        }
+        catch (JsonException)
+        {
+            // 还原文件损坏/正在写：当作读不到，交给调用方判失败。
+            return null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -227,13 +415,25 @@ public static class Program
     }
 
     /// <summary>
-    /// 引用 SDK 的文件数不能超出预算。
+    /// 引用**引擎** SDK 的文件数不能超出预算。
     /// </summary>
     /// <remarks>
-    /// <b>防的是"SDK 类型泄漏到别处"</b>：换掉 agent 框架时只有 Framework 需要重写
-    /// （约 800 行）。一旦 SDK 类型出现在别的层，那个估算就不成立了——
+    /// <b>防的是"引擎类型泄漏到别处"</b>：换掉 agent 框架时只有 Framework 需要重写
+    /// （约 800 行）。一旦引擎类型出现在别的层，那个估算就不成立了——
     /// 而且这种扩散是渐进的：每次只多一个文件，没人会注意到，
     /// 直到某天要换框架时发现到处都要改。
+    /// <para>
+    /// <b>这条检查覆盖的是引擎包，不是契约包。</b> 契约包
+    /// （<see cref="ContractPackage"/>）的类型本来就允许出现在 Ipc / App 层——
+    /// <c>App</c> 有十个文件在用 <c>ConversationItem</c> 等类型，靠的是
+    /// <c>Directory.Build.props</c> 的全局 using，源码里没有 <c>using Dougong.</c> 那一行。
+    /// </para>
+    /// <para>
+    /// <b>它数的是源码文本，不是还原结果</b>，所以看不见全局 using 带来的类型使用。
+    /// 这是刻意的：本检查管的是"哪些文件显式认 SDK"，与
+    /// <see cref="AppDoesNotReferenceSdk"/> / <see cref="IpcDependsOnNothingButBcl"/>
+    /// 的"还原出了什么包"是两个不同的问题，两者都需要。
+    /// </para>
     /// <para>
     /// 预算按当前实际值锁定。新增引用必须显式调高这个数字，
     /// 那个动作本身就是一次"要不要这么做"的复审。
@@ -306,11 +506,11 @@ public static class Program
         if (inject) violations.Add($"(反证注入) Framework: {budget + 1} 个文件");
 
         if (violations.Count > 0)
-            return "SDK 类型只允许出现在 Framework：" + string.Join("；", violations);
+            return "引擎 SDK 类型只允许出现在 Framework：" + string.Join("；", violations);
 
         return frameworkCount <= budget
             ? null
-            : $"Framework 引用 SDK 的文件 {frameworkCount} 个，超出预算 {budget}。"
+            : $"Framework 引用引擎 SDK 的文件 {frameworkCount} 个，超出预算 {budget}。"
               + "新增引用请同步调高预算——那个动作是复审的机会。";
     }
 

@@ -31,6 +31,12 @@ public sealed class SettingsView : UserControl
     private readonly SettingsPage _page;
     private readonly TextBlock _providerSummary;
     private readonly TextBlock _modelSummary;
+
+    /// <summary>当前模型的能力详情（窗口/输出）。</summary>
+    private readonly TextBlock _currentModelDetail = Body("—");
+
+    /// <summary>可浏览的模型清单，按 provider 分组。</summary>
+    private readonly StackPanel _modelList = new() { Spacing = 0 };
     private readonly TextBlock _engineSummary;
     private readonly TextBlock _checkCount;
     private readonly TextBlock _pluginSummary;
@@ -91,15 +97,105 @@ public sealed class SettingsView : UserControl
         _providerSummary.Text = $"{providers.Count} 家";
         _modelSummary.Text = $"{models.Count} 个模型";
 
-        foreach (var m in models)
+        var current = models.FirstOrDefault(m => m.Id == currentModelId);
+        if (current is not null)
         {
-            if (m.Id != currentModelId) continue;
-            _modelSummary.Text += $" · 当前 {m.Id}";
-            if (m.ContextWindow > 0)
-                _modelSummary.Text += $"（窗口 {m.ContextWindow:N0}）";
-            break;
+            _modelSummary.Text += $" · 当前 {current.Id}";
+            if (current.ContextWindow > 0)
+                _modelSummary.Text += $"（窗口 {current.ContextWindow:N0}）";
+        }
+        _currentModelDetail.Text = current is null ? "—" : DescribeModel(current);
+
+        // 填充可浏览清单：按 provider 分组，只列能力数据。
+        //
+        // **不做下拉切换**：模型是引擎启动时从环境变量读入的只读快照
+        // （EngineOptions.Model 是 init 属性），会话内没有改它的路径，
+        // 契约里也只有 model/list 没有 switch。给一个切不动的下拉
+        // 比不给更糟——用户会以为点了就该生效。
+        _modelList.Children.Clear();
+        foreach (var group in models
+                     .GroupBy(m => m.ProviderId)
+                     .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            _modelList.Children.Add(new TextBlock
+            {
+                Text = $"{group.Key}（{group.Count()}）",
+                Margin = new Thickness(0, 10, 0, 4),
+                Opacity = 0.6,
+            });
+
+            // **当前模型必须始终可见**：它在列表里排第 20 位时，只取前 8 个
+            // 就看不到 ● 标记，用户会以为"我的模型不在目录里"。
+            // 所以先按 id 排序，再把当前模型提到最前，然后取前 8 个。
+            var ordered = group
+                .OrderBy(m => m.Id == currentModelId ? 0 : 1)
+                .ThenBy(m => m.Id, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var m in ordered.Take(8))
+            {
+                var isCurrent = m.Id == currentModelId;
+                _modelList.Children.Add(Row(
+                    (isCurrent ? "● " : "") + m.Id,
+                    DescribeModel(m),
+                    Body("")));
+            }
+
+            if (group.Count() > 8)
+            {
+                _modelList.Children.Add(new TextBlock
+                {
+                    Text = $"… 另有 {group.Count() - 8} 个",
+                    Margin = new Thickness(0, 2, 0, 0),
+                    Opacity = 0.5,
+                });
+            }
         }
     }
+
+    /// <summary>
+    /// 描述密钥的形态，**不暴露内容**。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要这个</b>：用户最常见的困惑是"我明明配了，为什么说没配"——
+    /// 常见原因是变量名拼错、值带引号、或复制时多了空格。
+    /// 报长度与前缀能定位这几类问题，而完整密钥不该渲染到界面上。
+    /// </remarks>
+    private static string DescribeKeyShape(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return "—";
+
+        var notes = new List<string> { $"{key.Length} 字符" };
+
+        if (key.StartsWith("sk-", StringComparison.Ordinal))
+            notes.Add("sk- 前缀");
+        else
+            notes.Add("**不以 sk- 开头**（多半不是 API key，可能是 OAuth token）");
+
+        if (key.Length > 0 && (char.IsWhiteSpace(key[0]) || char.IsWhiteSpace(key[^1])))
+            notes.Add("**首尾有空白字符**（复制时带进来的，会导致认证失败）");
+
+        if (key.Contains('"') || key.Contains('\''))
+            notes.Add("**含引号**（环境变量里不该再包引号）");
+
+        return string.Join(" · ", notes);
+    }
+
+    /// <summary>把模型能力写成人看得懂的一行。</summary>
+    /// <remarks>
+    /// <b>只写有真实来源的字段</b>：窗口与输出上限来自能力表；
+    /// 价格、营销文案 SDK 不给，编造会让用户看到假信息。
+    /// 未知就写"—"，不猜。
+    /// </remarks>
+    private static string DescribeModel(ModelInfo m)
+    {
+        var parts = new List<string>();
+        parts.Add(m.ContextWindow > 0 ? $"窗口 {FormatTokens(m.ContextWindow)}" : "窗口未知");
+        parts.Add(m.MaxOutputTokens > 0 ? $"输出 {FormatTokens(m.MaxOutputTokens)}" : "输出未知");
+        if (m.SupportsReasoning) parts.Add("支持推理");
+        return string.Join(" · ", parts);
+    }
+
+    private static string FormatTokens(int n) => n >= 1000 ? $"{n / 1000}K" : n.ToString();
 
     /// <summary>填充引擎状态与检查数等诊断信息。</summary>
     public void SetDiagnostics(string engineState, string providerProtocol, int checkCount)
@@ -114,10 +210,23 @@ public sealed class SettingsView : UserControl
     /// <summary>提供商：模型目录来源 + 当前选择 + key 的存放位置（只读）。</summary>
     private SettingsSection BuildProvidersSection()
     {
+        var key = Environment.GetEnvironmentVariable("DOUGONG_PROVIDER_KEY");
         var keySource = Body(
-            Environment.GetEnvironmentVariable("DOUGONG_PROVIDER_KEY") is { Length: > 0 }
-                ? "已通过环境变量 DOUGONG_PROVIDER_KEY 提供"
-                : "未配置（环境变量 DOUGONG_PROVIDER_KEY）");
+            string.IsNullOrWhiteSpace(key)
+                ? "未配置（环境变量 DOUGONG_PROVIDER_KEY）"
+                : "已通过环境变量 DOUGONG_PROVIDER_KEY 提供");
+
+        // **只报形态，不报内容**：长度与前缀足以判断"配错了没有"，
+        // 而完整密钥不该出现在界面上（截图会带走它）。
+        var keyShape = Body(DescribeKeyShape(key));
+
+        var keyHint = Body(
+            string.IsNullOrWhiteSpace(key)
+                ? "在终端设置后重启应用：\n" +
+                  "export DOUGONG_PROVIDER_KEY=...\n" +
+                  "export DOUGONG_PROVIDER_BASE=...\n" +
+                  "export DOUGONG_PROVIDER_MODEL=..."
+                : "改了环境变量需要重启应用才生效（引擎启动时读取）。");
 
         return new SettingsSection
         {
@@ -135,6 +244,27 @@ public sealed class SettingsView : UserControl
                         {
                             Row("提供商数量", "引擎报回的 provider 组数", _providerSummary),
                             Row("模型数量", "含上下文窗口等能力数据", _modelSummary),
+                            Row("当前模型", "由引擎启动时的配置决定", _currentModelDetail),
+                        },
+                    },
+                    new SettingsGroup
+                    {
+                        Header = "全部模型",
+                        Description = "按提供商分组。● 标记当前在用的那个。",
+                        Items = { _modelList },
+                    },
+                    new SettingsGroup
+                    {
+                        Header = "为什么不能在这里切换",
+                        Description = "这不是没做，是当前架构做不到。",
+                        Items =
+                        {
+                            Row("模型来源",
+                                "引擎启动时从 DOUGONG_PROVIDER_MODEL 读入，是只读快照",
+                                Body("启动时固定")),
+                            Row("契约支持",
+                                "HostProtocol 只有 model/list（查询），没有切换命令",
+                                Body("仅查询")),
                         },
                     },
                     new SettingsGroup
@@ -144,6 +274,8 @@ public sealed class SettingsView : UserControl
                         Items =
                         {
                             Row("API Key", "只从环境变量读取", keySource),
+                            Row("形态检查", "只看长度与前缀，不显示内容", keyShape),
+                            Row("怎么改", "密钥不进配置文件，也不进界面", keyHint),
                         },
                     },
                 },

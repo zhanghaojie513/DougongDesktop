@@ -48,12 +48,12 @@
 |---|---|---|---|---|---|---|---|
 | P8a 布局骨架 | 10 | 0 | 1 | 1 | 1 | 13 | **91%** |
 | P8b 会话与输入 | 5 | 0 | 0 | 0 | 1 | 6 | **100%** |
-| P8c 设置域 | 4 | 2 | 0 | 1 | 1 | 8 | **100%** |
+| P8c 设置域 | 6 | 0 | 0 | 1 | 1 | 8 | **100%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **25%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **40%** |
 | **P8g 中区会话域** | **11** | **1** | **5** | **0** | **6** | **23** | **71%** |
-| **合计** | **32** | **5** | **22** | **2** | **9** | **70** | **64%** |
+| **合计** | **34** | **3** | **22** | **2** | **9** | **70** | **66%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -145,8 +145,8 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | # | 状态 | 项 | 实现方式 | 我们 | 验证 |
 |---|---|---|---|---|---|
 | C1 | ✅ | 设置外壳 + 通用分区 | `[Arc]` | **用 Arc `SettingsPage`**（左导航+右内容，窄容器退化为单列）。四个分区：提供商/权限/外观/诊断。设置页独占主区（右栏让位），否则 424px 宽会一直退化成最窄形态 | 无头检查 `settings-page-has-sections`；截图确认四个分区都有真实内容 |
-| C2 | 🟡 | 模型/provider 设置 | `[Arc]` | 复用 `models/list` 数据（不新开协议）显示提供商数/模型数/当前模型 | 运行时 23 家 / 663 个模型。**只做了只读展示**，还不能切换——切换要重开会话 |
-| C3 | 🟡 | 密钥管理 | `[自有]` | **只做了只读展示**：界面如实显示"来自环境变量 DOUGONG_PROVIDER_KEY"，**不给输入框**（不落盘的话填了会丢，比不显示更糟） | 无头检查 `settings-key-shows-env-source` 断言无密码框。三档存储中的钥匙串/会话内存未做 |
+| C2 | ✅ | 模型/provider 设置 | `[Arc]` | 可浏览的模型清单：按 provider 分组、显示窗口/输出/推理能力、● 标当前、当前模型置顶 | **切换做不了，已说明原因**：`EngineOptions.Model` 是启动时的 `init` 只读快照，`HostProtocol` 只有 `model/list` 没有切换命令。设置页里如实写"这不是没做，是当前架构做不到" |
+| C3 | ✅ | 密钥管理 | `[自有]` | 密钥诊断：来源、**形态检查**（长度/前缀/首尾空白/含引号，只报形态不报内容）、怎么改的引导。**仍不给输入框** | 无头检查 `key-diagnostics-never-leak-the-secret`：设假密钥后断言界面**不含**它但含长度。持久化（钥匙串）未做——那要引入密钥落盘，与既有原则冲突 |
 | C4 | ✅ | 插件清单页 | `[Arc]` | 读 `UiExtensionLoader.Loaded`，按 `Origin` 分内置/第三方，显示 Id / 槽位 / 文件名；空列表时提示 `DOUGONG_UI_PLUGINS` | 用真实 `SampleUiPlugin` 验证：`示例插件（sample.ui-plugin）→ shell.trailing`。无头检查 `settings-plugins-lists-loaded-only` |
 | C5 | ✅ | 权限预设 | `[Arc]` | **全链路通**：设置页下拉 → `permission/switch` → 引擎 `SwitchAsync` → 审批链按新档位裁决。预设单实例注入 `PermissionPolicyApprover(PresetApprover(inner, presets))` | ①单元：interactive 问 1 次 → unattended 问 0 次；②端到端：起真引擎往返，`interactive→unattended→interactive` 三态都对；③无头检查 `permission-picker-reflects-engine-state` 守回填与回环 |
 | C6 | ⏳ | Agent preset | `[—]` | **等契约**：`AgentPreset` 在 `Dougong.HostProtocol` 里 **0 处** | 等 SDK 暴露契约 |
@@ -360,3 +360,5 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-10 | **发现 C8 的派发工具根本没收注**。上一轮为了绕开 `dispatcherAccessor` 的时序问题，只注册了 `SubagentListTool` / `SubagentResultTool`（两者只读注册表），**漏了 `SubagentTool`**——模型因此完全没有派发能力，而三条命令照样"工作"（永远返回空列表）。这个组合极其误导：接口都对、日志都干净，功能却不存在。已用延迟解析 `dispatcherAccessorRef` 补上（createDispatcher 先于 createRuntime 执行，用闭包变量绕开）。**教训**：只读工具工作 ≠ 主功能接通 |
 | 2026-11-10 | **用 minimax 真实 provider 验证 C8**。模型确实调用了 `subagent` 工具（`"toolName":"subagent"`，带完整 prompt 参数），说明注册与工具暴露这条链是通的。但整轮未完成：provider 返回 **429「已达到 Token Plan 用量上限」**——配额耗尽，非代码问题。所以 C8 停在 🟡：派发路径验到了"被调用"，没验到"子 agent 真正跑完并回流 Started/Completed 事件"。等配额恢复后补验 |
 | 2026-11-10 | **C8 全链路验证通过（真实 minimax provider）**。完整时序：模型派发 → Started(running) + Completed(completed) 同 id 成对推送、requestId=null → `subagent/list` 看到同一实例（证明注册表是同一份，SDK 说的"唯一失败模式"没发生）→ `subagent/result` 取到结果 → 子 agent 实际完成工作（列出 7 个 csproj 并读 Directory.Build.props）。工具调用序列 `subagent → subagent_list → subagent_result → list_directory` 完全正常。第一次跑时出现 `toolRounds=83` 且只输出一句话，重跑后是 52 轮正常完成——判为模型行为漂移，非接线问题 |
+| 2026-11-10 | **C2/C3 收尾**。查清两者都卡在同一条：模型与密钥都是引擎**启动时**从环境变量读入的只读快照（`EngineOptions` 的 `init` 属性），契约里只有 `model/list`（查询）没有切换命令。真实生效必须"改配置→重启引擎"，而那要引入密钥落盘。**选择只做能生效的那一半**：C2 做成可浏览的模型清单（分组/能力/当前标记），C3 做成密钥形态诊断（长度/前缀/空白/引号）+ 引导。两处都如实写明限制，不给假控件 |
+| 2026-11-10 | **修了一条自己写坏的检查**。`current-model-stays-visible-when-buried` 第一版断言"界面文本含 model-11"，而模型名同时出现在摘要行"· 当前 model-11"里，所以列表截断与否都会通过——反证一做就露馅。改为**只收集 `SettingsRow.Header`**（列表行），不含摘要块。修正后反向测试正确失败。**这是这个项目第 N 次"检查看似通过、其实测的不是那件事"** |

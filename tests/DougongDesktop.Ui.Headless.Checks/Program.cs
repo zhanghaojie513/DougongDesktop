@@ -46,6 +46,9 @@ public static class Program
         failures += Check("engine-survives-bad-command", EngineSurvivesBadCommand);
         failures += Check("subagent-registry-is-single-instance", SubagentRegistryIsSingleInstance);
         failures += Check("subagent-dispatch-tool-is-registered", SubagentDispatchToolIsRegistered);
+        failures += Check("model-list-shows-capabilities-not-a-fake-picker", ModelListShowsCapabilities);
+        failures += Check("key-diagnostics-never-leak-the-secret", KeyDiagnosticsNeverLeakSecret);
+        failures += Check("current-model-stays-visible-when-buried", CurrentModelStaysVisibleWhenBuried);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -317,6 +320,123 @@ public static class Program
     /// 会漏掉每一行的标题与说明。
     /// 第一版就漏了，导致"插件 Id 没显示出来"的误报：实际渲染是好的。
     /// </remarks>
+    /// <summary>
+    /// 模型清单要可浏览，且**不许出现切换控件**。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条守的是"不做假控件"</b>：模型是引擎启动时的只读快照，
+    /// 契约里也没有切换命令。给一个切不动的下拉，用户会以为点了就该生效。
+    /// <para>
+    /// 断言三件事：模型条目渲染出来了、当前模型被标出、**没有 ComboBox/Button
+    /// 与模型切换相关**。
+    /// </para>
+    /// </remarks>
+    private static string? ModelListShowsCapabilities()
+    {
+        var view = new DougongDesktop.App.Shell.SettingsView();
+        view.SetModelCatalog(
+        [
+            new ModelInfo("prov-a", "model-x", 64_000, 8_000, false),
+            new ModelInfo("prov-a", "model-y", 128_000, 8_000, true),
+            new ModelInfo("prov-b", "model-z", 200_000, 8_000, false),
+        ], ["prov-a", "prov-b"], "model-x");
+
+        var texts = CollectTexts(view).ToArray();
+
+        // 1. 模型名必须出现
+        foreach (var id in new[] { "model-x", "model-y", "model-z" })
+            if (!texts.Any(t => t.Contains(id, StringComparison.Ordinal)))
+                return $"模型 {id} 没渲染出来";
+
+        // 2. 能力数据必须出现（窗口值格式化后是 64K / 128K / 200K）
+        if (!texts.Any(t => t.Contains("64K", StringComparison.Ordinal)))
+            return "上下文窗口没显示（期望出现 64K）";
+
+        // 3. 按 provider 分组
+        if (!texts.Any(t => t.Contains("prov-a", StringComparison.Ordinal)))
+            return "没有按 provider 分组";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 当前模型在分组里排得很靠后时，也必须出现在**列表**的可见前几个里。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查的第一版是错的，值得记下来</b>：它断言"界面文本里包含
+    /// model-11"，而模型名同时也出现在摘要行（"· 当前 model-11"）里，
+    /// 所以无论列表有没有截断它，检查都通过。反证一做就露馅了。
+    /// <para>
+    /// 现在改为**只看列表控件里的行**，不看摘要行——那才是"用户能不能在
+    /// 清单里找到自己的模型"这个问题。
+    /// </para>
+    /// </remarks>
+    private static string? CurrentModelStaysVisibleWhenBuried()
+    {
+        var models = Enumerable.Range(0, 12)
+            .Select(i => new ModelInfo("prov-a", $"model-{i:00}", 64_000, 8_000, false))
+            .ToArray();
+
+        // model-11 字典序最后；若只按 id 取前 8 就会被挤掉
+        var view = new DougongDesktop.App.Shell.SettingsView();
+        view.SetModelCatalog(models, ["prov-a"], "model-11");
+
+        // 只收集列表行（SettingsRow.Header），不含摘要块
+        var rowHeaders = view.GetLogicalDescendants()
+            .OfType<SettingsRow>()
+            .Select(r => r.Header?.ToString() ?? string.Empty)
+            .Where(t => t.Contains("model-", StringComparison.Ordinal))
+            .ToArray();
+
+        if (rowHeaders.Length == 0)
+            return "列表里一个模型行都没有";
+
+        if (!rowHeaders.Any(t => t.Contains("model-11", StringComparison.Ordinal)))
+            return $"当前模型 model-11 不在列表的前 {rowHeaders.Length} 行里"
+                   + "——用户会以为自己的模型不在目录里";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 密钥诊断只能报形态，**绝不能把密钥本身渲染到界面上**。
+    /// </summary>
+    /// <remarks>
+    /// <b>这是安全断言，不是功能断言</b>：设置页会被截图、贴进 issue、
+    /// 出现在录屏里。密钥一旦渲染就是永久泄漏。
+    /// <para>
+    /// 做法：设一个可识别的假密钥，喂给设置页，然后断言**界面文本里
+    /// 不包含它**，但包含它的长度。
+    /// </para>
+    /// </remarks>
+    private static string? KeyDiagnosticsNeverLeakSecret()
+    {
+        const string fake = "sk-PROBE1234567890abcdefSHOULDNOTAPPEAR";
+        var old = Environment.GetEnvironmentVariable("DOUGONG_PROVIDER_KEY");
+        Environment.SetEnvironmentVariable("DOUGONG_PROVIDER_KEY", fake);
+
+        try
+        {
+            var view = new DougongDesktop.App.Shell.SettingsView();
+            var texts = CollectTexts(view).ToArray();
+
+            if (texts.Any(t => t.Contains(fake, StringComparison.Ordinal)))
+                return "**密钥被渲染到界面上了**——截图/录屏会带走它";
+
+            if (!texts.Any(t => t.Contains(fake.Length.ToString(), StringComparison.Ordinal)))
+                return $"没有显示密钥长度（{fake.Length}），无法帮助用户排查配置问题";
+
+            if (!texts.Any(t => t.Contains("sk- 前缀", StringComparison.Ordinal)))
+                return "没有报告前缀形态";
+
+            return null;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOUGONG_PROVIDER_KEY", old);
+        }
+    }
+
     /// <summary>
     /// 三个子 agent 工具必须**全部**注册，特别是派发工具本身。
     /// </summary>
