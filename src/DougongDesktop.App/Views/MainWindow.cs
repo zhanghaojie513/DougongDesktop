@@ -95,7 +95,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
     /// 精确性不影响功能。**但它会随检查数变化**——改检查数时这里要同步，
     /// `settingsDiagnosticsReportsCheckCount` 那条无头检查会盯着。
     /// </remarks>
-    private const int ArchitectureCheckCount = 84;
+    private const int ArchitectureCheckCount = 88;
 
     public MainWindow()
     {

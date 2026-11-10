@@ -1,6 +1,6 @@
+using System.Text.Json;
 using System.Diagnostics;
 using System.Net.Sockets;
-using System.Text.Json;
 using DougongDesktop.Ipc;
 
 namespace DougongDesktop.App.Services;
@@ -183,10 +183,10 @@ public sealed class EngineClient : IAsyncDisposable
             var endpoint = await _locator.DiscoverAsync(ct).ConfigureAwait(false);
             if (endpoint is null) return false;
 
-            if (endpoint.ProtocolVersion is { } version && version != HostProtocolContract.Version)
+            if (endpoint.ProtocolVersion is { } version && version != DesktopContract.Version)
             {
                 SetState(EngineConnectionState.Failed,
-                    $"引擎协议版本 {version} 与客户端 {HostProtocolContract.Version} 不一致。");
+                    $"引擎协议版本 {version} 与客户端 {DesktopContract.Version} 不一致。");
                 return false;
             }
 
@@ -218,7 +218,15 @@ public sealed class EngineClient : IAsyncDisposable
             await connection.ReadLoopAsync(
                 json =>
                 {
-                    if (json.Deserialize<ServerEvent>(DesktopProtocol.Json) is not { } evt) return Task.CompletedTask;
+                    // 走 IpcSerializer 而不是就地 Deserialize：反序列化配置
+                    // 只有一处来源（DesktopProtocol.Json），两边各写一次就可能
+                    // 用一个默认 options 验证出不存在的实现——"字段命名不一致"
+                    // 那次误报就是这么来的。
+                    //
+                    // 未知判别器（新版引擎发来旧客户端不认识的事件）会抛
+                    // JsonException，由 ReadLoopAsync 接住并走 onMalformed；
+                    // 那条路径下连接保持可用，后续事件照常收到。
+                    if (IpcSerializer.ReadEvent(json) is not { } evt) return Task.CompletedTask;
 
                     // 序号缺口检测：不假装完整，明确要求重同步。
                     //

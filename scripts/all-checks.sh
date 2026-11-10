@@ -71,6 +71,10 @@ checks="$checks placeholder-yields-to-plugin"
 checks="$checks proj-text-delta proj-tool-requested-new-item proj-tool-id-is-deterministic"
 checks="$checks proj-unknown-outcome-preserved proj-unknown-event-ignored proj-outcome-mapping"
 checks="$checks resync-command-roundtrips resync-request-carries-session diag-uiplugin-has-phase"
+# 读取循环的容错。前两条在修复前的代码上实测会红（未知判别器让整条连接断掉），
+# 第三条防过度兜底：改成 catch(Exception) 才会红。
+checks="$checks readloop-unknown-event-keeps-connection readloop-unknown-command-keeps-connection"
+checks="$checks readloop-bug-is-not-swallowed readloop-missing-field-is-not-skipped"
 checks="$checks tool-durations-passed-through tool-null-duration-stays-null"
 checks="$checks reasoning-separate-from-text plan-replaces-wholesale plan-tool-comes-from-sdk"
 checks="$checks caps-table-beats-guess max-output-never-eats-context budget-check-comes-from-sdk"
