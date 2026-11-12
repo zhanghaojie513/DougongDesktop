@@ -21,7 +21,7 @@
 
 最后更新：2026-11-06
 
-**基线**：dsh `0.2.2-alpha.2`（commit `ce7073d`）· TKCode.Arc `1.0.0` · SDK `0.1.20-alpha.1`
+**基线**：dsh `0.2.2-rc.2`（commit `e8f7b93`）· TKCode.Arc `1.0.0` · SDK `0.1.21-alpha.1`
 
 ---
 
@@ -196,7 +196,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 
 > **本组是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**（P8a），
 > 会话内容的渲染与交互从未与 dsh 比对过——这是范围缺口。
-> 事实来源 `dsh-src` commit `ce7073d`，逐项行号见规格 §7.5。
+> 事实来源 `deepseek-harness` commit `e8f7b93`（`0.2.2-rc.2`），逐项行号见规格 §7.5。
 >
 > 状态判据照旧：**契约有数据但 UI 没做 = ⬜；做了但口径不对 = 🟡；
 > 契约无数据 = ➖**（不做假条目）。
@@ -220,7 +220,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 |---|---|---|---|---|---|
 | M9 | ✅ | 流式运行状态行 | `[自有]` | 鲸鱼尾 + "深度求索中，用时 N ···"，1s 刷新（`RunningStatus.tsx:25-48`） | 自建 `RunStatusLine`，放进**滚动区末尾**（放滚动区外的话用户上滚就看不见）。dump 实测 0→7 秒计时在走 |
 | M10 | ✅ | 已停止标记 | `[自有]` | assistant 尾部 11px 灰底小标签（`AssistantMarkdown.tsx:152-154`） | 旁挂 `_stoppedAssistantIds`（契约无该字段）。`chat-stopped-badge-needs-finished-turn` 断言回合进行中不能标 |
-| M11 | ✅ | 工具卡三态视觉 | `[Arc]` | running 整行 shimmer / error 错误色+结果首行 / stopped 琥珀（`ToolRow.module.css:118-126`） | **2026-11-06 核实：Arc `ToolCall` 自带这四态**（shimmer / 错误+Retry / 审批描边 / 拒绝变暗），代码已映射 9 种 SDK 状态，运行时截图确认。**原判"需覆写或自建"有误** |
+| M11 | ✅ | 工具卡三态视觉 | `[Arc]` | running 整行 shimmer / error 错误色+结果首行 / stopped 琥珀（`ToolRow.module.css:82-171`，2026-11-12 从 118-126 修正——原范围指向文本省略样式） | **2026-11-06 核实：Arc `ToolCall` 自带这四态**（shimmer / 错误+Retry / 审批描边 / 拒绝变暗），代码已映射 9 种 SDK 状态，运行时截图确认。**原判"需覆写或自建"有误** |
 | M12 | ✅ | 代码块复制+语言标签 | `[Arc]` | 复制 1000ms 复原；语言标签；默认自动换行（`CodeBlock.tsx:157-206`） | **Arc 自带，无需自建**。2026-11-06 探针窗口实测：`Markdown.DefaultServices` 渲染 fence 时给出 `csharp` 语言标签、语法高亮、复制按钮、自动换行开关、12 行折叠。新增 `markdown-codeblock-uses-arc-defaults` 防以后被改坏 |
 
 **P2 — 结构较大，延后**
@@ -366,3 +366,4 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-10 | **修了两个自己在 M17 里制造的缺陷**。①`AppSettings.Load` 注释写了"坏宽度当没存过"但**校验逻辑根本没加**——注释成了空话。②补上后又被嵌进"PaneSizes 有效"分支，导致**只存宽度时整份设置被丢弃**，拖动宽度永远还原不了（检查抓到：正常值 576 读回 null）。已改为两字段各自独立校验 |
 | 2026-11-10 | **一条检查的方法被证伪**。`saved-rightbar-width-is-revalidated` 第一版查源码里有没有 `IsNaN`，而 `PaneSizes` 校验里也有——删掉宽度校验照样通过。改为**行为验证**：写坏 JSON 到内存 store、调 `Load`、断言读回 null。**字符串匹配证明不了"这段逻辑管的是哪个字段"** |
 | 2026-11-10 | **标题栏按 dsh 做 Mac/Win 适配**。「应用 / 编辑」菜单改为**仅 Windows**——依据是 dsh 源码 `apps/desktop/src/preload-windows.ts`：`syncWindowsAppearance()` 里 `if (process.platform !== 'win32') return`，那个菜单本就是给 Windows 自绘标题栏配的（`titleBarStyle: 'hidden'` 抹了原生标题栏）。macOS 是 `hiddenInset`，交通灯还在、菜单栏在屏幕顶部，标题栏里不该再放一份。macOS 上现在只剩「收起侧栏」，截图确认：交通灯 → Dougong Desktop → 收起侧栏。新增检查 `titlebar-menus-are-windows-only`，并把 `titlebar-uses-arc-slots` 的按钮期望值改成按平台分（原本写死 3 会让 Mac 上的正确实现变红） |
+| 2026-11-12 | **规格行号全量复核**（源码更新到 `0.2.2-rc.2` / `e8f7b93`，比原基线 `alpha.2` 新 2200 个提交）。40 处 `文件:行号` 逐条核对，**修了 7 处漂移**。最值得注意的一处：`ToolRow.module.css` 原标 118-126，实际内容是**文本省略样式**，真正的三态在 82-171（错误色 `state-error-primary` + 停止色 `state-warn-label`）。结论不变（M11 仍然成立），但依据本身是错的，已修正。**所有数值常量都未变**，实现不用改 |

@@ -13,11 +13,29 @@
 
 | 项 | 值 |
 |---|---|
-| **dsh 版本** | `0.2.2-alpha.2` |
-| **commit** | `ce7073d51254c26cd63b22a60835b8f948deb447` |
-| **commit 时间** | 2026-10-30 00:13:15 +0800 |
+| **dsh 版本** | `0.2.2-rc.2`（2026-11-12 从 `0.2.2-alpha.2` 重新核对） |
+| **commit** | `e8f7b93a344964de3dca1ace9e72b6e4d6de87cb` |
 | **仓库** | https://github.com/deepseek-ai/deepseek-harness |
-| **源码位置** | `C:\work\myProject\dsh-src`（sparse checkout，只拉 UI 相关包） |
+| **源码位置** | `~/项目/my/deepseek-harness`（完整 clone） |
+
+> **2026-11-12 行号全量复核**：从 `alpha.2` 到 `rc.2` 有 2200 个提交
+> （197 个动了 `apps/desktop`），文档里 40 处 `文件:行号` 逐条核对过。
+> 修了 7 处漂移：
+>
+> | 引用 | 原 | 现 | 原因 |
+> |---|---|---|---|
+> | `ConversationContent.tsx` | 189-204 | **202-211** | `scrollBody` 下移 |
+> | `ChatView.module.css`（间距） | 77-93 | **86-143** | 三档间距分散到 86/92/143 |
+> | `ConversationRoot.module.css`（渐变） | 507-530 | **539-548** | 下方插入注释 |
+> | `ChatView.tsx`（回到底部） | 272-283 | **301-311** | 原指向 `MarkdownDelegateProvider` |
+> | `ChatView.tsx`（加载更早） | 239-245 | **254-256** | 原指向 `scroll.listRef` |
+> | `ToolRow.module.css`（三态） | 118-126 | **82-171** | 原指向文本省略样式，**不是三态** |
+> | `ConversationRoot.module.css`（列宽） | 461-467 | **469-472** | `clamp(...)` 在 470 |
+>
+> **数值常量全部未变**（`CONTENT_MIN=640`、`CONTENT_EDGE_BUDGET=176`、
+> `FOLLOW_THRESHOLD=24`、气泡 `0.702/82%`、列宽 `clamp(680,×0.64,920)`），
+> 所以实现不用改；`preload-windows.ts` 与 `windows-layout.ts` 在这 2200 个
+> 提交里**零改动**，上次的标题栏平台适配依然成立。
 | **提取日期** | 2026-10-30 |
 
 **复现命令**：
@@ -709,7 +727,7 @@ M12 已结案（✅）。守回归的是 `markdown-codeblock-uses-arc-defaults`�
 > 只在中栏宽度几何上对齐了 dsh，**内容侧的会话行为从未比对过**。
 > 2026-11-05 用户指出这是范围缺口，纳入复刻范围。
 >
-> 事实来源：`C:\work\myProject\dsh-src`（commit `ce7073d`，与本文档基线同版本）。
+> 事实来源：`~/项目/my/deepseek-harness`（commit `e8f7b93`，与本文档基线同版本）。
 > 所有文件名与行号均可在该仓库核验。
 
 ### 7.5.1 dsh 中区的真实结构
@@ -718,7 +736,7 @@ M12 已结案（✅）。守回归的是 `markdown-codeblock-uses-arc-defaults`�
 |---|---|---|
 | 布局骨架 | `ui-layout/src/client/AppFrame.tsx:41-50` | 中列渲染 `main` slot，默认 `entryKey: conversation` |
 | 会话根 | `ui-conversation/.../skeleton/ConversationRoot.tsx:11-13` | `root[data-phase]` 三态：`settling` / `hero` / `active` |
-| 中区主体 | `ConversationContent.tsx:189-204` | `.scrollBody[data-conversation-scroll]` → `Views` + `composerSeat` |
+| 中区主体 | `ConversationContent.tsx:202-211` | `.scrollBody[data-conversation-scroll]` → `Views` + `composerSeat` |
 | 消息流 | `ui-chat/src/client/chat/ChatFlow.tsx:52-63` | `entries.map` 全量渲染，**无消息级虚拟化** |
 
 **关键事实：dsh 的消息流没有虚拟化。** 全文只有轮次导航条
@@ -762,17 +780,17 @@ dsh 的流内 item 共 **17 种**（`register-node-renderers.ts:27-100` 等）�
 
 | 项 | dsh 值 | 出处 |
 |---|---|---|
-| 会话内容列宽 | `clamp(680px, 列宽 × 0.64, 920px)` | `ConversationRoot.module.css:461-467` |
+| 会话内容列宽 | `clamp(680px, 列宽 × 0.64, 920px)` | `ConversationRoot.module.css:469-472` |
 | 用户气泡最大宽 | `min(列宽 × 0.702, 82%)` | `MessageItem.module.css:10-21` |
 | 左右留白 | 各 **32px**（`16 + clearance 16`） | `ChatView.module.css:29-32` |
-| 消息间距 | 默认 4px；assistant 相邻 12px；`turn-process` 后 16px | `ChatView.module.css:77-93` |
+| 消息间距 | 默认 4px；assistant 相邻 12px；`turn-process` 后 16px | `ChatView.module.css:86-143` |
 | 用户消息 | **右对齐**，圆角 `--dsw-radius-xl`，padding 10/16 | `MessageItem.module.css:3-8` |
 | 助手消息 | **左对齐、整列宽**（非气泡） | `AssistantMarkdown.module.css:9-21` |
 | 头像 | **无**（全仓 grep `avatar` 无命中） | — |
 | 滚动条宽 | **5px**，thumb 圆角 999，track 透明 | `ui-theme/src/styles/scrollbar.css:17-25` |
 | 贴底阈值 | **≤25px**（`FOLLOW_THRESHOLD 24` 传入 +1） | `use-chat-reading.ts:7,277` |
 | 正文 | 14px / 行高 24px | 字体轴 |
-| 输入区 | sticky 贴底 + **36px 渐变遮罩** | `ConversationRoot.module.css:507-530` |
+| 输入区 | sticky 贴底 + **36px 渐变遮罩** | `ConversationRoot.module.css:539-548` |
 
 ### 7.5.4 我们要补的行为（按优先级）
 
@@ -783,11 +801,11 @@ dsh 的流内 item 共 **17 种**（`register-node-renderers.ts:27-100` 等）�
 | 用户消息复制 | 时间 + 复制图标，点后变对勾 **1000ms** 复原 | ❌ 无 | `MessageIconActions.tsx:45-90`、`use-clipboard-copy.ts:18-44` |
 | 用户气泡右对齐精确值 | `min(列宽×0.702, 82%)` | ⚠️ 固定 `Margin 60` | `MessageItem.module.css:10-21` |
 | assistant 动作行 | 复制 → 赞踩 → 分支 → 用量 → 时间 | ⚠️ 只有赞踩 | `TurnTailNodeView.tsx:57-78` |
-| 消息间距分层 | 4 / 12 / 16px 三种 | ⚠️ 统一 6px | `ChatView.module.css:77-93` |
+| 消息间距分层 | 4 / 12 / 16px 三种 | ⚠️ 统一 6px | `ChatView.module.css:86-143` |
 | 贴底阈值 | 25px | ⚠️ 80px | `use-chat-reading.ts:7` |
-| "回到底部"按钮 | 34×34 圆形，距底 16px | ❌ 无 | `ChatView.tsx:272-283` |
+| "回到底部"按钮 | 34×34 圆形，距底 16px | ❌ 无 | `ChatView.tsx:301-311` |
 | 空状态 | logo + "探索未至之境" + 预览版徽章 + 工作区 chip | ⚠️ 一行灰字 | `EmptyHero.tsx:132-166`、`locales.ts:79-81` |
-| 输入区渐变遮罩 | 36px `linear-gradient` | ❌ 无 | `ConversationRoot.module.css:507-530` |
+| 输入区渐变遮罩 | 36px `linear-gradient` | ❌ 无 | `ConversationRoot.module.css:539-548` |
 
 **P1 — 需要少量新状态**：
 
@@ -795,7 +813,7 @@ dsh 的流内 item 共 **17 种**（`register-node-renderers.ts:27-100` 等）�
 |---|---|---|
 | 流式"深度求索中，用时 N" | 鲸鱼尾图标 + 秒级计时 | `RunningStatus.tsx:25-48`、`chat/message-chrome.ts:13` |
 | 已停止标记 | assistant 尾部 11px 灰底小标签 | `AssistantMarkdown.tsx:152-154` |
-| 工具卡三态视觉 | running 整行 shimmer / error 用错误色+首行 / stopped 琥珀 | `ToolRow.module.css:118-126`、`DisclosureRow.tsx:114` |
+| 工具卡三态视觉 | running 整行 shimmer / error 用错误色+首行 / stopped 琥珀 | `ToolRow.module.css:82-171`、`DisclosureRow.tsx:114` |
 | 代码块复制 + 语言标签 | 复制 1000ms 复原；语言标签；默认自动换行 | `CodeBlock.tsx:157-206` |
 
 **P2 — 结构较大，可延后**：
@@ -803,7 +821,7 @@ dsh 的流内 item 共 **17 种**（`register-node-renderers.ts:27-100` 等）�
 | 项 | dsh 行为 | 出处 |
 |---|---|---|
 | 轮次导航条 | 右侧 28px 竖排刻度，hover 预览卡，≤900px 隐藏 | `TurnNavigator.tsx:81-295` |
-| 加载更早 | 顶部按钮 + 锚点补偿 | `ChatView.tsx:239-245` |
+| 加载更早 | 顶部按钮 + 锚点补偿 | `ChatView.tsx:254-256` |
 | 折叠四层模型 | 轮次 → 分组 → 单条，不可互相绕过 | `conversation-nodes/README.md:20-60` |
 | 四种工作详情模式 | compact/standard/detailed/verbose + 两个偏好 | `ui-chat/src/chat-settings.ts:15-56` |
 | 列宽可拖拽 | min 640，边缘预算 176，持久化 | `ConversationWidthControls.tsx:5-28` |

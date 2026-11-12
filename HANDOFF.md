@@ -301,9 +301,9 @@ Mac 上直接 `./scripts/rebuild.sh` 就是 `permission denied`。
 Windows 上这两个路径是本地拷贝，**Mac 上要重新 clone**：
 
 ```bash
-# dsh 源码（规格里所有行号出处都指向它，commit 必须对上 ce7073d）
+# dsh 源码（规格里所有行号出处都指向它，commit 必须对上 e8f7b93 / 0.2.2-rc.2）
 git clone https://github.com/deepseek-ai/deepseek-harness dsh-src
-cd dsh-src && git checkout ce7073d
+cd deepseek-harness && git checkout e8f7b93
 
 # Arc 源码（查组件是否存在、哪些是 internal 用）
 git clone https://github.com/AIDotNet/TKCode.Arc arc-src
