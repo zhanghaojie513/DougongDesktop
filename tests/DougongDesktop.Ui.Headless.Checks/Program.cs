@@ -42,6 +42,8 @@ public static class Program
         failures += Check("terminal-panel-reports-unavailable", TerminalPanelReportsUnavailable);
         failures += Check("titlebar-uses-arc-slots", TitlebarUsesArcSlots);
         failures += Check("titlebar-menus-are-windows-only", TitlebarMenusAreWindowsOnly);
+        failures += Check("run-duration-format-matches-dsh", RunDurationFormatMatchesDsh);
+        failures += Check("composer-mask-fades-from-page-background", ComposerMaskFadesFromBackground);
         failures += Check("dock-mode-builds-split-tree", DockModeBuildsSplitTree);
         failures += Check("permission-picker-reflects-engine-state", PermissionPickerReflectsEngineState);
         failures += Check("engine-survives-bad-command", EngineSurvivesBadCommand);
@@ -738,6 +740,89 @@ public static class Program
         {
             Environment.SetEnvironmentVariable("DOUGONG_UI_DOCK", old);
         }
+    }
+
+    /// <summary>
+    /// 输入区渐变遮罩的透明端必须是"底色全透明"，不是黑色全透明。
+    /// </summary>
+    /// <remarks>
+    /// dsh 的注释（<c>ConversationRoot.module.css:541-544</c>）明写：
+    /// <i>"The 0px stop is bg-base at zero alpha (not white, which the figma
+    /// export hardcodes) so both themes fade from their own base."</i>
+    /// <para>
+    /// 用黑色全透明 <c>FromArgb(0,0,0,0)</c> 在浅色主题下几乎看不出，
+    /// 但深色主题里深灰底 → 黑的过渡会显出一条暗带。这是"看着差不多、
+    /// 换个主题就露馅"的典型。
+    /// </para>
+    /// </remarks>
+    private static string? ComposerMaskFadesFromBackground()
+    {
+        var path = Path.Combine(
+            FindRepoRoot(), "src", "DougongDesktop.App", "Shell", "ConversationView.cs");
+        if (!File.Exists(path)) return $"找不到 {path}";
+
+        var src = File.ReadAllText(path);
+
+        // 找渐变遮罩那一段
+        var at = src.IndexOf("ComposerMaskHeight", StringComparison.Ordinal);
+        if (at < 0) return "找不到输入区渐变遮罩";
+
+        var window = src.Substring(at, Math.Min(1400, src.Length - at));
+
+        if (window.Contains("Color.FromArgb(0, 0, 0, 0)", StringComparison.Ordinal))
+            return "遮罩透明端用了黑色全透明（FromArgb(0,0,0,0)）："
+                   + "深色主题下会显出暗带。应改为「底色全透明」（WithAlpha(bg, 0)）";
+
+        if (!window.Contains("WithAlpha(", StringComparison.Ordinal))
+            return "遮罩没有用 WithAlpha 从底色派生透明端";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 运行耗时格式必须与 dsh 的 <c>formatRunDuration</c> 一致。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条来自 2026-11-12 的对照复核</b>：拿 dsh 0.2.2-rc.2 源码逐项核，
+    /// 发现我们原来的实现有三处不一致——
+    /// <list type="number">
+    /// <item>用四舍五入（`:0`）而非 <c>Math.floor</c>——59.6 秒会显示成 60 秒</item>
+    /// <item>没有最小 1 秒，刚起跑时显示"0 秒"像没在走</item>
+    /// <item>没有小时档</item>
+    /// </list>
+    /// <para>
+    /// 源码依据：<c>message-chrome.ts:54-64</c>（格式化）与
+    /// <c>RunningStatus.tsx:34</c>（<c>Math.max(1000, ...)</c>）。
+    /// </para>
+    /// </remarks>
+    private static string? RunDurationFormatMatchesDsh()
+    {
+        var cases = new (TimeSpan Elapsed, string Expect, string Why)[]
+        {
+            (TimeSpan.Zero, "1 秒", "零耗时也报 1 秒（Math.max(1000, ...)）"),
+            (TimeSpan.FromMilliseconds(999), "1 秒", "不足 1 秒报 1 秒"),
+            (TimeSpan.FromMilliseconds(1500), "1 秒", "1.5 秒向下取整为 1"),
+            (TimeSpan.FromMilliseconds(59_600), "59 秒", "59.6 秒不得进位成 60"),
+            (TimeSpan.FromSeconds(60), "1 分 0 秒", "满 60 秒报分钟"),
+            (TimeSpan.FromSeconds(125), "2 分 5 秒", "2 分 05 秒 → 2 分 5 秒"),
+            (TimeSpan.FromSeconds(3600), "1 小时 0 分 0 秒", "满 1 小时报小时档"),
+            (TimeSpan.FromSeconds(3725), "1 小时 2 分 5 秒", "小时+分+秒"),
+        };
+
+        foreach (var (elapsed, expect, why) in cases)
+        {
+            var actual = DougongDesktop.App.Shell.RunStatusLine.FormatElapsed(elapsed);
+
+            // 只比"用时 "之后的部分，前缀单独验
+            if (!actual.StartsWith("深度求索中，用时 ", StringComparison.Ordinal))
+                return $"文案前缀不对：{actual}";
+
+            var tail = actual["深度求索中，用时 ".Length..];
+            if (tail != expect)
+                return $"{why}：期望「{expect}」，实际「{tail}」";
+        }
+
+        return null;
     }
 
     /// <summary>

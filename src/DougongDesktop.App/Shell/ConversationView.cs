@@ -35,6 +35,7 @@ namespace DougongDesktop.App.Shell;
 /// </remarks>
 public sealed class ConversationView : UserControl
 {
+
     private readonly ItemsControl _list;
 
     /// <summary>内部列表，供诊断读取实际尺寸与条目数。</summary>
@@ -325,7 +326,14 @@ public sealed class ConversationView : UserControl
                 EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
                 GradientStops =
                 {
-                    new GradientStop(Color.FromArgb(0, 0, 0, 0), 0),
+                    // **0 端必须是 bg-base 全透明，不能用黑色全透明**。
+                    // dsh 的注释写得很明确（`ConversationRoot.module.css:541-544`）：
+                    //   "The 0px stop is bg-base at zero alpha (**not white**,
+                    //    which the figma export hardcodes) so both themes fade
+                    //    from their own base."
+                    // 用黑色全透明在浅色主题下几乎看不出差别，但深色主题里
+                    // 深灰底 → 黑的过渡会显出一条暗带。
+                    new GradientStop(DshTheme.WithAlpha(DshTheme.PageBackground, 0), 0),
                     new GradientStop(DshTheme.PageBackground, 1),
                 },
             },

@@ -93,10 +93,45 @@ public sealed class RunStatusLine : UserControl
         var elapsed = DateTimeOffset.Now - _startedAt;
         if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
 
-        // 不到一分钟只报秒；超过则"1 分 05 秒"。
-        // dsh 用的是紧凑格式，长回合下秒数一直跳会很吵。
-        _text.Text = elapsed.TotalSeconds < 60
-            ? $"深度求索中，用时 {elapsed.TotalSeconds:0} 秒"
-            : $"深度求索中，用时 {(int)elapsed.TotalMinutes} 分 {elapsed.Seconds:00} 秒";
+        // **照 dsh 的 formatRunDuration（message-chrome.ts:54-64）**。
+        //
+        // 三处此前与源码不一致，2026-11-12 对照修正：
+        //  1. 用 `Math.Floor` **向下取整**，不是四舍五入（`:0` 会进位）。
+        //     源码第 55 行：`Math.max(0, Math.floor(ms / 1000))`。
+        //  2. **最小 1 秒**（RunningStatus.tsx:34 的 `Math.max(1000, ...)`）——
+        //     刚起跑时显示"0 秒"会像没在走。
+        //  3. **有小时档**：源码 60-61 行，`total >= 3600` 时报小时，
+        //     `total >= 60` 时报分钟，秒永远报。
+        _text.Text = FormatElapsed(elapsed);
+    }
+
+    /// <summary>
+    /// 把耗时写成人读的"用时"文案。
+    /// </summary>
+    /// <remarks>
+    /// <b>提取成 public static 是为了能被检查断言</b>：写在 <c>Update()</c> 里
+    /// 就只能靠"源码里有没有 Math.Floor"这种字符串匹配，而那证明不了
+    /// 实际输出对不对——这个项目已经栽过几次。
+    /// </remarks>
+    public static string FormatElapsed(TimeSpan elapsed)
+    {
+        if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+
+        // 照 dsh 的 formatRunDuration（`message-chrome.ts:54-64`）：
+        //  1. 向下取整（源码 55 行 `Math.floor`），不是四舍五入
+        //  2. 最小 1 秒（`RunningStatus.tsx:34` 的 `Math.max(1000, ...)`）
+        //  3. 有小时档，秒始终显示
+        var ms = Math.Max(1000, (long)elapsed.TotalMilliseconds);
+        var total = (int)(ms / 1000);
+        var hours = total / 3600;
+        var minutes = total / 60 % 60;
+        var seconds = total % 60;
+
+        var parts = new List<string>();
+        if (hours > 0) parts.Add($"{hours} 小时");
+        if (total >= 60) parts.Add($"{minutes} 分");
+        parts.Add($"{seconds} 秒");
+
+        return "深度求索中，用时 " + string.Join(" ", parts);
     }
 }
