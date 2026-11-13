@@ -139,7 +139,7 @@ public sealed class FileEngineLocator : IEngineLocator
             foreach (var config in new[] { "Release", "Debug" })
             {
                 var candidate = Path.Combine(
-                    dir.FullName, "src", "DougongDesktop.AgentHost", "bin", config, "net10.0", exe);
+                    dir.FullName, "src", "DougongDesktop.AgentHost", "bin", config, "net11.0", exe);
 
                 if (File.Exists(candidate)) return candidate;
             }

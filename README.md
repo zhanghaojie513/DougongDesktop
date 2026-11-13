@@ -199,7 +199,7 @@ Debug 构建内置了 [Spyglass](https://github.com/AIDotNet/Spyglass)——Aval
 ```bash
 dotnet tool install -g TKCode.Spyglass          # 一次性
 scripts/rebuild.sh DougongDesktop.slnx Debug
-src/DougongDesktop.App/bin/Debug/net10.0/DougongDesktop.App.exe
+src/DougongDesktop.App/bin/Debug/net11.0/DougongDesktop.App.exe
 # 然后在窗口里按 Ctrl+Shift+I
 ```
 
@@ -208,7 +208,7 @@ src/DougongDesktop.App/bin/Debug/net10.0/DougongDesktop.App.exe
 另有一个轻量的**组件探针窗口**，不需要 Spyglass，用来单独验证某个 Arc 控件：
 
 ```bash
-DOUGONG_UI_PROBE=1 src/DougongDesktop.App/bin/Release/net10.0/DougongDesktop.App
+DOUGONG_UI_PROBE=1 src/DougongDesktop.App/bin/Release/net11.0/DougongDesktop.App
 ```
 
 它绕开消息流虚拟化——比如验证 `Markdown` 的代码块（语言标签、复制按钮、

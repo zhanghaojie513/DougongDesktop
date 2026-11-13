@@ -60,13 +60,13 @@ scripts/all-checks.sh
 ### 3. 跑起来看界面
 
 ```bash
-src/DougongDesktop.App/bin/Release/net10.0/DougongDesktop.App
+src/DougongDesktop.App/bin/Release/net11.0/DougongDesktop.App
 ```
 
 无 provider 时用自检数据看渲染：
 
 ```bash
-DOUGONG_UI_SELFTEST=1 src/DougongDesktop.App/bin/Release/net10.0/DougongDesktop.App
+DOUGONG_UI_SELFTEST=1 src/DougongDesktop.App/bin/Release/net11.0/DougongDesktop.App
 ```
 
 ### 4. 环境变量一览（自检开关）

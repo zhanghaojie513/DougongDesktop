@@ -24,7 +24,7 @@ dotnet tool install -g TKCode.Spyglass
 
 ```
 ~/.dotnet/tools/.store/tkcode.spyglass/0.2.3/tkcode.spyglass.win-x64/
-  0.2.3/tools/net10.0/win-x64/Spyglass.exe
+  0.2.3/tools/net11.0/win-x64/Spyglass.exe
 ```
 
 所以在 Git Bash 里直接敲 `spyglass` 会报 `command not found`——用 `.cmd` 或上面的完整路径。
@@ -45,7 +45,7 @@ dotnet tool install -g TKCode.Spyglass
 ```bash
 # 必须是 Debug 构建（Release 里没有探针）
 scripts/rebuild.sh DougongDesktop.slnx Debug
-src/DougongDesktop.App/bin/Debug/net10.0/DougongDesktop.App.exe
+src/DougongDesktop.App/bin/Debug/net11.0/DougongDesktop.App.exe
 ```
 
 然后在 App 窗口里按：
@@ -140,7 +140,7 @@ claude mcp add spyglass -- spyglass mcp
 
 1. **它的 Avalonia 版本要求与我们完全一致**（`12.1.4` 精确）。
    它用 `[PrivateApi]` 成员，版本漂移会出问题——这反而与 Arc 的约束同向。
-2. **`TKCode.Spyglass.Agent` 只有 `net8.0` 目标框架**，net10.0 靠兼容引用。
+2. **`TKCode.Spyglass.Agent` 只有 `net8.0` 目标框架**，net11.0 靠兼容引用。
    能正常工作，但如果哪天出现奇怪的类型加载问题，这是第一个要查的地方。
 
 ### Release 构建必须干净

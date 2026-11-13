@@ -570,7 +570,7 @@ public static readonly StyledProperty<double> SidebarPxProperty = ...;
 > 这些名字在 XML 文档里有 `<member>` 条目，所以"查文档"会以为存在——
 > **文档不反映可见性**。本次一律按 DLL 元数据的 `Visibility` 判定。
 
-**检索口径**：`0.4.0-preview.1` 全部 **16 个包**的 `lib/net10.0` 程序集，
+**检索口径**：`0.4.0-preview.1` 全部 **16 个包**的 `lib/net11.0` 程序集，
 按元数据枚举 `Visibility == Public` 的顶层类型，再按基类是 Avalonia 控件
 （`TemplatedControl` / `Control` / `ContentControl` / `ItemsControl` / …）
 筛出**可实例化控件**。

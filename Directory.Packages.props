@@ -37,9 +37,9 @@
     <!-- Dougong.HostProtocol 曾经在这里。契约搬进 DougongDesktop.Ipc 之后
          已无工程引用它——本仓库的线上格式由 Contract.cs 自持。
          若将来又需要它（比如换回 SDK 的 ProtocolMapping），记得连版本一起加回。 -->
-    <PackageVersion Include="Dougong.Agent" Version="0.1.21-alpha.1" />
-    <PackageVersion Include="Dougong.Ai" Version="0.1.21-alpha.1" />
-    <PackageVersion Include="Dougong.Hosting" Version="0.1.21-alpha.1" />
+    <PackageVersion Include="Dougong.Agent" Version="0.2.0-alpha.1" />
+    <PackageVersion Include="Dougong.Ai" Version="0.2.0-alpha.1" />
+    <PackageVersion Include="Dougong.Hosting" Version="0.2.0-alpha.1" />
   </ItemGroup>
 
 </Project>

@@ -335,7 +335,7 @@ public static class Program
             if (!doc.RootElement.TryGetProperty("projectFileDependencyGroups", out var groups))
                 return null;
 
-            // 按 TFM 分组（"net10.0"、"任意框架" 之类）。本仓库只有一个 TFM，
+            // 按 TFM 分组（"net11.0"、"任意框架" 之类）。本仓库只有一个 TFM，
             // 但仍按全部分组收集——多 TFM 时漏读一个分支就是漏判。
             var names = new List<string>();
             foreach (var group in groups.EnumerateObject())
