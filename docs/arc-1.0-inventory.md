@@ -12,12 +12,15 @@
 
 ### 版本约束变了：Avalonia 必须一起升
 
-| | 1.0.0 | 1.1.0 |
+| | 1.0.0 | 1.1.x |
 |---|---|---|
 | Arc 的 Avalonia 依赖 | `[12.1.4]` **精确锁定** | `[12.1.5, 13.0.0)` **区间** |
 
-所以升级是**成对**的：`Avalonia 12.1.4 → 12.1.5` + 八个 Arc 包 `1.0.0 → 1.1.0`。
+所以 `1.0.0 → 1.1.0` 是**成对**的：`Avalonia 12.1.4 → 12.1.5` + 八个 Arc 包。
 只升一边会 NU1605。
+
+> **1.1.1-preview.2 起 Avalonia 不用再动**：nuspec 的约束仍是
+> `[12.1.5, 13.0.0)`，与 1.1.0 完全一致（逐包核过），所以只升 Arc 八个包。
 
 Spyglass 0.2.3 的 nuspec 写的是裸 `12.1.4`，NuGet 语义等于 `>= 12.1.4`，
 因此与 12.1.5 共存（实测 restore 通过，不是推断）。
@@ -58,7 +61,7 @@ Spyglass 0.2.3 的 nuspec 写的是裸 `12.1.4`，NuGet 语义等于 `>= 12.1.4`
 - 差异区域只有 `(10,798)` 起 67×12 一块——状态栏的「已连接」vs「启动引擎…」
 - 其余**逐像素一致**（布局、配色、字体、间距全没动）
 
-### 终端缺陷：1.1.0 仍未修
+### 终端缺陷：1.1.x 全系未修
 
 用同一份 7 行最小复现重测：
 
@@ -98,6 +101,39 @@ Create FAILED: NullReferenceException
 Blocks 新增的 626 个里绝大多数是整页营销/SaaS 模板
 （`InvoiceStudio`、`KnowledgeBase`、`SeatMap`、`BookingPill`、`SupportWidget` …），
 与桌面客户端形态不匹配，**不采用**。
+
+### 1.1.0 → 1.1.1-preview.2（2026-11-16）
+
+| 包 | 公开类型 | 新增 | 删除 |
+|---|---|---|---|
+| `TKCode.Arc` | 1184 → 1189 | +5 | **0** |
+| `TKCode.Arc.Blocks` | 1903 → 1949 | +46 | **0** |
+| Special / Core / Dock / Workflow / Terminal / Icons.Lucide | 不变 | 0 | **0** |
+| **合计** | | **+51** | **0** |
+
+**22 处类型成员有变，全部是纯增（`+n/-0`）**，零删除。
+
+新增的 51 个里没有一个是新的顶层控件——都是既有组件的成员增强：
+
+| 类型 | 新增 |
+|---|---|
+| `PrizeWheel` | +47（`CodeCopied` / `SelectionChanged` 事件、`Charging`/`Claimed` 伪类、`Code` 属性等） |
+| `SandText` | +10（`DigRadius` / `Palette` / `HeadingLevel` 等） |
+| `TocProgress` | +6（`ReadingOffset` / `ReadingTime` / `ShowsTimeLeft`） |
+
+都属装饰性/演示品类，本项目不用。
+
+**视觉回归**：无头渲染逐像素比对 1.1.0 vs preview.2，
+差异 **479 / 1,049,600 = 0.046%**，与上次升级到 1.1.0 时**完全相同的那一块**
+（状态栏「已连接 / 启动引擎…」，连接时序差异），其余逐像素一致。
+
+**API 状态复核**：`CommandPaletteDialog.ItemSelected` 在 preview.2 仍标
+"The former name of …"，弃用关系没变，我们用的 `ItemInvoked` 依然正确。
+
+**终端缺陷复测**：同一份 7 行最小复现仍抛 `NullReferenceException`
+（`Version = 0.1.0-dev` 握手正常）。**1.1.1-preview.2 也没修**，F1 继续卡着。
+每升一次都重跑这条是既定做法——不重跑就等于拿旧结论代替验证。
+
 
 ---
 

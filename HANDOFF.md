@@ -428,4 +428,4 @@ f96dab2 feat(p8b): 附件栏——Arc 自带完整链路，删掉多余的抽象
 ```
 
 **当前状态**：119 条检查全绿，构建 0 警告 0 错误，
-Arc `1.1.0`，Avalonia `12.1.5`，SDK `0.2.0-alpha.1`。
+Arc `1.1.1-preview.2`，Avalonia `12.1.5`，SDK `0.2.0-alpha.1`。
