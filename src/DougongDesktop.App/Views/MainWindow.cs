@@ -475,6 +475,18 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         // 否则"切换失败"会显示成"成功"。
         _settingsView.PermissionPresetRequested += key => _ = SendPermissionSwitchAsync(key);
 
+        // 工作详情偏好（M16）：回填 + 保存。
+        //
+        // **回填必须在绑定事件之前**：SetWorkDetail 设 SelectedIndex 会触发
+        // SelectionChanged，若那时已绑好事件，回填会被当成"用户改了"而写盘。
+        // （SettingsView 内部也有 _updatingWorkDetail 兜底，两处都要。）
+        _settingsView.SetWorkDetail(
+            Shell?.Settings.TranscriptView,
+            Shell?.Settings.CollapseTiming,
+            Shell?.Settings.FoldedReplies);
+
+        _settingsView.WorkDetailRequested += SaveWorkDetail;
+
         return _settingsView;
     }
 
@@ -582,6 +594,20 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         });
     }
 
+    /// <summary>
+    /// 保存工作详情偏好。
+    /// </summary>
+    /// <remarks>
+    /// <b>这些偏好只影响客户端渲染</b>，不发给引擎——与权限预设不同。
+    /// dsh 也把它们存在客户端的 settings 文档里。
+    /// <para>
+    /// 写盘失败不抛（与 <see cref="AppSettings"/> 的既有原则一致）：
+    /// 存不下偏好不该打断用户。
+    /// </para>
+    /// </remarks>
+    private void SaveWorkDetail(string mode, string timing, string replies) =>
+        Shell?.SaveWorkDetail(mode, timing, replies);
+
     /// <summary>把用户选的预设发给引擎。</summary>
     /// <remarks>
     /// <b>只发不猜</b>：引擎回 <c>permission/listed</c>（带当前真实状态），
@@ -682,7 +708,9 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 break;
 
             case ItemAddedEvent added:
-                _conversation.Add(added.Item);
+                // 把 TurnId 一起传下去：M15 的轮次分组需要它，
+                // 此前在这里被丢掉了（事件有、视图没有）。
+                _conversation.Add(added.Item, added.TurnId);
 
                 // 右栏的计划 tab 跟着消息流更新（全量替换）。
                 // "改动" tab 不靠这里——它用宿主推来的 FileVersionSet 比对结果

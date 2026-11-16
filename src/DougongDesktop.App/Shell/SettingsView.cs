@@ -37,6 +37,204 @@ public sealed class SettingsView : UserControl
 
     /// <summary>可浏览的模型清单，按 provider 分组。</summary>
     private readonly StackPanel _modelList = new() { Spacing = 0 };
+
+    // **用 Arc.SegmentedControl，不用原生 ComboBox**。
+    //
+    // 实测（2026-11-12）：`new ComboBox()` 在设置行里是 `200x0`——宽度有、
+    // 高度 0。根因是本项目 `App.axaml` 的 `Application.Styles` 是空的
+    // （注释写明不能挂 FluentTheme，会与 Arc 的 token 互相覆盖），
+    // 所以原生控件没有 ControlTheme、没有模板。
+    // 同一个位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"而非容器问题。
+    //
+    // 权限分区的预设下拉一直是 0 高、从没显示过——同一原因，此前没人发现。
+    //
+    // `SegmentedControl` 继承 `SelectingItemsControl`，有标准
+    // `SelectedIndex`/`SelectionChanged`，且本来就是"一组里选一个"的形态。
+
+    /// <summary>工作详情模式选择器（M16）。</summary>
+    private readonly TKCode.Arc.SegmentedControl _detailPicker = new();
+
+    /// <summary>折叠时机选择器。</summary>
+    private readonly TKCode.Arc.SegmentedControl _timingPicker = new();
+
+    /// <summary>折叠回复范围选择器。</summary>
+    private readonly TKCode.Arc.SegmentedControl _repliesPicker = new();
+
+    /// <summary>选择器当前展示的能力摘要。</summary>
+    private readonly TextBlock _policySummary = Body("—");
+
+    /// <summary>
+    /// 回填期间抑制"用户改动"事件。
+    /// </summary>
+    /// <remarks>
+    /// 设 <c>SelectedIndex</c> 会触发 <c>SelectionChanged</c>——回填时若不挡住，
+    /// 程序自己的赋值会被当成用户操作而立刻写盘。
+    /// 与权限下拉的 <c>_updatingPresets</c> 是同一手法。
+    /// </remarks>
+    private bool _updatingWorkDetail;
+
+    /// <summary>用户改了工作详情偏好。参数是 (模式, 折叠时机, 折叠回复)。</summary>
+    public event Action<string, string, string>? WorkDetailRequested;
+
+    private static readonly (string Key, string Label, string Note)[] ModeOptions =
+    [
+        ("compact", "紧凑", "不显示过程细节与推理预览"),
+        ("standard", "标准", "显示过程细节与推理预览"),
+        ("detailed", "详细（默认）", "分组标题只在历史轮次可折叠"),
+        ("verbose", "啰嗦", "不折叠轮次，过程始终可见"),
+    ];
+
+    private static readonly (string Key, string Label)[] TimingOptions =
+    [
+        ("completion", "完成时折叠（默认）"),
+        ("next-input", "等到下一次输入"),
+    ];
+
+    private static readonly (string Key, string Label)[] ReplyOptions =
+    [
+        ("all", "保留全部回复（默认）"),
+        ("final", "只保留最终答复"),
+    ];
+
+    /// <summary>
+    /// 工作详情分区（M16）。
+    /// </summary>
+    /// <remarks>
+    /// <b>四个模式不是 UI 风格，是一组能力开关</b>（见
+    /// <see cref="ChatPresentation"/>）。所以这里除了选择器，还如实显示
+    /// 当前档位实际启用了哪几项——否则用户看不出"标准"和"详细"差在哪。
+    /// <para>
+    /// <b>遗留值不出现在选项里</b>：dsh 的 <c>normal</c> / <c>expanded</c>
+    /// 只在读取时映射成 detailed，不提供选择、也不写回。
+    /// </para>
+    /// </remarks>
+    private SettingsSection BuildWorkDetailSection()
+    {
+        var mode = _detailPicker;
+        var timing = _timingPicker;
+        var replies = _repliesPicker;
+
+        // SegmentedControl 吃子项
+        foreach (var (_, label, _) in ModeOptions)
+            mode.Items.Add(new TKCode.Arc.Button { Content = label, Variant = TKCode.Arc.ButtonVariant.Secondary });
+        foreach (var (_, label) in TimingOptions)
+            timing.Items.Add(new TKCode.Arc.Button { Content = label, Variant = TKCode.Arc.ButtonVariant.Secondary });
+        foreach (var (_, label) in ReplyOptions)
+            replies.Items.Add(new TKCode.Arc.Button { Content = label, Variant = TKCode.Arc.ButtonVariant.Secondary });
+
+        mode.SelectedIndex = 2;      // detailed
+        timing.SelectedIndex = 0;    // completion
+        replies.SelectedIndex = 0;   // all
+
+        void Changed()
+        {
+            // 回填期间不当作"用户改了"
+            if (_updatingWorkDetail) return;
+            if (CurrentModeKey() is not { } m) return;
+            UpdatePolicySummary(m);
+            WorkDetailRequested?.Invoke(m, CurrentTimingKey(), CurrentRepliesKey());
+        }
+
+        mode.SelectionChanged += (_, _) => Changed();
+        timing.SelectionChanged += (_, _) => Changed();
+        replies.SelectionChanged += (_, _) => Changed();
+
+        UpdatePolicySummary("detailed");
+
+        return new SettingsSection
+        {
+            Header = "工作详情",
+            Description = "决定一轮对话里「过程」显示多少。这不只是疏密——它同时决定轮次折叠与分组行为。",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    new SettingsGroup
+                    {
+                        Header = "显示档位",
+                        Items =
+                        {
+                            RowWithControl("详情模式", "四个档位对应的能力不同，不是简单增减", mode),
+                            RowWithControl("折叠时机", "完成的轮次何时收起来", timing),
+                            RowWithControl("保留回复", "折叠过程时，哪些助手回复还可见", replies),
+                        },
+                    },
+                    new SettingsGroup
+                    {
+                        Header = "当前生效的能力",
+                        Description = "这是档位实际启用的项，不是猜测。",
+                        Items = { Row("能力摘要", "与 dsh 的 POLICIES 表一致", _policySummary) },
+                    },
+                },
+            },
+        };
+    }
+
+    private string? CurrentModeKey() =>
+        _detailPicker.SelectedIndex >= 0 && _detailPicker.SelectedIndex < ModeOptions.Length
+            ? ModeOptions[_detailPicker.SelectedIndex].Key : null;
+
+    private string CurrentTimingKey() =>
+        _timingPicker.SelectedIndex >= 0 && _timingPicker.SelectedIndex < TimingOptions.Length
+            ? TimingOptions[_timingPicker.SelectedIndex].Key : "completion";
+
+    private string CurrentRepliesKey() =>
+        _repliesPicker.SelectedIndex >= 0 && _repliesPicker.SelectedIndex < ReplyOptions.Length
+            ? ReplyOptions[_repliesPicker.SelectedIndex].Key : "all";
+
+    /// <summary>把当前档位的能力写成一行，让用户看得见差别。</summary>
+    private void UpdatePolicySummary(string modeKey)
+    {
+        var p = ChatPresentation.Resolve(
+            ChatPresentation.ParseMode(modeKey),
+            ChatPresentation.ParseTiming(CurrentTimingKey()),
+            ChatPresentation.ParseReplies(CurrentRepliesKey()));
+
+        _policySummary.Text =
+            $"{(p.FoldCompletedTurns ? "折叠完成的轮次" : "不折叠")} · " +
+            $"分组标题{(p.StepGrouping switch
+            {
+                StepGroupingKind.Collapsed => "全部可折叠",
+                StepGroupingKind.History => "仅历史轮次可折叠",
+                _ => "不折叠",
+            })} · " +
+            $"过程细节{(p.LiveProcessDetail ? "显示" : "隐藏")} · " +
+            $"推理预览{(p.SettledReasoningPreview ? "显示" : "隐藏")}";
+    }
+
+    /// <summary>用已保存的偏好回填选择器。</summary>
+    /// <remarks>
+    /// 解析一律走 <see cref="ChatPresentation"/>：它认识遗留值
+    /// （normal / expanded → detailed），也把认不出的值落到默认。
+    /// </remarks>
+    public void SetWorkDetail(string? mode, string? timing, string? replies)
+    {
+        var m = ChatPresentation.ToKey(ChatPresentation.ParseMode(mode));
+        var t = ChatPresentation.ParseTiming(timing) == CollapseTiming.NextInput ? "next-input" : "completion";
+        var r = ChatPresentation.ParseReplies(replies) == FoldedReplies.Final ? "final" : "all";
+
+        _updatingWorkDetail = true;
+        try
+        {
+            _detailPicker.SelectedIndex = Array.FindIndex(ModeOptions, o => o.Key == m);
+            _timingPicker.SelectedIndex = Array.FindIndex(TimingOptions, o => o.Key == t);
+            _repliesPicker.SelectedIndex = Array.FindIndex(ReplyOptions, o => o.Key == r);
+        }
+        finally
+        {
+            _updatingWorkDetail = false;
+        }
+
+        UpdatePolicySummary(m);
+    }
+
+    /// <summary>当前选择（诊断与自检用）。</summary>
+    public (string Mode, string Timing, string Replies) CurrentWorkDetail =>
+        (CurrentModeKey() ?? "detailed", CurrentTimingKey(), CurrentRepliesKey());
+
+    /// <summary>能力摘要文本（诊断用）。</summary>
+    public string PolicySummaryText => _policySummary.Text ?? string.Empty;
     private readonly TextBlock _engineSummary;
     private readonly TextBlock _checkCount;
     private readonly TextBlock _pluginSummary;
@@ -62,6 +260,7 @@ public sealed class SettingsView : UserControl
                 BuildPluginsSection(),
                 BuildPermissionsSection(),
                 BuildAppearanceSection(),
+                BuildWorkDetailSection(),
                 BuildDiagnosticsSection(),
             },
         };
@@ -364,11 +563,12 @@ public sealed class SettingsView : UserControl
     /// 放一个切了不生效的开关，比不放更糟。
     /// </remarks>
     /// <summary>预设选择器与当前档位（诊断用）。</summary>
-    private readonly ComboBox _presetPicker = new()
-    {
-        MinWidth = 180,
-        PlaceholderText = "（等待引擎）",
-    };
+    /// <remarks>
+    /// **用 SegmentedControl 而不是 ComboBox**：原生 ComboBox 在本项目里
+    /// 是 `180x0`（无 FluentTheme 故无模板），这个下拉从来没有显示过。
+    /// 换成 Arc 的分段控件后可见可点。
+    /// </remarks>
+    private readonly TKCode.Arc.SegmentedControl _presetPicker = new();
 
     private readonly TextBlock _presetState = Body("—");
 
@@ -419,7 +619,7 @@ public sealed class SettingsView : UserControl
                         Header = "审批档位",
                         Items =
                         {
-                            Row("预设", "由引擎裁决，不是只记一个值", _presetPicker),
+                            RowWithControl("预设", "由引擎裁决，不是只记一个值", _presetPicker),
                             Row("当前生效", "以引擎回报为准", _presetState),
                         },
                     },
@@ -462,11 +662,12 @@ public sealed class SettingsView : UserControl
             foreach (var option in state.Options)
             {
                 _presetKeys.Add(option.Key);
-                _presetPicker.Items.Add(new ComboBoxItem
+                _presetPicker.Items.Add(new TKCode.Arc.Button
                 {
-                    Content = $"{option.Name}（{option.Key}）",
+                    Content = option.Name,
                     // 派生出来的 custom 之类不可选：选了也没语义
                     IsEnabled = option.Selectable,
+                    Variant = TKCode.Arc.ButtonVariant.Secondary,
                 });
             }
 
@@ -527,6 +728,30 @@ public sealed class SettingsView : UserControl
         Description = description,
         Content = value,
     };
+
+    /// <summary>
+    /// 带控件的一行，**显式钉住内容对齐**。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么单独一个重载</b>：Arc 的 <c>SettingsRow</c> 从
+    /// <c>SettingsGroup</c> 继承 <c>ContentAlignment</c>，未设时控件在
+    /// 竖直方向拿到 <c>0</c> 高度（实测 <c>B=200x0</c>，父行有 74px）。
+    /// <c>TextBlock</c> 因为自然高度存在所以看不出来，<c>ComboBox</c> 直接消失。
+    /// <para>
+    /// 这不是我们的 bug——权限分区的预设下拉一直是 <c>0</c> 高，
+    /// 只是没人注意它没显示。显式给 <c>VerticalAlignment.Center</c> 即可。
+    /// </para>
+    /// </remarks>
+    private static SettingsRow RowWithControl(string header, string description, Control value)
+    {
+        value.VerticalAlignment = VerticalAlignment.Center;
+        return new SettingsRow
+        {
+            Header = header,
+            Description = description,
+            Content = value,
+        };
+    }
 
     private static TextBlock Body(string text) => new()
     {

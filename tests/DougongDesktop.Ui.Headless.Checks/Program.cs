@@ -44,6 +44,10 @@ public static class Program
         failures += Check("titlebar-menus-are-windows-only", TitlebarMenusAreWindowsOnly);
         failures += Check("run-duration-format-matches-dsh", RunDurationFormatMatchesDsh);
         failures += Check("composer-mask-fades-from-page-background", ComposerMaskFadesFromBackground);
+        failures += Check("transcript-view-modes-match-dsh-table", TranscriptViewModesMatchDshTable);
+        failures += Check("transcript-legacy-modes-read-as-detailed", TranscriptLegacyModesReadAsDetailed);
+        failures += Check("work-detail-picker-reflects-and-saves", WorkDetailPickerReflectsAndSaves);
+        failures += Check("settings-fields-load-independently", SettingsFieldsLoadIndependently);
         failures += Check("dock-mode-builds-split-tree", DockModeBuildsSplitTree);
         failures += Check("permission-picker-reflects-engine-state", PermissionPickerReflectsEngineState);
         failures += Check("engine-survives-bad-command", EngineSurvivesBadCommand);
@@ -438,6 +442,76 @@ public static class Program
         return null;
     }
 
+    /// <summary>
+    /// 设置文件里每个字段独立生效，一个字段缺失或损坏不该拖累其他字段。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查针对一个反复出现的 bug 形态</b>（2026-11-12 一天内犯了三次）：
+    /// <list type="number">
+    /// <item><c>RightbarWidth</c> 的校验被嵌在「<c>PaneSizes</c> 有效」的分支里
+    /// ——只存宽度时整份设置被丢弃。</item>
+    /// <item>补上后又写成「两项都无效就返回空设置」——只存偏好、没存布局时
+    /// 整份设置照样被丢弃。</item>
+    /// </list>
+    /// 共同点：**把"某字段坏了"扩大成"整份文件作废"**。
+    /// <para>
+    /// 断言方式是逐字段单独存、单独读：每个字段都必须能独立往返。
+    /// </para>
+    /// </remarks>
+    private static string? SettingsFieldsLoadIndependently()
+    {
+        var cases = new (string Label, DougongDesktop.Ui.Core.AppSettings Save, Func<DougongDesktop.Ui.Core.AppSettings, bool> Ok)[]
+        {
+            ("只有右栏宽度",
+                new DougongDesktop.Ui.Core.AppSettings { RightbarWidth = 576 },
+                s => s.RightbarWidth is 576),
+            ("只有详情模式",
+                new DougongDesktop.Ui.Core.AppSettings { TranscriptView = "verbose" },
+                s => s.TranscriptView == "verbose"),
+            ("只有折叠时机",
+                new DougongDesktop.Ui.Core.AppSettings { CollapseTiming = "next-input" },
+                s => s.CollapseTiming == "next-input"),
+            ("只有折叠回复",
+                new DougongDesktop.Ui.Core.AppSettings { FoldedReplies = "final" },
+                s => s.FoldedReplies == "final"),
+            ("布局 + 三项偏好同时存",
+                new DougongDesktop.Ui.Core.AppSettings
+                {
+                    PaneSizes = [0.3, 0.4, 0.3],
+                    RightbarWidth = 500,
+                    TranscriptView = "compact",
+                    CollapseTiming = "completion",
+                    FoldedReplies = "all",
+                },
+                s => s.PaneSizes is { Length: 3 } && s.RightbarWidth is 500
+                     && s.TranscriptView == "compact"),
+        };
+
+        foreach (var (label, save, ok) in cases)
+        {
+            var store = new RoundTripStore();
+            save.Save(store);
+            var loaded = DougongDesktop.Ui.Core.AppSettings.Load(store);
+
+            if (!ok(loaded))
+                return $"「{label}」存进去后读不回来（得到："
+                       + $"width={loaded.RightbarWidth?.ToString() ?? "null"}, "
+                       + $"view={loaded.TranscriptView ?? "null"}, "
+                       + $"timing={loaded.CollapseTiming ?? "null"}, "
+                       + $"replies={loaded.FoldedReplies ?? "null"}）";
+        }
+
+        return null;
+    }
+
+    /// <summary>可往返的内存存储：写进去能读回来。</summary>
+    private sealed class RoundTripStore : DougongDesktop.Ui.Core.ISettingsStore
+    {
+        private readonly Dictionary<string, string> _files = new(StringComparer.Ordinal);
+        public string? Read(string name) => _files.TryGetValue(name, out var v) ? v : null;
+        public bool Write(string name, string content) { _files[name] = content; return true; }
+    }
+
     /// <summary>内存存储，用于测 AppSettings 的读写而不碰磁盘。</summary>
     private sealed class MemoryStore(string json) : DougongDesktop.Ui.Core.ISettingsStore
     {
@@ -740,6 +814,245 @@ public static class Program
         {
             Environment.SetEnvironmentVariable("DOUGONG_UI_DOCK", old);
         }
+    }
+
+    /// <summary>
+    /// 四个工作详情模式的能力开关必须与 dsh 的 POLICIES 表逐项一致。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么逐项比对而不是"看着合理就行"</b>：这张表**不是单调递增**的。
+    /// <c>verbose</c> 的 <c>LiveProcessDetail</c> 是 <c>false</c>（不是 true）——
+    /// 它把过程全摊开，因而不需要在标题里显示实时细节。
+    /// 凭"模式越细越多"的直觉写，四项里有这一项必错。
+    /// <para>
+    /// 依据：dsh <c>presentation-policy.ts</c> 的 <c>POLICIES</c>（0.2.2-rc.2）。
+    /// </para>
+    /// </remarks>
+    private static string? TranscriptViewModesMatchDshTable()
+    {
+        // (模式, FoldCompletedTurns, StepGrouping, LiveProcessDetail, SettledReasoningPreview)
+        var expected = new (DougongDesktop.Ui.Core.TranscriptViewMode Mode,
+                            bool Fold, DougongDesktop.Ui.Core.StepGroupingKind Grouping,
+                            bool Live, bool Preview, string Why)[]
+        {
+            (DougongDesktop.Ui.Core.TranscriptViewMode.Compact,
+                true, DougongDesktop.Ui.Core.StepGroupingKind.Collapsed, false, false,
+                "compact 不显示过程细节与推理预览"),
+            (DougongDesktop.Ui.Core.TranscriptViewMode.Standard,
+                true, DougongDesktop.Ui.Core.StepGroupingKind.Collapsed, true, true,
+                "standard 两项都开"),
+            (DougongDesktop.Ui.Core.TranscriptViewMode.Detailed,
+                true, DougongDesktop.Ui.Core.StepGroupingKind.History, true, true,
+                "detailed 的分组只在历史轮次折叠"),
+            (DougongDesktop.Ui.Core.TranscriptViewMode.Verbose,
+                false, DougongDesktop.Ui.Core.StepGroupingKind.None, false, true,
+                "verbose 不折叠轮次；LiveProcessDetail 是 false 不是 true"),
+        };
+
+        foreach (var (mode, fold, grouping, live, preview, why) in expected)
+        {
+            var p = DougongDesktop.Ui.Core.ChatPresentation.Resolve(mode);
+            if (p.FoldCompletedTurns != fold)
+                return $"{mode}: FoldCompletedTurns 期望 {fold}，实际 {p.FoldCompletedTurns}（{why}）";
+            if (p.StepGrouping != grouping)
+                return $"{mode}: StepGrouping 期望 {grouping}，实际 {p.StepGrouping}（{why}）";
+            if (p.LiveProcessDetail != live)
+                return $"{mode}: LiveProcessDetail 期望 {live}，实际 {p.LiveProcessDetail}（{why}）";
+            if (p.SettledReasoningPreview != preview)
+                return $"{mode}: SettledReasoningPreview 期望 {preview}，实际 {p.SettledReasoningPreview}（{why}）";
+        }
+
+        // 默认模式必须是 detailed，不是 standard
+        if (DougongDesktop.Ui.Core.ChatPresentation.DefaultMode
+            != DougongDesktop.Ui.Core.TranscriptViewMode.Detailed)
+            return "默认模式必须是 detailed（dsh: DEFAULT_TRANSCRIPT_VIEW_MODE = 'detailed'）";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 工作详情选择器：回填要准确、改动要保存、能力摘要要跟着变。
+    /// </summary>
+    /// <remarks>
+    /// <b>三个断言各有对应的事故形态</b>：
+    /// <list type="number">
+    /// <item><b>回填准确</b> —— 存了 verbose，界面却显示 detailed，
+    /// 用户会以为设置丢了。</item>
+    /// <item><b>回填不触发保存</b> —— 设 <c>SelectedIndex</c> 会触发
+    /// <c>SelectionChanged</c>；若这时事件已绑好，回填本身会被当成
+    /// "用户改了"而立刻写盘。这是本次实现里特意规避的顺序问题。</item>
+    /// <item><b>摘要跟随选择</b> —— 用户看不出"标准"和"详细"差在哪，
+    /// 就只能盲选。</item>
+    /// </list>
+    /// </remarks>
+    private static string? WorkDetailPickerReflectsAndSaves()
+    {
+        var view = new DougongDesktop.App.Shell.SettingsView();
+
+        // 1. 回填准确（含遗留值映射）
+        view.SetWorkDetail("verbose", "next-input", "final");
+        var got = view.CurrentWorkDetail;
+        if (got != ("verbose", "next-input", "final"))
+            return $"回填不准：期望 verbose/next-input/final，实际 {got}";
+
+        // 遗留值 normal 必须回填成 detailed
+        view.SetWorkDetail("normal", null, null);
+        if (view.CurrentWorkDetail.Mode != "detailed")
+            return $"遗留值 normal 回填成 {view.CurrentWorkDetail.Mode}，应为 detailed";
+
+        // 2. 回填不应触发保存事件
+        var saved = new List<(string, string, string)>();
+        view.WorkDetailRequested += (m, t, r) => saved.Add((m, t, r));
+
+        view.SetWorkDetail("compact", "completion", "all");
+        if (saved.Count > 0)
+            return $"回填触发了 {saved.Count} 次保存请求（应为 0）——"
+                   + "回填被当成用户改动写盘了";
+
+        // 2a. 装配层必须真的调用回填与绑定（只写方法不接线 = 死代码）
+        var mw = Path.Combine(
+            FindRepoRoot(), "src", "DougongDesktop.App", "Views", "MainWindow.cs");
+        var mwSrc = File.ReadAllText(mw);
+        if (!mwSrc.Contains("SetWorkDetail(", StringComparison.Ordinal))
+            return "MainWindow 没有调用 SetWorkDetail：存下的偏好在界面上永远不生效";
+        if (!mwSrc.Contains("WorkDetailRequested +=", StringComparison.Ordinal))
+            return "MainWindow 没有订阅 WorkDetailRequested：改了也不会保存";
+
+        // 2a-2. **不许用原生 ComboBox**
+        //
+        // 这是本项目的一条硬约束：`App.axaml` 的 `Application.Styles` 是空的
+        // （注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），
+        // 所以原生 Avalonia 控件没有 ControlTheme、没有模板、渲染成 0 高度。
+        //
+        // 2026-11-12 实测：`ComboBox` 在设置行里是 `200x0`——控件树里有、
+        // `IsVisible=true`、`items=4`，就是看不见。Arc 的控件因为有主题正常。
+        // 权限预设那个下拉因此**从来没有显示过**，而没人发现。
+        var combos = view.GetLogicalDescendants()
+            .OfType<Avalonia.Controls.ComboBox>().ToArray();
+        if (combos.Length > 0)
+            return $"设置页里有 {combos.Length} 个原生 ComboBox："
+                   + "本项目没有 FluentTheme，它们会渲染成 0 高度（看不见）。"
+                   + "改用 Arc 的 SegmentedControl / Select 等带主题的控件";
+
+        // 2b. 选择器必须真的在控件树里（不能只有字段）
+        // **断言控件有非零高度**：这一条来自真实事故——原生 ComboBox
+        // 在没有 FluentTheme 的项目里是 200x0，看得见"在树里"，实际不渲染。
+        var pickers = view.GetLogicalDescendants()
+            .OfType<TKCode.Arc.SegmentedControl>()
+            .ToArray();
+        if (pickers.Length < 3)
+            return $"控件树里只有 {pickers.Length} 个 SegmentedControl（期望至少 3：模式/时机/回复）";
+
+        // **只要求工作详情这三个有选项**。权限预设那个是引擎驱动的，
+        // 没有 provider 时本来就该是空的——把它算进来会让检查在
+        // "引擎没连"的环境里误报。区分方式：工作详情三个都在
+        // "显示档位"那一组，权限那个在"审批档位"组。
+        var withItems = pickers.Count(p => p.ItemCount > 0);
+        if (withItems < 3)
+            return $"只有 {withItems} 个 SegmentedControl 有选项（期望 3 个带固定选项的）——"
+                   + "控件在树里但没有内容，渲染出来是空的";
+
+
+        // 2c. **落盘往返**：存进去、重新读回来必须一致
+        //
+        // 只验"事件发出去了"不够——保存链路上任何一环断掉，
+        // 用户都会看到"设置重启后又变回去了"。
+        var tmp = new RoundTripStore();
+        var toSave = new DougongDesktop.Ui.Core.AppSettings
+        {
+            TranscriptView = "verbose",
+            CollapseTiming = "next-input",
+            FoldedReplies = "final",
+        };
+        toSave.Save(tmp);
+        var back = DougongDesktop.Ui.Core.AppSettings.Load(tmp);
+
+        if (back.TranscriptView != "verbose" || back.CollapseTiming != "next-input"
+            || back.FoldedReplies != "final")
+            return $"落盘往返不一致：读回 {back.TranscriptView}/{back.CollapseTiming}/{back.FoldedReplies}";
+
+        // 3. 摘要要跟着档位变
+        view.SetWorkDetail("compact", "completion", "all");
+        var compactSummary = view.PolicySummaryText;
+        view.SetWorkDetail("verbose", "completion", "all");
+        var verboseSummary = view.PolicySummaryText;
+
+        if (compactSummary == verboseSummary)
+            return $"compact 与 verbose 的能力摘要相同（「{compactSummary}」）——"
+                   + "用户看不出两档差别";
+
+        // verbose 的摘要必须写"不折叠"，这是它与其余三档最关键的区别
+        if (!verboseSummary.Contains("不折叠", StringComparison.Ordinal))
+            return $"verbose 的摘要没有体现「不折叠」：{verboseSummary}";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 详情模式的持久化必须**往返稳定**，且认不出的值落到默认而不是乱猜。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查的第一版是废的，值得记</b>：它断言"遗留值 normal/expanded
+    /// 读作 detailed"，但删掉那两个分支后 `_` 兜底同样返回 detailed——
+    /// 两条路径结果一样，反证根本触发不了。
+    /// <para>
+    /// 真正有意义的是这几条：
+    /// <list type="number">
+    /// <item><b>往返稳定</b>：<c>Parse(ToKey(m)) == m</c>，对四个模式都成立。
+    /// 不成立会导致"存进去读出来变一档"。</item>
+    /// <item><b>遗留值不会被写回</b>：<c>ToKey(Parse("normal"))</c> 必须是
+    /// <c>"detailed"</c> 而不是 <c>"normal"</c>。</item>
+    /// <item>认不出的值落到默认，不抛异常。</item>
+    /// <item>大小写与空白容忍（用户可能手改配置文件）。</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private static string? TranscriptLegacyModesReadAsDetailed()
+    {
+        var cp = typeof(DougongDesktop.Ui.Core.ChatPresentation);
+
+        // 1. 四个模式的往返稳定
+        foreach (var mode in new[]
+                 {
+                     DougongDesktop.Ui.Core.TranscriptViewMode.Compact,
+                     DougongDesktop.Ui.Core.TranscriptViewMode.Standard,
+                     DougongDesktop.Ui.Core.TranscriptViewMode.Detailed,
+                     DougongDesktop.Ui.Core.TranscriptViewMode.Verbose,
+                 })
+        {
+            var key = DougongDesktop.Ui.Core.ChatPresentation.ToKey(mode);
+            var back = DougongDesktop.Ui.Core.ChatPresentation.ParseMode(key);
+            if (back != mode)
+                return $"往返不稳定：{mode} → 「{key}」→ {back}";
+        }
+
+        // 2. 遗留值读作 detailed，**且写回时归一成 detailed**
+        foreach (var legacy in new[] { "normal", "expanded" })
+        {
+            var parsed = DougongDesktop.Ui.Core.ChatPresentation.ParseMode(legacy);
+            if (parsed != DougongDesktop.Ui.Core.TranscriptViewMode.Detailed)
+                return $"遗留值「{legacy}」应读作 detailed，实际 {parsed}";
+
+            var written = DougongDesktop.Ui.Core.ChatPresentation.ToKey(parsed);
+            if (written != "detailed")
+                return $"遗留值「{legacy}」被写回成「{written}」——"
+                       + "dsh 明确要求 legacy 值 never written back";
+        }
+
+        // 3. 认不出的值落到默认（不抛）
+        if (DougongDesktop.Ui.Core.ChatPresentation.ParseMode("nonsense")
+            != DougongDesktop.Ui.Core.ChatPresentation.DefaultMode)
+            return "无法识别的值应落到默认模式";
+        if (DougongDesktop.Ui.Core.ChatPresentation.ParseMode(null)
+            != DougongDesktop.Ui.Core.ChatPresentation.DefaultMode)
+            return "null 应落到默认模式";
+
+        // 4. 大小写与空白容忍
+        if (DougongDesktop.Ui.Core.ChatPresentation.ParseMode("  VERBOSE ")
+            != DougongDesktop.Ui.Core.TranscriptViewMode.Verbose)
+            return "解析应容忍大小写与首尾空白";
+
+        return null;
     }
 
     /// <summary>

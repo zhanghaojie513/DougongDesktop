@@ -52,8 +52,8 @@
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **25%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **40%** |
-| **P8g 中区会话域** | **12** | **1** | **4** | **0** | **6** | **23** | **76%** |
-| **合计** | **35** | **3** | **21** | **2** | **9** | **70** | **67%** |
+| **P8g 中区会话域** | **12** | **2** | **3** | **0** | **6** | **23** | **82%** |
+| **合计** | **35** | **4** | **20** | **2** | **9** | **70** | **66%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -230,7 +230,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | M13 | ⬜ | 轮次导航条 | `[自有]` | 右侧 28px 竖排刻度，hover 预览，≤900px 隐藏（`TurnNavigator.tsx:81-295`） | 无 |
 | M14 | ⬜ | 加载更早 | `[自有]` | 顶部按钮 + 锚点补偿（`ChatView.tsx:239-245`） | 无（无分页） |
 | M15 | ⬜ | 折叠四层模型 | `[自有]` | 轮次→分组→单条，不可互相绕过（`conversation-nodes/README.md:20-60`） | 只有单条折叠 |
-| M16 | ⬜ | 工作详情模式 | `[自有]` | compact/standard/detailed/verbose + 两个偏好（`chat-settings.ts:15-56`） | 无 |
+| M16 | 🟡 | 工作详情模式 | `[自有]` | 四模式策略表 + 两个偏好已落地：`ChatPresentation`（照抄 dsh 的 POLICIES）、遗留值 normal/expanded→detailed、设置页分段选择器、持久化 | 检查 `transcript-view-modes-match-dsh-table`（逐项比对四个能力开关）、`transcript-legacy-modes-read-as-detailed`（往返稳定）、`work-detail-picker-reflects-and-saves`、`settings-fields-load-independently`。**能力消费只接了 2 项**：FoldCompletedTurns / StepGrouping 需 M15 的分组层才能生效 |
 | M17 | ✅ | 列宽可拖拽 | `[自有]` | 右栏左边界 6px 拖拽区；宽度**不自己算**，仍交给 `Columns.Compute` 裁决；松手才持久化到 `ui.json`（`ConversationWidthControls.tsx:5-28`） | `drag-resize-cannot-bypass-column-limits`（拖到 900/2000 中栏都不低于下限）+ `saved-rightbar-width-is-revalidated`（坏值丢弃、正常值 576 保留） |
 
 **明确不做（dsh 也没有，别照想象补）**
@@ -368,3 +368,6 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-10 | **标题栏按 dsh 做 Mac/Win 适配**。「应用 / 编辑」菜单改为**仅 Windows**——依据是 dsh 源码 `apps/desktop/src/preload-windows.ts`：`syncWindowsAppearance()` 里 `if (process.platform !== 'win32') return`，那个菜单本就是给 Windows 自绘标题栏配的（`titleBarStyle: 'hidden'` 抹了原生标题栏）。macOS 是 `hiddenInset`，交通灯还在、菜单栏在屏幕顶部，标题栏里不该再放一份。macOS 上现在只剩「收起侧栏」，截图确认：交通灯 → Dougong Desktop → 收起侧栏。新增检查 `titlebar-menus-are-windows-only`，并把 `titlebar-uses-arc-slots` 的按钮期望值改成按平台分（原本写死 3 会让 Mac 上的正确实现变红） |
 | 2026-11-12 | **规格行号全量复核**（源码更新到 `0.2.2-rc.2` / `e8f7b93`，比原基线 `alpha.2` 新 2200 个提交）。40 处 `文件:行号` 逐条核对，**修了 7 处漂移**。最值得注意的一处：`ToolRow.module.css` 原标 118-126，实际内容是**文本省略样式**，真正的三态在 82-171（错误色 `state-error-primary` + 停止色 `state-warn-label`）。结论不变（M11 仍然成立），但依据本身是错的，已修正。**所有数值常量都未变**，实现不用改 |
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
+| 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
+| 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-12 | **同一个 bug 一天内犯了三次**：把"某字段坏了"扩大成"整份设置作废"。①`RightbarWidth` 嵌在 `PaneSizes` 分支里 ②改成"两项都无效就返回空设置"，而只存偏好、没存布局时两项都无效 ③偏好三件套又栽在②上。已改为每字段独立保留，并加 `settings-fields-load-independently` 逐字段验证往返 |

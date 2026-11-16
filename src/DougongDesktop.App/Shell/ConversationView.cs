@@ -99,6 +99,21 @@ public sealed class ConversationView : UserControl
     private readonly List<ConversationItem> _items = [];
 
     /// <summary>
+    /// 条目 → 所属轮次。**旁挂而不改契约**。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么不在 <c>ConversationItem</c> 上加 TurnId</b>：
+    /// 那是线格式的一部分，加字段等于改协议，而引擎侧的
+    /// <c>ItemAddedEvent</c> 已经带了 TurnId——我们只是没往下传。
+    /// 旁挂表让"契约不动"和"分组有依据"两件事同时成立，
+    /// 与 <c>_stoppedAssistantIds</c> 是同一手法。
+    /// <para>
+    /// M15 的轮次分组全靠这张表：没有它就无法判断"哪几条属于同一轮"。
+    /// </para>
+    /// </remarks>
+    private readonly Dictionary<string, string> _itemTurn = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// 自动贴底开关。
     /// </summary>
     /// <remarks>
@@ -596,6 +611,34 @@ public sealed class ConversationView : UserControl
 
         if (_stickToBottom) QueueScrollToBottom();
     }
+
+    /// <summary>
+    /// 新增一个条目，并记录它属于哪个轮次。
+    /// </summary>
+    /// <param name="turnId">
+    /// 所属轮次。<c>ItemAddedEvent</c> 一直带着它，此前在
+    /// <c>MainWindow</c> 里被丢掉了——M15 的分组需要它。
+    /// </param>
+    public void Add(ConversationItem item, string? turnId)
+    {
+        if (turnId is { Length: > 0 }) _itemTurn[item.Id] = turnId;
+        Add(item);
+    }
+
+    /// <summary>某条目所属的轮次；没记录过返回 null。</summary>
+    public string? TurnIdOf(ConversationItem item) =>
+        _itemTurn.TryGetValue(item.Id, out var t) ? t : null;
+
+    /// <summary>按轮次分组后的结果（供诊断与 M15 使用）。</summary>
+    /// <remarks>
+    /// 保持插入顺序：<c>GroupBy</c> 在有序序列上是稳定的，轮次不会乱序。
+    /// 没有 TurnId 的条目归入 <c>null</c> 组——自检数据就是这种情况，
+    /// 不能因此把它们丢掉或强行塞进某个轮次。
+    /// </remarks>
+    public IReadOnlyList<(string? TurnId, IReadOnlyList<ConversationItem> Items)> GroupedByTurn() =>
+        [.. _items
+            .GroupBy(i => TurnIdOf(i))
+            .Select(g => (g.Key, (IReadOnlyList<ConversationItem>)[.. g]))];
 
     /// <summary>已停止的助手消息 Id 集合。</summary>
     /// <remarks>

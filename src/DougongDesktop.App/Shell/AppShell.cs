@@ -504,6 +504,41 @@ public sealed class AppShell : UserControl
         _settings.RightbarWidth ?? Columns.RightbarDefault(viewport);
 
     /// <summary>
+    /// 保存工作详情偏好（M16）。
+    /// </summary>
+    /// <remarks>
+    /// <b>由 AppShell 做而不是 MainWindow</b>：<c>_settings</c> 与 <c>_store</c>
+    /// 都在这一层，让上层直接持有它们等于把两套状态分给两个类，
+    /// 迟早出现"一处改了另一处没跟上"。
+    /// <para>
+    /// 只合并三个偏好字段，其余（PaneSizes / RightbarWidth）原样保留——
+    /// 覆盖整份设置会把用户拖过的列宽冲掉。
+    /// </para>
+    /// </remarks>
+    public void SaveWorkDetail(string mode, string timing, string replies)
+    {
+        try
+        {
+            _settings = new AppSettings
+            {
+                PaneSizes = _settings.PaneSizes,
+                RightbarWidth = _settings.RightbarWidth,
+                TranscriptView = mode,
+                CollapseTiming = timing,
+                FoldedReplies = replies,
+            };
+            _settings.Save(_store);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[shell] 保存工作详情偏好失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>当前持久化的设置（只读，供上层回填界面）。</summary>
+    public AppSettings Settings => _settings;
+
+    /// <summary>
     /// 右栏左边界的分隔条（P8g M17：列宽可拖拽）。
     /// </summary>
     /// <remarks>

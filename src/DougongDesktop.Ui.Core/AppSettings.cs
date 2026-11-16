@@ -64,6 +64,26 @@ public sealed class AppSettings
     [JsonPropertyName("rightbarWidth")]
     public double? RightbarWidth { get; init; }
 
+    /// <summary>
+    /// 工作详情模式（dsh 的 <c>transcriptView</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <b>存字符串不存枚举序号</b>：序号会随枚举成员增删而错位，
+    /// 而且用户可能手改这个文件。dsh 同样存字符串。
+    /// 认不出的值由 <see cref="ChatPresentation.ParseMode"/> 落到默认——
+    /// 这里不做校验，因为"读不懂"和"没设过"行为上都是"用默认"。
+    /// </remarks>
+    [JsonPropertyName("transcriptView")]
+    public string? TranscriptView { get; init; }
+
+    /// <summary>完成的轮次何时折叠（dsh 的 <c>collapseTiming</c>）。</summary>
+    [JsonPropertyName("collapseTiming")]
+    public string? CollapseTiming { get; init; }
+
+    /// <summary>折叠时保留哪些助手回复（dsh 的 <c>foldedReplies</c>）。</summary>
+    [JsonPropertyName("foldedReplies")]
+    public string? FoldedReplies { get; init; }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -107,12 +127,21 @@ public sealed class AppSettings
             var widthOk = width is { } w
                           && !double.IsNaN(w) && !double.IsInfinity(w) && w > 0;
 
-            if (!paneSizesOk && !widthOk) return new AppSettings();
-
+            // **每个字段独立保留，不因别的字段坏就整份丢弃**。
+            //
+            // 这是同一个 bug 的第三次出现：先是 RightbarWidth 嵌在 PaneSizes
+            // 分支里，再是"两项都无效就返回空设置"——而**只存偏好、没存布局**
+            // 是完全合法的场景（新用户第一次改工作详情就是这样），
+            // 那时两项都是 false，整份设置被扔，偏好永远存不下来。
+            // 检查 `工作详情落盘往返` 抓到的。
             return new AppSettings
             {
                 PaneSizes = paneSizesOk ? loaded.PaneSizes : null,
                 RightbarWidth = widthOk ? width : null,
+                // 偏好三件套原样带回（坏值由 ChatPresentation 解析时兜底）
+                TranscriptView = loaded.TranscriptView,
+                CollapseTiming = loaded.CollapseTiming,
+                FoldedReplies = loaded.FoldedReplies,
             };
         }
         catch
