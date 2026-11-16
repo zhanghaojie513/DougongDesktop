@@ -13,30 +13,20 @@
 
 | 项 | 值 |
 |---|---|
-| **dsh 版本** | `0.2.2-rc.2`（2026-11-12 从 `0.2.2-alpha.2` 重新核对） |
-| **commit** | `e8f7b93a344964de3dca1ace9e72b6e4d6de87cb` |
+| **dsh 版本** | `0.2.2-rc.3`（2026-11-16 从 `0.2.2-rc.2` 核对） |
+| **commit** | `39163dd30f`（tag `dsh-v0.2.2-rc.3`） |
 | **仓库** | https://github.com/deepseek-ai/deepseek-harness |
-| **源码位置** | `~/项目/my/deepseek-harness`（完整 clone） |
+| **源码位置** | `/Volumes/other/work/my/deepseek-harness`（完整 clone；原在 `~/项目/my/`，已移动） |
 
-> **2026-11-12 行号全量复核**：从 `alpha.2` 到 `rc.2` 有 2200 个提交
-> （197 个动了 `apps/desktop`），文档里 40 处 `文件:行号` 逐条核对过。
-> 修了 7 处漂移：
->
-> | 引用 | 原 | 现 | 原因 |
-> |---|---|---|---|
-> | `ConversationContent.tsx` | 189-204 | **202-211** | `scrollBody` 下移 |
-> | `ChatView.module.css`（间距） | 77-93 | **86-143** | 三档间距分散到 86/92/143 |
-> | `ConversationRoot.module.css`（渐变） | 507-530 | **539-548** | 下方插入注释 |
-> | `ChatView.tsx`（回到底部） | 272-283 | **301-311** | 原指向 `MarkdownDelegateProvider` |
-> | `ChatView.tsx`（加载更早） | 239-245 | **254-256** | 原指向 `scroll.listRef` |
-> | `ToolRow.module.css`（三态） | 118-126 | **82-171** | 原指向文本省略样式，**不是三态** |
-> | `ConversationRoot.module.css`（列宽） | 461-467 | **469-472** | `clamp(...)` 在 470 |
->
-> **数值常量全部未变**（`CONTENT_MIN=640`、`CONTENT_EDGE_BUDGET=176`、
-> `FOLLOW_THRESHOLD=24`、气泡 `0.702/82%`、列宽 `clamp(680,×0.64,920)`），
-> 所以实现不用改；`preload-windows.ts` 与 `windows-layout.ts` 在这 2200 个
-> 提交里**零改动**，上次的标题栏平台适配依然成立。
-| **提取日期** | 2026-10-30 |
+
+> **2026-11-16 rc.2 → rc.3 核对**：6 个提交、110 个文件，但**本文档引用的
+> 49 处 `文件:行号` 全部未漂移**——rc.3 只动了三块：
+> ①`experimental/deepseek-chat-import`（新包，DeepSeek 官网对话导入，我们不用）；
+> ②`ui-workspace` 的工作区选择器改成 `WorkspacePickerFactory`（D1 的未来依据）；
+> ③`ui-sidebar` 把「新会话」按钮包进 `sidebar.session.action` slot。
+> 三份最关键的实现依据文件（`conversation-nodes/README.md`、`presentation-policy.ts`、
+> `apps/desktop/src/main.ts`）最后一次改动分别在 11-03 / 10-16 / 11-06，**rc.3 没碰**。
+> 所以已实现的 M15/M16/macOS 标题栏一行都不用改。
 
 **复现命令**：
 
@@ -727,7 +717,7 @@ M12 已结案（✅）。守回归的是 `markdown-codeblock-uses-arc-defaults`�
 > 只在中栏宽度几何上对齐了 dsh，**内容侧的会话行为从未比对过**。
 > 2026-11-05 用户指出这是范围缺口，纳入复刻范围。
 >
-> 事实来源：`~/项目/my/deepseek-harness`（commit `e8f7b93`，与本文档基线同版本）。
+> 事实来源：`/Volumes/other/work/my/deepseek-harness`（commit `39163dd3`，与本文档基线同版本）。
 > 所有文件名与行号均可在该仓库核验。
 
 ### 7.5.1 dsh 中区的真实结构
