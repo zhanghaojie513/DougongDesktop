@@ -112,6 +112,9 @@ public static class Program
         // 包版本约束：Arc 与 Avalonia 必须成对升级
         failures += PackageVersionChecks.Run(breakMode);
 
+        // 进度表自洽：表头数字必须等于逐行统计
+        failures += ProgressDocChecks.Run(breakMode);
+
         Console.WriteLine();
         Console.WriteLine(failures == 0
             ? "ARCHITECTURE: ALL PASS"
