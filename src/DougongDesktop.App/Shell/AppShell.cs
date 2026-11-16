@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using DougongDesktop.App.Services;
 using DougongDesktop.Ui.Core;
 using TKCode.Arc;
@@ -380,6 +381,7 @@ public sealed class AppShell : UserControl
         // 进程活没活、连的哪个模型，属于"全局环境信息"，与底部导航同类。
         // 放进 shell.bottom slot 不行——那个 slot 默认是空的，且会被插件顶掉。
         _sidebarHost = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+
         var sidebarSlot = SlotSingle(ReservedSlots.Sidebar);
         Grid.SetRow(sidebarSlot, 0);
         _sidebarHost.Children.Add(sidebarSlot);
@@ -387,6 +389,34 @@ public sealed class AppShell : UserControl
         StatusBar.Margin = new Thickness(10, 4, 10, 8);
         Grid.SetRow(StatusBar, 1);
         _sidebarHost.Children.Add(StatusBar);
+
+        // macOS：与交通灯同排的一条 52px 顶部条，右侧放「收起侧栏」。
+        //
+        // 出处是 dsh 的 `SidebarRoot.tsx:330` 那句注释与
+        // `SidebarRoot.module.css:192-204` 的 `.topStrip`：
+        //   "macOS hiddenInset titlebar: the strip shares the row with the
+        //    traffic lights and keeps the toggle at the sidebar's top-right."
+        // 几何：height 52px、justify-content flex-end、padding 0 12px 2px，
+        // 28px 的按钮因此居中在 y≈25——正好与交通灯同一条水平线
+        // （交通灯 y=18 + 半高 7 = 25）。
+        //
+        // **它不是我原先写的"给交通灯让位的内边距"**：让位内边距只能把内容推下去，
+        // 收起按钮就没地方放了；而 dsh 是拿这一行**当容器**用，
+        // 让按钮与交通灯并排。Windows 上不需要这一行——
+        // 那边按钮被 CSS 的 `[data-windows-titlebar] .toggle { position: fixed }`
+        // 挪进了自绘标题栏（同文件 52-58 行），侧栏品牌行高度归 0。
+        if (OperatingSystem.IsMacOS())
+        {
+            _sidebarHost.RowDefinitions = new RowDefinitions("Auto,*,Auto");
+
+            var topStrip = BuildMacTopStrip();
+            Grid.SetRow(topStrip, 0);
+            _sidebarHost.Children.Insert(0, topStrip);
+
+            Grid.SetRow(sidebarSlot, 1);
+            Grid.SetRow(StatusBar, 2);
+        }
+
 
         // 侧栏分界：dsh 是 0.5px solid border-l3（.sidebarCol 的 border-right）。
         // 没有它时侧栏的 #F9FAFB 与主区白只差 2 个色阶，视觉上分不开。
@@ -678,6 +708,16 @@ public sealed class AppShell : UserControl
         // 同时 macOS 也没有 `data-windows-titlebar` 标记（同文件）：
         // 那 40px 自绘标题栏只在 Windows 生效。macOS 交给系统交通灯，
         // 左栏内容贴着它排。
+        // **macOS 不建标题栏内容**：那边整条标题栏都不存在（dsh 的 hiddenInset），
+        // 「收起侧栏」已改放在侧栏顶部的 52px 条里（BuildMacTopStrip）。
+        // 若这里仍然返回内容，ArcWindow 会把它塞进一条并不显示的标题栏，
+        // 按钮就永远点不到了。
+        if (OperatingSystem.IsMacOS())
+        {
+            TitlebarContent = null;
+            return;
+        }
+
         var content = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -694,6 +734,61 @@ public sealed class AppShell : UserControl
         }
 
         TitlebarContent = content;
+    }
+
+    /// <summary>
+    /// macOS 侧栏顶部的 52px 条：与交通灯同排，右端放「收起侧栏」。
+    /// </summary>
+    /// <remarks>
+    /// 几何照 dsh 的 <c>.topStrip</c>（<c>SidebarRoot.module.css:192-204</c>）：
+    /// 高 52、右对齐、<c>padding: 0 12px 2px</c>。那 2px 底边把 28px 按钮
+    /// 推到 y≈25，与交通灯中心线齐平——折叠/展开时按钮不会上下跳。
+    /// <para>
+    /// <b>整条要能拖窗口</b>：它占据窗口最顶上一行，不拖的话用户会以为窗口卡住。
+    /// 按钮本身不参与拖拽（否则点不动）。
+    /// </para>
+    /// </remarks>
+    private Control BuildMacTopStrip()
+    {
+        var toggle = TitleBarIconButton(
+            TKCode.Arc.Icons.Lucide.LucideIconKind.PanelLeft, 28);
+
+        toggle.Click += (_, e) =>
+        {
+            e.Handled = true;
+            ToggleSidebar();
+        };
+
+        var strip = new Grid
+        {
+            Height = Columns.MacTopStripHeight,
+
+            // dsh 的 `padding: 0 12px 2px`。Grid 没有 Padding 属性，
+            // 用 Border 包一层来承担（底边那 2px 是对齐交通灯中心线用的）。
+        };
+
+        // 右对齐（dsh: justify-content: flex-end）
+        toggle.HorizontalAlignment = HorizontalAlignment.Right;
+        toggle.VerticalAlignment = VerticalAlignment.Center;
+        strip.Children.Add(toggle);
+
+        var framed = new Border
+        {
+            Padding = new Thickness(12, 0, 12, 2),
+            Child = strip,
+        };
+
+        // 拖拽：条上空白处按下即拖窗口。指到按钮时不接管。
+        framed.PointerPressed += (_, e) =>
+        {
+            if (e.Source is Control c && (c == toggle || c.FindAncestorOfType<Avalonia.Controls.Button>() is not null))
+                return;
+
+            if (e.GetCurrentPoint(framed).Properties.IsLeftButtonPressed)
+                (VisualRoot as Window)?.BeginMoveDrag(e);
+        };
+
+        return framed;
     }
 
     /// <summary>标题栏的纯图标按钮。</summary>

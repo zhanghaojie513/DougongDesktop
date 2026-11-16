@@ -60,7 +60,8 @@ echo "== 无头 UI 反证（M15/M16 新增的四条）=="
 # 因为"凭直觉归纳"而出过偏差的地方，更需要能变红。
 ui_break_failed=0
 for check in tool-categories-match-dsh-name-table group-title-matches-dsh-composition \
-             two-layer-folding-matches-dsh-modes desktop-default-mode-is-standard; do
+             two-layer-folding-matches-dsh-modes desktop-default-mode-is-standard \
+             titlebar-uses-arc-slots; do
   printf '%-42s ' "$check"
   if "$DOTNET" run --project tests/DougongDesktop.Ui.Headless.Checks \
         -c Release --no-build -- --break="$check" > /dev/null 2>&1; then

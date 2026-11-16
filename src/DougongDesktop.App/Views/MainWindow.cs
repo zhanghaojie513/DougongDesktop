@@ -114,6 +114,30 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         ExtendClientAreaToDecorationsHint = true;
         ExtendClientAreaTitleBarHeightHint = Ui.Core.Columns.TitlebarHeight;
 
+        // **macOS 不显示那条独立标题栏**——照 dsh 的 `hiddenInset` 形态。
+        //
+        // dsh 在 macOS 上设的是（apps/desktop/src/main.ts:279-287）：
+        //   titleBarStyle: 'hiddenInset'
+        //   trafficLightPosition: { x: 16, y: 18 }
+        //   vibrancy: 'sidebar'
+        // 也就是说交通灯**嵌在侧栏内部**，窗口顶部没有一条独立的标题行，
+        // 内容直接从顶端开始。而 Windows 是 `titleBarStyle: 'hidden'` +
+        // `titleBarOverlay`（同文件 273-277），那条 40px caption 是 Windows 专有的。
+        //
+        // 我们此前在 macOS 上也画了那条 40px 标题栏，于是：
+        // ①多出一行把内容整体下推，窗口显得局促（用户反馈"小窗口"）；
+        // ②那行还写着「Dougong Desktop」，而 dsh 的 macOS 窗口没有标题文字。
+        //
+        // 关掉后 ArcWindow 的内容会顶到窗口顶部，同时窗口仍可拖拽/双击最大化
+        // （`ArcWindow.IsTitleBarVisible` 的文档：without it the content reaches
+        // the top of the window, which still extends into the decorations）。
+        // 交通灯的让位改由侧栏顶部内边距承担，见 AppShell 的 SidebarTopInset。
+        if (OperatingSystem.IsMacOS())
+        {
+            IsTitleBarVisible = false;
+            Title = string.Empty;
+        }
+
         // 窗口图标用真实品牌资源（品牌规格：纯黑白，无渐变）
         Icon = new Avalonia.Controls.WindowIcon(
             Avalonia.Platform.AssetLoader.Open(new Uri("avares://DougongDesktop.App/Assets/dougong.ico")));
@@ -1301,12 +1325,23 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         // 断言三件事：它存在、左侧内容已注入、窗口按钮由 Arc 按平台决定。
         if (shell is AppShell barHost)
         {
-            var tb = TitleBar!;
-            Report("ArcWindow.TitleBar", tb);
-            Console.Error.WriteLine(
-                $"[shell] 标题栏 CaptionButtons={tb.CaptionButtons}（Auto=macOS 用系统交通灯）");
+            // macOS 上标题栏整个关掉（照 dsh 的 hiddenInset），此时 TitleBar 为 null——
+            // 那不是缺陷，是预期形态，所以这里要区分"该有却没有"与"本来就不该有"。
+            var tb = TitleBar;
+            if (tb is null)
+            {
+                Console.Error.WriteLine(
+                    $"[shell] 标题栏 (无) IsTitleBarVisible={IsTitleBarVisible} "
+                    + $"（macOS 预期：False，交通灯浮在侧栏上）");
+            }
+            else
+            {
+                Report("ArcWindow.TitleBar", tb);
+                Console.Error.WriteLine(
+                    $"[shell] 标题栏 CaptionButtons={tb.CaptionButtons}（Auto=macOS 用系统交通灯）");
+            }
 
-            if (tb.LeftContent is null)
+            if (tb?.LeftContent is null)
                 Console.Error.WriteLine("[shell] 标题栏 LeftContent **(空)**——收起侧栏按钮没注进去");
             else
                 Console.Error.WriteLine("[shell] 标题栏 LeftContent 已注入");

@@ -120,7 +120,27 @@ public static class Columns
     // ── 窗口标题栏（dsh 的 Windows caption row）──
 
     /// <summary>标题栏高度。dsh 的 <c>--dsh-windows-titlebar-height</c> 实测 40px。</summary>
+    /// <remarks>
+    /// <b>Windows 专有</b>：dsh 只在 <c>process.platform === 'win32'</c> 时设
+    /// <c>titleBarStyle: 'hidden'</c> + <c>titleBarOverlay</c>（`main.ts:273-277`）。
+    /// macOS 走 <c>hiddenInset</c>，没有这一行。
+    /// </remarks>
     public const double TitlebarHeight = 40;
+
+    /// <summary>
+    /// macOS 侧栏顶部条的高度：与交通灯同排，右端放「收起侧栏」。
+    /// </summary>
+    /// <remarks>
+    /// 出处 dsh <c>SidebarRoot.module.css:192-204</c> 的 <c>.topStrip</c>：
+    /// <c>height: 52px</c>、<c>justify-content: flex-end</c>、
+    /// <c>padding: 0 12px 2px</c>。28px 的按钮因此居中在 y≈25，
+    /// 与交通灯中心线（y=18，半高 7）齐平。
+    /// <para>
+    /// <b>不是标题栏</b>：这条只在侧栏宽度内，主区从窗口顶端就开始。
+    /// Windows 没有它——那边同一颗按钮被挪进自绘标题栏。
+    /// </para>
+    /// </remarks>
+    public const double MacTopStripHeight = 52;
 
     // macOS 红绿灯安全区（曾在此处的 MacTrafficLightInset = 80）已删除。
     // 2026-11-09 起窗口是 Arc 的 ArcWindow，它的 TitleBar 用

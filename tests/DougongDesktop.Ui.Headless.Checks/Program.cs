@@ -1319,19 +1319,44 @@ public static class Program
         var shell = new DougongDesktop.App.Shell.AppShell(
             slots, new DougongDesktop.App.Shell.AppShellViewModel());
 
-        // 左侧内容必须存在且含 3 个按钮（收起侧栏 / 应用 / 编辑）
-        if (shell.TitlebarContent is null)
-            return "AppShell.TitlebarContent 为 null：左侧按钮没建出来";
+        // **形态按平台分，不是"按钮数不同"那么简单**。
+        //
+        // macOS：dsh 用 `titleBarStyle: 'hiddenInset'`（main.ts:279-287），
+        // 窗口根本没有独立标题栏——交通灯浮在侧栏上，「收起侧栏」在侧栏
+        // 顶部 52px 条（SidebarRoot.tsx:330 / .topStrip）的右上角。
+        // 所以 TitlebarContent 必须为 null：给它内容等于往一条不显示的栏里塞控件，
+        // 那颗按钮永远点不到。
+        //
+        // Windows：`titleBarStyle: 'hidden'` + `titleBarOverlay`（main.ts:273-277），
+        // 那条 40px 自绘 caption 是 Windows 专有，装「收起侧栏 / 应用 / 编辑」三个。
+        if (OperatingSystem.IsMacOS())
+        {
+            if (shell.TitlebarContent is not null)
+                return "macOS 不该有标题栏内容：dsh 是 hiddenInset，"
+                     + "「收起侧栏」在侧栏顶部的 topStrip 里，不在标题栏";
 
-        // **期望值按平台分**：dsh 的「应用/编辑」只在 Windows 有
-        // （preload-windows.ts 里 `if (process.platform !== 'win32') return`）。
-        // macOS 上只剩「收起侧栏」一个。写死 3 会让 Mac 上的正确实现变红。
-        var expected = OperatingSystem.IsWindows() ? 3 : 1;
-        var buttons = shell.TitlebarContent.GetLogicalDescendants()
-            .OfType<Avalonia.Controls.Button>().Count();
-        if (buttons != expected)
-            return $"左侧内容里按钮 {buttons} 个（期望 {expected}：" +
-                   (OperatingSystem.IsWindows() ? "收起侧栏 / 应用 / 编辑）" : "仅收起侧栏）");
+            // 收起侧栏必须真的在侧栏里，否则窗口收起来就再也打不开了。
+            var toggleInSidebar = shell.GetLogicalDescendants()
+                .OfType<Avalonia.Controls.Button>()
+                .Any(b => b.GetLogicalDescendants()
+                    .OfType<TKCode.Arc.Icons.Lucide.LucideIcon>()
+                    .Any(i => i.Kind == TKCode.Arc.Icons.Lucide.LucideIconKind.PanelLeft));
+            if (!toggleInSidebar)
+                return "macOS 的「收起侧栏」按钮没建出来：侧栏收起后没有恢复入口";
+        }
+        else
+        {
+            if (shell.TitlebarContent is null)
+                return "AppShell.TitlebarContent 为 null：左侧按钮没建出来";
+
+            // dsh 的「应用/编辑」只在 Windows 有（preload-windows.ts 非 win32 直接 return）
+            var expected = OperatingSystem.IsWindows() ? 3 : 1;
+            var buttons = shell.TitlebarContent.GetLogicalDescendants()
+                .OfType<Avalonia.Controls.Button>().Count();
+            if (buttons != expected)
+                return $"左侧内容里按钮 {buttons} 个（期望 {expected}：" +
+                       (OperatingSystem.IsWindows() ? "收起侧栏 / 应用 / 编辑）" : "仅收起侧栏）");
+        }
 
         // 自绘窗口按钮必须彻底消失——它们现在由 Arc 的 TitleBar 按平台处理
         var hasWindowButtons = typeof(DougongDesktop.App.Shell.AppShell)
@@ -1707,6 +1732,17 @@ public static class Program
                 ? "standard 历史组体默认收起，符合预期值——断言能发现差异"
                 : null,
 
+        // 标题栏形态按平台分：macOS 应无 TitlebarContent、按钮在侧栏。
+        // 注入方式是断言"macOS 上 TitlebarContent 非空才正确"——真实实现里
+        // 它是 null，所以这条命题为假，说明检查真的在比对。
+        "titlebar-uses-arc-slots" => OperatingSystem.IsMacOS()
+            ? (BuildShellProbe().TitlebarContent is null
+                ? "macOS 的 TitlebarContent 确为 null（与'必须有内容'的错期望冲突）——断言能发现差异"
+                : null)
+            : (BuildShellProbe().TitlebarContent is not null
+                ? "非 macOS 的 TitlebarContent 非空——断言能发现差异"
+                : null),
+
         // 默认档：桌面端应为 Standard，把 Detailed 当期望就会冲突。
         "desktop-default-mode-is-standard" =>
             ChatPresentation.DefaultMode != TranscriptViewMode.Detailed
@@ -1715,4 +1751,13 @@ public static class Program
 
         _ => null,
     };
+
+    /// <summary>建一个最小 AppShell，供反证用。</summary>
+    private static DougongDesktop.App.Shell.AppShell BuildShellProbe()
+    {
+        var slots = new DougongDesktop.Ui.Core.SlotRegistry();
+        DougongDesktop.App.Shell.AppShell.DeclareSlots(slots);
+        return new DougongDesktop.App.Shell.AppShell(
+            slots, new DougongDesktop.App.Shell.AppShellViewModel());
+    }
 }
