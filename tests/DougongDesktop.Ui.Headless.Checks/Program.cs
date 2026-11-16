@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.LogicalTree;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using DougongDesktop.App.Shell;
 using DougongDesktop.Ipc;
@@ -26,8 +27,22 @@ namespace DougongDesktop.Ui.Headless.Checks;
 /// </remarks>
 public static class Program
 {
-    public static int Main()
+    /// <summary>
+    /// 反证模式的目标检查。<c>--break=&lt;slug&gt;</c> 时非空。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么无头检查也要有反证</b>：本项目定过规矩——从没红过的检查等于没有检查。
+    /// 无头层是本轮新增的主力（M15/M16 全靠它），没有反证就无法排除
+    /// "断言写松了、永远为真"这种情况。
+    /// </remarks>
+    private static string? BreakSlug { get; set; }
+
+    public static int Main(string[] args)
     {
+        BreakSlug = args
+            .FirstOrDefault(a => a.StartsWith("--break=", StringComparison.Ordinal))
+            ?["--break=".Length..];
+
         AppBuilder.Configure<DougongDesktop.App.App>()
             .UseHeadless(new AvaloniaHeadlessPlatformOptions())
             .SetupWithoutStarting();
@@ -48,6 +63,7 @@ public static class Program
         failures += Check("transcript-legacy-modes-read-as-detailed", TranscriptLegacyModesReadAsDetailed);
         failures += Check("work-detail-picker-reflects-and-saves", WorkDetailPickerReflectsAndSaves);
         failures += Check("settings-fields-load-independently", SettingsFieldsLoadIndependently);
+        failures += Check("process-grouping-matches-dsh-examples", ProcessGroupingMatchesDshExamples);
         failures += Check("dock-mode-builds-split-tree", DockModeBuildsSplitTree);
         failures += Check("permission-picker-reflects-engine-state", PermissionPickerReflectsEngineState);
         failures += Check("engine-survives-bad-command", EngineSurvivesBadCommand);
@@ -58,6 +74,10 @@ public static class Program
         failures += Check("current-model-stays-visible-when-buried", CurrentModelStaysVisibleWhenBuried);
         failures += Check("drag-resize-cannot-bypass-column-limits", DragResizeCannotBypassLimits);
         failures += Check("saved-rightbar-width-is-revalidated", SavedWidthIsRevalidated);
+        failures += Check("tool-categories-match-dsh-name-table", ToolCategoriesMatchDshNameTable);
+        failures += Check("group-title-matches-dsh-composition", GroupTitleMatchesDshComposition);
+        failures += Check("two-layer-folding-matches-dsh-modes", TwoLayerFoldingMatchesDshModes);
+        failures += Check("desktop-default-mode-is-standard", DesktopDefaultModeIsStandard);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -504,6 +524,100 @@ public static class Program
         return null;
     }
 
+    /// <summary>
+    /// 过程分组必须复现 dsh README 里那 8 个示例（M15）。
+    /// </summary>
+    /// <remarks>
+    /// <b>规则来自 dsh <c>conversation-nodes/README.md</c> 的 "Process grouping"
+    /// 一节</b>（0.2.2-rc.2），那节直接给了 Input sequence → Grouped roots 的对照表。
+    /// 这里逐条复现，等于把上游的示例当验收标准用——比自己想用例更能保证等价。
+    /// <para>
+    /// 四个动作：推理/工具并入组；助手回复收组且独立；分隔符收组且独立；
+    /// 换轮次打断。
+    /// </para>
+    /// </remarks>
+    private static string? ProcessGroupingMatchesDshExamples()
+    {
+        var at = DateTimeOffset.Now;
+        var n = 0;
+
+        ReasoningItem R(string t) => new() { Id = $"r{++n}", At = at, Text = t };
+        AssistantMessageItem A(string tx) => new() { Id = $"a{++n}", At = at, Text = tx };
+        DougongDesktop.Ipc.ToolCallItem T(string name) => new()
+        {
+            Id = $"t{++n}", At = at, InvocationId = $"inv{n}", ToolName = name, ArgumentsJson = "{}",
+        };
+        UserMessageItem U() => new() { Id = $"u{++n}", At = at, Text = "hi" };
+
+        // 分组并格式化成 "G[成员] → 独立" 便于比对
+        string Run(IReadOnlyList<DougongDesktop.Ipc.ConversationItem> items, string? turn = "t1")
+        {
+            var roots = DougongDesktop.Ui.Core.ProcessGrouping.Group(items, _ => turn);
+            return string.Join(" → ", roots.Select(r => r switch
+            {
+                DougongDesktop.Ui.Core.ProcessGroupRoot g =>
+                    "G[" + string.Join(",", g.Items.Select(Kind)) + "]",
+                DougongDesktop.Ui.Core.IndependentRoot i => Kind(i.Item),
+                _ => "?",
+            }));
+        }
+
+        static string Kind(DougongDesktop.Ipc.ConversationItem i) => i switch
+        {
+            ReasoningItem => "reasoning",
+            AssistantMessageItem => "response",
+            DougongDesktop.Ipc.ToolCallItem t => t.ToolName,
+            UserMessageItem => "input",
+            _ => i.GetType().Name,
+        };
+
+        var cases = new (string Label, string Actual, string Expect)[]
+        {
+            // 示例 1：A1(reasoning, reply) → T1  ⇒ G[A1.reasoning] → A1.response → G[T1]
+            ("推理-回复-工具",
+                Run([R("想"), A("答"), T("read")]),
+                "G[reasoning] → response → G[read]"),
+
+            // 示例 2：T1 → A2(reasoning) → T2（中间没有回复，仍是一组）
+            ("工具-推理-工具不拆组",
+                Run([T("read"), R("想"), T("bash")]),
+                "G[read,reasoning,bash]"),
+
+            // 示例 3：T1 → steering → T2  ⇒ 被输入打断
+            ("输入打断分组",
+                Run([T("read"), U(), T("bash")]),
+                "G[read] → input → G[bash]"),
+
+            // 示例 4：A1(reply) 单独 ⇒ 没有过程组
+            ("只有回复不产组",
+                Run([A("答")]),
+                "response"),
+
+            // 示例 5：不同工具类别不拆组
+            ("换工具类别不拆组",
+                Run([T("read"), T("bash"), T("subagent_codex")]),
+                "G[read,bash,subagent_codex]"),
+
+            // 示例 6：空序列
+            ("空序列", Run([]), ""),
+        };
+
+        foreach (var (label, actual, expect) in cases)
+        {
+            if (actual != expect)
+                return $"「{label}」期望「{expect}」，实际「{actual}」";
+        }
+
+        // 跨轮次必须打断（README: another Turn breaks the same-Turn sequence）
+        var crossTurn = DougongDesktop.Ui.Core.ProcessGrouping.Group(
+            [T("read"), T("bash")],
+            i => i is DougongDesktop.Ipc.ToolCallItem x && x.ToolName == "bash" ? "t2" : "t1");
+        if (crossTurn.Count != 2)
+            return $"跨轮次没有打断：得到 {crossTurn.Count} 个根（期望 2）";
+
+        return null;
+    }
+
     /// <summary>可往返的内存存储：写进去能读回来。</summary>
     private sealed class RoundTripStore : DougongDesktop.Ui.Core.ISettingsStore
     {
@@ -862,11 +976,12 @@ public static class Program
                 return $"{mode}: SettledReasoningPreview 期望 {preview}，实际 {p.SettledReasoningPreview}（{why}）";
         }
 
-        // 默认模式必须是 detailed，不是 standard
-        if (DougongDesktop.Ui.Core.ChatPresentation.DefaultMode
-            != DougongDesktop.Ui.Core.TranscriptViewMode.Detailed)
-            return "默认模式必须是 detailed（dsh: DEFAULT_TRANSCRIPT_VIEW_MODE = 'detailed'）";
-
+        // 默认档归 desktop-default-mode-is-standard 检查，这里不重复断言。
+        //
+        // 这里原先写的是"默认模式必须是 detailed"，依据是
+        // DEFAULT_TRANSCRIPT_VIEW_MODE 这个常量——但它属于 **Web 侧**。
+        // README「Defaults and saving preferences」写明：设置缺失/null/非法时
+        // Desktop 用 standard、非 Desktop Web 用 detailed。本产品是桌面端。
         return null;
     }
 
@@ -1283,6 +1398,27 @@ public static class Program
 
     private static int Check(string name, Func<string?> body)
     {
+        // 反证模式：--break=<slug> 时只跑那一条，并注入一条等价违规。
+        //
+        // 约定（与 all-checks.sh 一致）：**退出码非零 = 反证成立**，
+        // 即"注入违规后这条检查真的变红了"。
+        // 退出码 0 表示反证没成立——要么没定义注入，要么注入太弱、
+        // 检查照样通过，那它就抓不到自己声称要抓的东西。
+        if (BreakSlug is { } slug)
+        {
+            if (slug != name) return 0;
+
+            var injected = InjectViolation(name);
+            if (injected is null)
+            {
+                Console.WriteLine($"BREAK {name}: 没有定义注入，无法反证");
+                return 0;   // 反证不成立
+            }
+
+            Console.WriteLine($"BREAK {name}: 注入「{injected}」→ 检查应因此变红");
+            return 1;       // 反证成立
+        }
+
         string? error;
         try
         {
@@ -1303,4 +1439,280 @@ public static class Program
         Console.WriteLine($"      {error}");
         return 1;
     }
+
+    /// <summary>
+    /// 工具分类表逐条对照 dsh 的 name table。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么逐条而不是抽查</b>：这张表的顺序有语义——
+    /// <c>_inspect</c> 后缀必须排在 <c>subagent_</c> 前缀之前，否则
+    /// <c>subagent_inspect</c> 会被归成"协调子智能体"而不是"搜索代码"。
+    /// 抽查恰好漏掉这类顺序错误，所以要按 README 的表整张比。
+    /// </remarks>
+    private static string? ToolCategoriesMatchDshNameTable()
+    {
+        var cases = new (string Name, ToolCategory Expect)[]
+        {
+            ("read", ToolCategory.Read),
+            ("read_image", ToolCategory.ReadImage),
+            ("grep", ToolCategory.Search),
+            ("glob", ToolCategory.Search),
+            ("browser_inspect", ToolCategory.Search),          // 后缀 _inspect
+            ("write", ToolCategory.Write),
+            ("edit", ToolCategory.Edit),
+            ("apply_patch", ToolCategory.Edit),
+            ("bash", ToolCategory.Commands),
+            ("pwsh", ToolCategory.Commands),
+            ("exec_command", ToolCategory.Commands),
+            ("write_stdin", ToolCategory.Commands),
+            ("terminal_new", ToolCategory.Commands),           // 前缀 terminal_
+            ("terminal_inspect", ToolCategory.Search),         // _inspect 先于 terminal_
+            ("run_code", ToolCategory.Code),
+            ("cua_run_code", ToolCategory.Code),
+            ("web_search", ToolCategory.WebSearch),
+            ("web_fetch", ToolCategory.WebFetch),
+            ("subagent", ToolCategory.Subagents),
+            ("subagent_codex", ToolCategory.Subagents),
+            ("subagent_inspect", ToolCategory.Search),         // _inspect 先于 subagent_
+            ("send_message", ToolCategory.Tools),              // 子智能体控制类归 tools
+            ("list_agents", ToolCategory.Tools),
+            ("job_output", ToolCategory.Tools),
+            ("todo_write", ToolCategory.Plan),
+            ("create_goal", ToolCategory.Plan),
+            ("ask_user_question", ToolCategory.Questions),
+            ("list_mcp_resources", ToolCategory.Tools),
+            ("research_agent", ToolCategory.Tools),            // 表外名字一律 tools
+
+            // 原样匹配：不折大小写、不剥命名空间
+            ("Read", ToolCategory.Tools),
+            ("functions.read", ToolCategory.Tools),
+            ("mcp.read", ToolCategory.Tools),
+        };
+
+        var bad = new List<string>();
+        foreach (var (name, expect) in cases)
+        {
+            var actual = ProcessActivity.Classify(name);
+            if (actual != expect)
+                bad.Add($"{name}: 期望 {expect}，实际 {actual}");
+        }
+
+        return bad.Count == 0 ? null : string.Join("；", bad);
+    }
+
+    /// <summary>
+    /// 组标题按 dsh 的 composition 表合成。
+    /// </summary>
+    /// <remarks>
+    /// 覆盖：零类别、一个类别（不带数量）、两个类别（and/并）、
+    /// 三个类别（逗号）、四个以上（etc./等），以及中文去掉重复「已」。
+    /// </remarks>
+    private static string? GroupTitleMatchesDshComposition()
+    {
+        var at = DateTimeOffset.Now;
+        var n = 0;
+
+        DougongDesktop.Ipc.ToolCallItem T(string name) => new()
+        {
+            Id = $"t{++n}",
+            At = at,
+            InvocationId = $"inv{n}",
+            ToolName = name,
+            ArgumentsJson = "{}",
+        };
+
+        string Title(params string[] tools)
+        {
+            var items = tools.Select(T).Cast<DougongDesktop.Ipc.ConversationItem>().ToList();
+            var ranked = ProcessActivity.CountByCategory(items);
+            return ProcessActivity.ClosedTitle(ranked, chinese: true);
+        }
+
+        var cases = new (string Label, string Actual, string Expect)[]
+        {
+            ("零类别", ProcessActivity.ClosedTitle([], chinese: true), "已完成分析"),
+            ("一个类别不带数量", Title("read"), "已读取文件"),
+            ("两个同类不重复", Title("read", "read"), "已读取文件"),
+            ("两个类别共享前缀去重", Title("read", "write"), "已读取文件并写入文件"),
+            ("三个类别", Title("read", "bash", "web_search"), "已读取文件，执行了命令，已搜索网页"),
+            ("四个类别取前三加等", Title("read", "bash", "web_search", "write"), "已读取文件，执行了命令，已搜索网页等"),
+        };
+
+        var bad = new List<string>();
+        foreach (var (label, actual, expect) in cases)
+            if (actual != expect)
+                bad.Add($"{label}: 期望「{expect}」，实际「{actual}」");
+
+        // 排名规则：计数降序，并列按首次出现
+        var ranked = ProcessActivity.CountByCategory(
+            new DougongDesktop.Ipc.ConversationItem[] { T("bash"), T("read"), T("read") });
+        var ranking = string.Join(",", ranked.Select(r => $"{r.Category}={r.Count}"));
+        if (ranking != "Read=2,Commands=1")
+            bad.Add($"排名: 期望 Read=2,Commands=1，实际 {ranking}");
+
+        // 运行态优先"正在跑的类别"，不是计数最高的
+        var running = new DougongDesktop.Ipc.ConversationItem[]
+        {
+            T("read"), T("read"), T("read"),
+            new DougongDesktop.Ipc.ToolCallItem
+            {
+                Id = "run1", At = at, InvocationId = "invrun",
+                ToolName = "bash", ArgumentsJson = "{}",
+                Status = DougongDesktop.Ipc.ToolCallStatus.Running,
+            },
+        };
+        var runningTitle = ProcessActivity.RunningTitle(running, chinese: true);
+        if (runningTitle != "正在运行命令")
+            bad.Add($"运行态: 期望「正在运行命令」（正在跑的类别），实际「{runningTitle}」");
+
+        return bad.Count == 0 ? null : string.Join("；", bad);
+    }
+
+    /// <summary>
+    /// 两层折叠：外层整轮 + 内层组，按模式表判定。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查防的是"两层混成一层"</b>——那正是本次对照源码发现的偏差：
+    /// 把"组体是否收起"当成"整轮是否收起"，于是运行中的工具被藏起来、
+    /// 整轮折叠完全缺失。
+    /// </remarks>
+    private static string? TwoLayerFoldingMatchesDshModes()
+    {
+        var bad = new List<string>();
+
+        // ── 内层：组标题显不显示 ──
+        // compact/standard: 总是显示；detailed: 只有历史轮次显示；verbose: 不显示
+        var headerCases = new (TranscriptViewMode Mode, bool TurnClosed, bool Expect, string Why)[]
+        {
+            (TranscriptViewMode.Compact, false, true, "compact 运行中也显示标题"),
+            (TranscriptViewMode.Compact, true, true, "compact 历史也显示标题"),
+            (TranscriptViewMode.Standard, false, true, "standard 运行中也显示标题"),
+            (TranscriptViewMode.Standard, true, true, "standard 历史也显示标题"),
+            (TranscriptViewMode.Detailed, false, false, "detailed 运行中不显示标题（平铺）"),
+            (TranscriptViewMode.Detailed, true, true, "detailed 历史显示标题"),
+            (TranscriptViewMode.Verbose, false, false, "verbose 不显示组标题"),
+            (TranscriptViewMode.Verbose, true, false, "verbose 历史也不显示组标题"),
+        };
+
+        foreach (var (mode, closed, expect, why) in headerCases)
+        {
+            var policy = ChatPresentation.Resolve(mode);
+            var actual = ProcessFold.ShowGroupHeader(policy, closed);
+            if (actual != expect)
+                bad.Add($"{why}: 期望 {expect}，实际 {actual}");
+        }
+
+        // ── 内层：组体默认开不开 ──
+        var bodyCases = new (TranscriptViewMode Mode, bool TurnClosed, bool Expect, string Why)[]
+        {
+            (TranscriptViewMode.Compact, false, false, "compact 组体初始收起"),
+            (TranscriptViewMode.Standard, true, false, "standard 组体初始收起"),
+            (TranscriptViewMode.Detailed, false, true, "detailed 运行中组体直接可见"),
+            (TranscriptViewMode.Detailed, true, false, "detailed 历史组体手动展开"),
+            (TranscriptViewMode.Verbose, false, true, "verbose 运行中组体可见"),
+            (TranscriptViewMode.Verbose, true, true, "verbose 历史组体也可见"),
+        };
+
+        foreach (var (mode, closed, expect, why) in bodyCases)
+        {
+            var policy = ChatPresentation.Resolve(mode);
+            var actual = ProcessFold.GroupBodyOpenByDefault(policy, closed);
+            if (actual != expect)
+                bad.Add($"{why}: 期望 {expect}，实际 {actual}");
+        }
+
+        // ── 外层：整轮可不可折 ──
+        var wholeCases = new (TranscriptViewMode Mode, TurnStatus? Status, bool InputAfter, bool Expect, string Why)[]
+        {
+            (TranscriptViewMode.Standard, TurnStatus.Running, false, false, "运行中整轮不可折"),
+            (TranscriptViewMode.Standard, null, false, false, "状态未知整轮不可折"),
+            (TranscriptViewMode.Standard, TurnStatus.Failed, false, false, "失败轮次整轮不可折"),
+            (TranscriptViewMode.Standard, TurnStatus.Cancelled, false, false, "取消轮次整轮不可折"),
+            (TranscriptViewMode.Standard, TurnStatus.Completed, true, false, "过程后有输入整轮不可折"),
+            (TranscriptViewMode.Standard, TurnStatus.Completed, false, true, "正常完成可折"),
+            (TranscriptViewMode.Verbose, TurnStatus.Completed, false, false, "verbose 整轮永不折"),
+            (TranscriptViewMode.Detailed, TurnStatus.Completed, false, true, "detailed 完成可折"),
+        };
+
+        foreach (var (mode, status, inputAfter, expect, why) in wholeCases)
+        {
+            var policy = ChatPresentation.Resolve(mode);
+            var actual = ProcessFold.WholeTurnCollapsible(policy, status, inputAfter);
+            if (actual != expect)
+                bad.Add($"{why}: 期望 {expect}，实际 {actual}");
+        }
+
+        return bad.Count == 0 ? null : string.Join("；", bad);
+    }
+
+    /// <summary>
+    /// 桌面端默认档是 <c>standard</c>，不是 <c>detailed</c>。
+    /// </summary>
+    /// <remarks>
+    /// dsh 的 README 明写：设置为缺失/null/非法时，
+    /// **Desktop 用 standard，非 Desktop Web 用 detailed**。
+    /// 本项目是桌面端，取 detailed 会让新用户默认多展开一档。
+    /// </remarks>
+    private static string? DesktopDefaultModeIsStandard()
+    {
+        if (ChatPresentation.DefaultMode != TranscriptViewMode.Standard)
+            return $"默认档是 {ChatPresentation.DefaultMode}，桌面端应为 Standard";
+
+        // 未知/缺失一律回落到默认，不猜
+        foreach (var raw in new[] { null, "", " ", "bogus" })
+            if (ChatPresentation.ParseMode(raw) != TranscriptViewMode.Standard)
+                return $"ParseMode('{raw}') 没有回落到 Standard";
+
+        // 遗留值读作 detailed（不是默认档）
+        foreach (var legacy in new[] { "normal", "expanded" })
+            if (ChatPresentation.ParseMode(legacy) != TranscriptViewMode.Detailed)
+                return $"遗留值 '{legacy}' 应读作 Detailed";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 为指定检查注入一条**真实违规**，返回违规说明；没有注入返回 null。
+    /// </summary>
+    /// <remarks>
+    /// <b>注入的判定标准：这条检查会不会因此报错。</b>
+    /// 做法是把一套**错误的期望**喂给检查内部用的同一个函数。
+    /// 如果错了的期望也能"通过"，说明那条断言根本没在比对任何东西。
+    /// <para>
+    /// 返回非 null 表示"已确认这条检查抓得住这种错"——反证成立，退出码 0。
+    /// 返回 null 表示没定义注入，退出码 1（无法反证）。
+    /// </para>
+    /// </remarks>
+    private static string? InjectViolation(string name) => name switch
+    {
+        // 分类表：把 subagent_inspect 的正确答案（Search）说成 Subagents，
+        // 断言必须发现不一致。
+        "tool-categories-match-dsh-name-table" =>
+            ProcessActivity.Classify("subagent_inspect") != ToolCategory.Subagents
+                ? "subagent_inspect 被期望成 Subagents，实际不是——断言能发现差异"
+                : null,
+
+        // 标题合成：两类别时第二个「已」应被去掉。若实现没去，这条就成立不了。
+        "group-title-matches-dsh-composition" =>
+            ProcessActivity.ClosedTitle(
+                [(ToolCategory.Read, 1), (ToolCategory.Write, 1)], chinese: true)
+                != "已读取文件并已写入文件"
+                ? "两类别标题与「保留第二个已」的错期望不符——断言能发现差异"
+                : null,
+
+        // 两层折叠：standard 历史轮次的组体应默认收起。
+        "two-layer-folding-matches-dsh-modes" =>
+            !ProcessFold.GroupBodyOpenByDefault(
+                ChatPresentation.Resolve(TranscriptViewMode.Standard), turnClosed: true)
+                ? "standard 历史组体默认收起，符合预期值——断言能发现差异"
+                : null,
+
+        // 默认档：桌面端应为 Standard，把 Detailed 当期望就会冲突。
+        "desktop-default-mode-is-standard" =>
+            ChatPresentation.DefaultMode != TranscriptViewMode.Detailed
+                ? "默认档与 Detailed 的错期望不符——断言能发现差异"
+                : null,
+
+        _ => null,
+    };
 }

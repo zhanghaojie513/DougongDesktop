@@ -48,7 +48,32 @@ echo "$forward"
 
 echo
 echo "== 无头 UI 检查（真实构建控件，不依赖显示链接）=="
-"$DOTNET" run --project tests/DougongDesktop.Ui.Headless.Checks -c Release --no-build
+"$DOTNET" run --project tests/DougongDesktop.Ui.Headless.Checks -c Release --no-build || {
+  echo "无头 UI 检查失败"
+  exit 1
+}
+
+echo
+echo "== 无头 UI 反证（M15/M16 新增的四条）=="
+# 与架构守卫同一条规矩：没红过的检查等于没有检查。
+# 这四条断言的是分类表、标题合成、两层折叠、默认档——全是本轮
+# 因为"凭直觉归纳"而出过偏差的地方，更需要能变红。
+ui_break_failed=0
+for check in tool-categories-match-dsh-name-table group-title-matches-dsh-composition \
+             two-layer-folding-matches-dsh-modes desktop-default-mode-is-standard; do
+  printf '%-42s ' "$check"
+  if "$DOTNET" run --project tests/DougongDesktop.Ui.Headless.Checks \
+        -c Release --no-build -- --break="$check" > /dev/null 2>&1; then
+    echo "FAIL（反证未生效）"
+    ui_break_failed=$((ui_break_failed + 1))
+  else
+    echo "OK（正确变红）"
+  fi
+done
+if [ "$ui_break_failed" -ne 0 ]; then
+  echo "$ui_break_failed 项无头反证未生效"
+  exit 1
+fi
 
 echo
 echo "== 架构守卫（反证：每条都必须变红）=="

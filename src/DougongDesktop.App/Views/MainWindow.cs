@@ -279,6 +279,24 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 Console.Error.WriteLine("[shell] 工具条目已前置（工具卡自检）");
             }
 
+            // 顶部守卫自检：停在列表顶部，看首屏（用户气泡 / 分组标题）。
+            // 与 TOOLFIRST 互斥使用——两者都要控制滚动位置。
+            // 全部展开：standard 档下已完成轮次默认收起，不展开就看不到组标题，
+            // 也就分不清"没渲染"和"折起来了"。
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_EXPANDALL") is "1")
+            {
+                _conversation.ExpandEverythingForProbe();
+                await Task.Delay(400);
+                Console.Error.WriteLine("[shell] 已展开全部整轮块与过程组（折叠自检）");
+            }
+
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_TOPGUARD") is "1")
+            {
+                _conversation.ScrollToTopForProbe();
+                await Task.Delay(400);
+                Console.Error.WriteLine("[shell] 已停在列表顶部（首屏自检）");
+            }
+
             DumpLayout(layoutSettled: true);
 
             // 目录导航自检：模拟"在右栏点进子目录"。
@@ -487,6 +505,15 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
 
         _settingsView.WorkDetailRequested += SaveWorkDetail;
 
+        // 启动时应用已保存的档位（否则重启后界面回到默认，与设置页显示不一致）
+        if (Shell?.Settings is { } savedSettings)
+        {
+            _conversation.SetPresentation(ChatPresentation.Resolve(
+                ChatPresentation.ParseMode(savedSettings.TranscriptView),
+                ChatPresentation.ParseTiming(savedSettings.CollapseTiming),
+                ChatPresentation.ParseReplies(savedSettings.FoldedReplies)));
+        }
+
         return _settingsView;
     }
 
@@ -605,8 +632,17 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
     /// 存不下偏好不该打断用户。
     /// </para>
     /// </remarks>
-    private void SaveWorkDetail(string mode, string timing, string replies) =>
+    private void SaveWorkDetail(string mode, string timing, string replies)
+    {
         Shell?.SaveWorkDetail(mode, timing, replies);
+
+        // **改档位要立刻作用到会话区**：不重建的话，用户改了"啰嗦"
+        // 却发现过程还是收着——那正是"调了不生效的开关"。
+        _conversation.SetPresentation(ChatPresentation.Resolve(
+            ChatPresentation.ParseMode(mode),
+            ChatPresentation.ParseTiming(timing),
+            ChatPresentation.ParseReplies(replies)));
+    }
 
     /// <summary>把用户选的预设发给引擎。</summary>
     /// <remarks>
@@ -765,6 +801,11 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 _capsule.OnTurnCompleted(done.Status, done.Diagnostic);
                 _conversation.Composer.SetGenerating(false);
                 _conversation.OnTurnEnded();
+
+                // 记下轮次终态：M15 的折叠判定要用它——"已关闭"才折，
+                // 失败/取消的轮次永远摊开。TurnCompleted 不改任何条目，
+                // 所以这条信息只能这样传下去。
+                _conversation.SetTurnStatus(done.TurnId, done.Status);
 
                 // 用户中止的回合：给最后一条助手消息打"已停止"标记。
                 //
@@ -1320,6 +1361,19 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
             Report("Conversation.List", _conversation.List);
             Report("Conversation.Scroll", _conversation.Scroll);
             Console.Error.WriteLine($"[shell] 消息条目数 {_conversation.Count}");
+
+        // 分组自检：外层整轮块、内层过程组、独立条目各有多少
+        var roots = _conversation.Roots;
+        var turns = roots.OfType<TurnProcessRoot>().ToArray();
+        var looseGroups = roots.OfType<ProcessGroupRoot>().ToArray();
+        var allGroups = turns.SelectMany(t => t.Groups).Concat(looseGroups).ToArray();
+        Console.Error.WriteLine(
+            $"[shell] 分组 根={roots.Count} 整轮块={turns.Length} 组={allGroups.Length} "
+            + $"独立={roots.Count - turns.Length - looseGroups.Length}"
+            + (allGroups.Length > 0
+                ? $" 组大小=[{string.Join(",", allGroups.Select(g => g.Items.Count))}]"
+                : ""));
+
         }
 
         // 三栏不用 Arc 的 ResizablePanels：dsh 的列宽是"像素 + 求解顺序"，

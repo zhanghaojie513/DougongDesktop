@@ -99,6 +99,28 @@ public sealed class ConversationView : UserControl
     private readonly List<ConversationItem> _items = [];
 
     /// <summary>
+    /// 渲染用的根序列：过程组 + 独立条目（M15）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么渲染绑它而不是 <c>_items</c></b>：过程组的标题要接在组前面，
+    /// 而虚拟化列表按"根"构建容器。直接绑扁平条目就没法插组标题。
+    /// <para>
+    /// <c>_items</c> 仍是唯一真源——这个列表每次 <see cref="Refresh"/> 从它
+    /// 重算，不单独维护状态，避免两份数据不同步。
+    /// </para>
+    /// </remarks>
+    private readonly List<ConversationRoot> _roots = [];
+
+    /// <summary>
+    /// 当前的工作详情策略（M16）。
+    /// </summary>
+    /// <remarks>
+    /// 默认 <c>detailed</c>，与 dsh 的 <c>DEFAULT_TRANSCRIPT_VIEW_MODE</c> 一致。
+    /// 用户在设置页改档位时经 <see cref="SetPresentation"/> 更新。
+    /// </remarks>
+    private ChatPresentationPolicy _presentation = ChatPresentation.Resolve(ChatPresentation.DefaultMode);
+
+    /// <summary>
     /// 条目 → 所属轮次。**旁挂而不改契约**。
     /// </summary>
     /// <remarks>
@@ -112,6 +134,19 @@ public sealed class ConversationView : UserControl
     /// </para>
     /// </remarks>
     private readonly Dictionary<string, string> _itemTurn = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 轮次 → 状态（M15 折叠判定）。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须旁挂</b>：<see cref="TurnCompletedEvent"/> 不改任何条目，
+    /// 但它决定"这一轮的组该不该收起"。契约里没有"条目带轮次状态"这种东西，
+    /// 也不该为它加字段（那是改协议）。
+    /// <para>
+    /// 没有记录的轮次一律当"未关闭"——宁可多摊开，也不要误折正在发生的组。
+    /// </para>
+    /// </remarks>
+    private readonly Dictionary<string, TurnStatus> _turnStatus = new(StringComparer.Ordinal);
 
     /// <summary>
     /// 自动贴底开关。
@@ -157,9 +192,16 @@ public sealed class ConversationView : UserControl
     {
         _list = new ItemsControl
         {
-            ItemsSource = _items,
-            ItemTemplate = new FuncDataTemplate<ConversationItem>((item, _) =>
-                item is null ? null : BuildItem(item)),
+            ItemsSource = _roots,
+            ItemTemplate = new FuncDataTemplate<ConversationRoot>((root, _) =>
+                root switch
+                {
+                    null => null,
+                    IndependentRoot independent => BuildItem(independent.Item),
+                    TurnProcessRoot turn => BuildTurnProcess(turn),
+                    ProcessGroupRoot group => BuildProcessGroup(group),
+                    _ => null,
+                }),
             // 虚拟化：1000 条不进视觉树，只构建可见的那部分
             ItemsPanel = new Avalonia.Controls.Templates.FuncTemplate<Panel?>( 
                 () => new VirtualizingStackPanel()),
@@ -406,6 +448,10 @@ public sealed class ConversationView : UserControl
         var seq = 0;
         string NextId() => $"selftest-{++seq}";
 
+        // 自检用的轮次：工具条目挂在它上面，并标为已完成——
+        // 折叠只在"轮次已关闭"时发生（dsh 的 turnClosed 语义）。
+        const string SelfTestTurnId = "turn-selftest-tools";
+
         Add(new UserMessageItem { Id = NextId(), At = DateTimeOffset.Now, Text = "帮我读一下 README.md" });
 
         Add(new AssistantMessageItem
@@ -426,21 +472,27 @@ public sealed class ConversationView : UserControl
         });
 
         // 工具：五种状态各来一个
-        foreach (var (status, label) in new[]
+        foreach (var (status, label, toolName) in new[]
         {
-            (IpcToolCallStatus.Succeeded, "成功"),
-            (IpcToolCallStatus.Failed, "失败"),
-            (IpcToolCallStatus.Rejected, "被拒绝"),
-            (IpcToolCallStatus.Cancelled, "已取消"),
-            (IpcToolCallStatus.Unknown, "结果未知"),
+            // 工具名故意取 dsh 表内的不同类别：这样截图里能直接验证
+            // 标题合成（已读取文件 → 执行了命令 → …），而不是清一色
+            // 落到 tools 的「已调用工具」。
+            (IpcToolCallStatus.Succeeded, "成功", "read"),
+            (IpcToolCallStatus.Failed, "失败", "bash"),
+            (IpcToolCallStatus.Rejected, "被拒绝", "write"),
+            (IpcToolCallStatus.Cancelled, "已取消", "web_search"),
+            (IpcToolCallStatus.Unknown, "结果未知", "grep"),
         })
         {
+            // 挂到自检轮次上并标为已关闭：这样 detailed 档（默认）
+            // 才真的会折——不挂轮次的话它们永远当"当前轮"，永远平铺，
+            // 分组标题可折这件事就没被验证到。
             Add(new IpcToolCallItem
             {
                 At = DateTimeOffset.Now,
                 Id = NextId(),
                 InvocationId = $"inv-{label}",
-                ToolName = "read_file",
+                ToolName = toolName,
                 ArgumentsJson = "{\"path\":\"README.md\"}",
                 ResultText = $"（{label} 的输出）",
                 Diagnostic = status == IpcToolCallStatus.Unknown
@@ -462,8 +514,11 @@ public sealed class ConversationView : UserControl
                     IpcToolCallStatus.Failed => TimeSpan.FromMilliseconds(12),
                     _ => null,
                 },
-            });
+            }, SelfTestTurnId);
         }
+
+        // 该轮次已结束：上面的工具因此在 standard/detailed 档下默认收起。
+        _turnStatus[SelfTestTurnId] = TurnStatus.Completed;
 
         // JSON 输出：验证 Arc 的 JsonOutput 着色与十行折叠
         Add(new IpcToolCallItem
@@ -477,7 +532,7 @@ public sealed class ConversationView : UserControl
                          + "\"limits\":{\"context\":200000,\"output\":8192}}",
             Status = IpcToolCallStatus.Succeeded,
             ExecutionElapsed = TimeSpan.FromMilliseconds(8),
-        });
+        }, SelfTestTurnId);
 
         Add(new PlanItem
         {
@@ -628,6 +683,25 @@ public sealed class ConversationView : UserControl
     /// <summary>某条目所属的轮次；没记录过返回 null。</summary>
     public string? TurnIdOf(ConversationItem item) =>
         _itemTurn.TryGetValue(item.Id, out var t) ? t : null;
+
+    /// <summary>
+    /// 记录一个轮次的状态（M15 折叠判定需要）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要单独的旁挂表</b>：<see cref="TurnCompletedEvent"/> 不改任何条目，
+    /// 但从它到达那一刻起，**已有的组**就该按"已关闭"重新判定折叠。
+    /// 只靠条目内容和 <see cref="ProcessGrouping"/> 推不出这件事。
+    /// <para>
+    /// 有记录的轮次但状态是 <see cref="TurnStatus.Running"/>，与"没有记录"
+    /// 在折叠判定上等价（都当未关闭处理），所以不必为 TurnStarted 单独写表项。
+    /// </para>
+    /// </remarks>
+    public void SetTurnStatus(string turnId, TurnStatus status)
+    {
+        if (turnId is not { Length: > 0 }) return;
+        _turnStatus[turnId] = status;
+        Refresh();
+    }
 
     /// <summary>按轮次分组后的结果（供诊断与 M15 使用）。</summary>
     /// <remarks>
@@ -838,12 +912,362 @@ public sealed class ConversationView : UserControl
         _scroll.Offset = new Avalonia.Vector(_scroll.Offset.X, 0);
     }
 
+    /// <summary>
+    /// 应用工作详情策略（M16）。
+    /// </summary>
+    /// <remarks>
+    /// <b>改档位要重建列表</b>：<c>FoldCompletedTurns</c> 直接影响组是否收起，
+    /// 而收起状态在构建时就定了。只改字段不重建，界面不会变。
+    /// </remarks>
+    public void SetPresentation(ChatPresentationPolicy policy)
+    {
+        _presentation = policy;
+        Refresh();
+    }
+
+    /// <summary>当前策略（诊断用）。</summary>
+    public ChatPresentationPolicy Presentation => _presentation;
+
+    /// <summary>分组结果（诊断用）。</summary>
+    public IReadOnlyList<ConversationRoot> Roots => _roots;
+
+    /// <summary>
+    /// 滚到会话顶部（自检用）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么需要它</b>：自检内容高度 3143px，视口只有 353px，
+    /// 列表默认停在底部。要看顶部的用户消息（比如验证气泡没被压成竖排）
+    /// 只能滚上去，而无头/无辅助功能权限的环境发不了按键。
+    /// 这个钩子只被 <c>DOUGONG_UI_TOPGUARD</c> 调用，不影响正常路径。
+    /// </remarks>
+    public void ScrollToTopForProbe() => _scroll.Offset = new Avalonia.Vector(_scroll.Offset.X, 0);
+
+    /// <summary>
+    /// 把所有整轮块与过程组都展开（自检用）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要它</b>：<c>standard</c>（桌面默认档）下已完成的轮次默认收起，
+    /// 自检内容又全是已完成轮次——不展开的话截图里永远看不到组标题，
+    /// 于是"标题没渲染"和"标题被折起来了"分不清。
+    /// 展开后走的是与用户点击完全相同的记录路径（<c>_expandedTurns</c> /
+    /// <c>_expandedGroups</c>），不是特例渲染。
+    /// </remarks>
+    public void ExpandEverythingForProbe()
+    {
+        foreach (var root in _roots)
+        {
+            switch (root)
+            {
+                case TurnProcessRoot turn:
+                    _collapsedTurns.Remove(TurnKey(turn));
+                    _expandedTurns.Add(TurnKey(turn));
+                    foreach (var g in turn.Groups)
+                    {
+                        _collapsedGroups.Remove(GroupKey(g));
+                        _expandedGroups.Add(GroupKey(g));
+                    }
+                    break;
+
+                case ProcessGroupRoot g:
+                    _collapsedGroups.Remove(GroupKey(g));
+                    _expandedGroups.Add(GroupKey(g));
+                    break;
+            }
+        }
+
+        Refresh();
+    }
+
+    /// <summary>
+    /// 从扁平条目重算根序列（M15 分组）。
+    /// </summary>
+    /// <remarks>
+    /// <b>每次都全量重算</b>：与 <see cref="Refresh"/> 的既有做法一致——
+    /// 条目列表是 <see cref="List{T}"/>，本来就不发集合通知，每次重建
+    /// ItemsSource 是既定模式。真到性能成问题时再改成增量，
+    /// 现在先保证"两份数据不会不同步"。
+    /// </remarks>
+    private void RebuildRoots()
+    {
+        _roots.Clear();
+        var grouped = ProcessGrouping.Group(_items, i => TurnIdOf(i));
+
+        // 整轮折叠（dsh 的 whole-Turn folding）：
+        // 把同一轮次里**连续的过程组**收拢到一条轮次控制条下面。
+        // 回复、输入、分隔符是独立根，不参与外层折叠（README: "every Assistant
+        // reply remains outside whole-Turn folding"）。
+        _roots.AddRange(ApplyWholeTurnFold(grouped));
+    }
+
+    /// <summary>
+    /// 把过程组按轮次收拢成"整轮块"，其余根原样保留。
+    /// </summary>
+    /// <remarks>
+    /// <b>只收拢相邻的同轮过程组</b>：中间夹了回复就不是同一段过程了
+    /// （README 的完整例子：G1 → 中间回复 → G2，回复把过程分成两段，
+    /// 但整轮折叠仍然同时管这两段——那属于"跨段汇总"，本轮不做）。
+    /// <para>
+    /// 本实现按"连续同轮过程组"聚块，因为这是最常见也最有价值的情形
+    /// （推理 + 一串工具）。回复打断后各自成块，块多的时候只是多了几条控制条，
+    /// 不会藏错内容——错的方向是"多显示"，不是"藏起来"。
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<ConversationRoot> ApplyWholeTurnFold(IReadOnlyList<ConversationRoot> roots)
+    {
+        var result = new List<ConversationRoot>(roots.Count);
+        var run = new List<ProcessGroupRoot>();
+
+        void FlushRun()
+        {
+            if (run.Count == 0) return;
+
+            var turnId = run[0].TurnId;
+            var turnStatus = turnId is { } t && _turnStatus.TryGetValue(t, out var s) ? s : (TurnStatus?)null;
+
+            // 这一块过程之后是否还有可见输入（决定整轮可不可折）
+            var hasInputAfter = HasInputAfterProcess(turnId);
+
+            result.Add(new TurnProcessRoot(turnId, [.. run], turnStatus, hasInputAfter));
+            run.Clear();
+        }
+
+        foreach (var root in roots)
+        {
+            if (root is ProcessGroupRoot g)
+            {
+                // 轮次变了要断块（不同轮的过程不能共用一个控制条）
+                if (run.Count > 0 && run[0].TurnId != g.TurnId) FlushRun();
+                run.Add(g);
+            }
+            else
+            {
+                FlushRun();
+                result.Add(root);
+            }
+        }
+
+        FlushRun();
+        return result;
+    }
+
+    /// <summary>
+    /// 某轮次的过程内容之后是否还有用户输入。
+    /// </summary>
+    /// <remarks>
+    /// README："Visible input after the first process evidence → Whole-Turn
+    /// collapse is unavailable"。过程被输入打断时折起来会藏掉"用户中途说了什么"，
+    /// 所以整轮不折，只留组级披露。
+    /// </remarks>
+    private bool HasInputAfterProcess(string? turnId)
+    {
+        var sawProcess = false;
+        foreach (var item in _items)
+        {
+            if (TurnIdOf(item) != turnId) continue;
+
+            if (item is ReasoningItem or IpcToolCallItem)
+                sawProcess = true;
+            else if (sawProcess && item is UserMessageItem)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 渲染整轮过程块：轮次控制条 + 块内各组（外层折叠）。
+    /// </summary>
+    /// <remarks>
+    /// <b>控制条只在可折时出现</b>：不可折的轮次（运行中 / 失败 / 中途有输入）
+    /// 不该出现一个点了没反应的东西——README 说这种情况"Whole-Turn collapse
+    /// is unavailable"，过程保持展开。
+    /// <para>
+    /// 控制条文案用"已完成"这类状态词（<c>message.turnProcess.worked</c>）。
+    /// 时长后续接上 <see cref="TurnCompletedEvent"/> 时再补。
+    /// </para>
+    /// </remarks>
+    private Control BuildTurnProcess(TurnProcessRoot turn)
+    {
+        var policy = _presentation;
+        var collapsible = ProcessFold.WholeTurnCollapsible(policy, turn.TurnStatus, turn.HasInputAfterProcess);
+        var hiddenByDefault = ProcessFold.WholeTurnHiddenByDefault(
+            policy, turn.TurnStatus, turn.HasInputAfterProcess);
+
+        var key = TurnKey(turn);
+        var userExpanded = _expandedTurns.Contains(key);
+        var userCollapsed = _collapsedTurns.Contains(key);
+
+        var bodyOpen = userCollapsed ? false : userExpanded || !hiddenByDefault;
+
+        var body = new StackPanel();
+        foreach (var group in turn.Groups)
+            body.Children.Add(BuildProcessGroup(group));
+
+        body.IsVisible = bodyOpen;
+
+        var control = new Avalonia.Controls.Button
+        {
+            Content = new TextBlock
+            {
+                Text = TurnControlText(turn),
+                Opacity = 0.65,
+                FontSize = 12,
+            },
+            Background = Avalonia.Media.Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(12, 4),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            IsVisible = collapsible,
+            IsEnabled = collapsible,
+            Cursor = collapsible
+                ? new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand)
+                : Avalonia.Input.Cursor.Default,
+        };
+
+        control.Click += (_, _) =>
+        {
+            var nowOpen = !body.IsVisible;
+            _expandedTurns.Remove(key);
+            _collapsedTurns.Remove(key);
+            (nowOpen ? _expandedTurns : _collapsedTurns).Add(key);
+            body.IsVisible = nowOpen;
+        };
+
+        return new StackPanel { Children = { control, body } };
+    }
+
+    /// <summary>整轮控制条的文案。</summary>
+    /// <remarks>
+    /// dsh 的 <c>message.turnProcess.*</c>：完成写 "Completed"（中文「已完成」），
+    /// 失败写 "Failed"（「已失败」）。运行中不显示控制条，所以这里没有运行态文案。
+    /// </remarks>
+    private static string TurnControlText(TurnProcessRoot turn) => turn.TurnStatus switch
+    {
+        TurnStatus.Failed => "已失败",
+        TurnStatus.Cancelled => "已停止",
+        _ => "已完成",
+    };
+
+    /// <summary>整轮块的稳定标识。</summary>
+    private static string TurnKey(TurnProcessRoot turn) =>
+        turn.TurnId is { Length: > 0 } id
+            ? id
+            : string.Join("|", turn.Groups.SelectMany(g => g.Items).Select(i => i.Id));
+
+    /// <summary>
+    /// 渲染一个过程组：标题行 + 组内条目。
+    /// </summary>
+    /// <remarks>
+    /// <b>判定全在 <see cref="ProcessFold"/> 里</b>，这里只执行。三件事分开：
+    /// 标题显不显示、标题能不能点、组体默认开不开——它们各自取决于不同的
+    /// 模式开关，合并成一个布尔值就会互相牵连（第一版就是这么错的）。
+    /// <para>
+    /// 组体的默认开合还要叠用户手动展开过的事实（<c>_expandedGroups</c>），
+    /// 那是用户意图，优先级高于默认值。
+    /// </para>
+    /// </remarks>
+    private Control BuildProcessGroup(ProcessGroupRoot group)
+    {
+        var policy = _presentation;
+        var running = group.IsRunning;
+
+        // 轮次是否已关闭。没有轮次信息的条目按"当前轮"处理——
+        // 保守取"未关闭"，宁可多摊开也不要误折正在发生的东西。
+        var turnState = group.TurnId is { } tid && _turnStatus.TryGetValue(tid, out var st)
+            ? st
+            : (TurnStatus?)null;
+        var turnClosed = turnState is not null and not TurnStatus.Running;
+
+        var showHeader = ProcessFold.ShowGroupHeader(policy, turnClosed);
+        var openByDefault = ProcessFold.GroupBodyOpenByDefault(policy, turnClosed);
+        var userExpanded = _expandedGroups.Contains(GroupKey(group));
+
+        // 用户手动开合过就以用户的为准；没动过才用默认
+        var bodyOpen = _collapsedGroups.Contains(GroupKey(group))
+            ? false
+            : userExpanded || openByDefault;
+
+        var body = new StackPanel();
+        foreach (var item in group.Items)
+            body.Children.Add(BuildItem(item));
+
+        body.IsVisible = bodyOpen;
+
+        var header = new Avalonia.Controls.Button
+        {
+            Content = new TextBlock
+            {
+                // 中文标签：本项目界面是中文（dsh 的 locale.ts 两套都有，用中文那套）
+                Text = group.SummaryText(running),
+                Opacity = 0.65,
+                FontSize = 12,
+            },
+            Background = Avalonia.Media.Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(12, 4),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            IsVisible = showHeader,
+            IsEnabled = showHeader,
+            Cursor = showHeader
+                ? new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand)
+                : Avalonia.Input.Cursor.Default,
+        };
+
+        header.Click += (_, _) =>
+        {
+            // 记录的是"用户把这一组拨到哪边"，不是"翻转当前可见性"。
+            // 只翻 IsVisible 会在下次 Refresh（新消息到达）时被默认值覆盖回去——
+            // 也就是用户刚展开的组自己又合上了。
+            var key = GroupKey(group);
+            var nowOpen = !body.IsVisible;
+
+            _expandedGroups.Remove(key);
+            _collapsedGroups.Remove(key);
+            (nowOpen ? _expandedGroups : _collapsedGroups).Add(key);
+
+            body.IsVisible = nowOpen;
+        };
+
+        return new StackPanel { Children = { header, body } };
+    }
+
+    /// <summary>组的稳定标识：由成员 Id 拼成，重算后同一组得到同一个键。</summary>
+    /// <remarks>
+    /// 不能用对象引用：每次 <see cref="Refresh"/> 都会新建 <see cref="ProcessGroupRoot"/>，
+    /// 引用一变，用户展开过的状态就全丢了。
+    /// </remarks>
+    private static string GroupKey(ProcessGroupRoot group) =>
+        string.Join("|", group.Items.Select(i => i.Id));
+
+    /// <summary>用户手动展开过的组。</summary>
+    private readonly HashSet<string> _expandedGroups = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 用户手动收起过的组。
+    /// </summary>
+    /// <remarks>
+    /// <b>要单独记一侧，不能只记"展开"</b>：<c>detailed</c> 档下运行中的组默认展开，
+    /// 用户把它收起来之后，下一条消息到达触发的 <see cref="Refresh"/> 会重新构建控件——
+    /// 只记"展开"的话没法表达"用户明确关掉了这个默认展开的组"，
+    /// 它会自己弹开。
+    /// </remarks>
+    private readonly HashSet<string> _collapsedGroups = new(StringComparer.Ordinal);
+
+    /// <summary>用户手动展开过的整轮块（外层）。</summary>
+    private readonly HashSet<string> _expandedTurns = new(StringComparer.Ordinal);
+
+    /// <summary>用户手动收起过的整轮块（外层）。</summary>
+    private readonly HashSet<string> _collapsedTurns = new(StringComparer.Ordinal);
+
     private void Refresh()
     {
         // List<T> 不触发集合通知，重建 ItemsSource 强制刷新。
         // 真正的虚拟化在 ItemsPanel，重建 source 不会重建所有容器。
+        RebuildRoots();
         _list.ItemsSource = null;
-        _list.ItemsSource = _items;
+        _list.ItemsSource = _roots;
 
         _emptyHint.IsVisible = _items.Count == 0;
 
@@ -1011,13 +1435,24 @@ public sealed class ConversationView : UserControl
             Children = { bubble, actions },
         };
 
-        stack.SizeChanged += (_, e) =>
+        // **必须用列表视口宽度，不能用 e.NewSize.Width**。
+        // e.NewSize 是这个 bubble 自己的宽度，而 bubble 的宽度又受 MaxWidth 约束——
+        // 于是"用自己算自己"形成正反馈：某一帧量到窄宽度 → MaxWidth 被设小 →
+        // 下一帧更窄 → 最后塌成一字一行（实测：用户消息竖排单字）。
+        // 容器宽是列表视口，与气泡宽度无关，所以没有回路。
+        stack.SizeChanged += (_, _) => ApplyBubbleLimit();
+
+        void ApplyBubbleLimit()
         {
-            var contentWidth = ConversationMetrics.ContentWidth(e.NewSize.Width);
-            var limit = ConversationMetrics.UserBubbleWidth(contentWidth, e.NewSize.Width);
+            var containerWidth = _list.Bounds.Width;
+            if (containerWidth <= 0) return;
+
+            var limit = ConversationMetrics.UserBubbleWidth(
+                ConversationMetrics.ContentWidth(containerWidth), containerWidth);
 
             if (limit > 0 && bubble.MaxWidth != limit) bubble.MaxWidth = limit;
-        };
+
+        }
 
         return new Border
         {

@@ -87,17 +87,23 @@ public enum StepGroupingKind
 /// </remarks>
 public static class ChatPresentation
 {
-    /// <summary>默认详情模式。<b>不是 <c>standard</c>，是 <c>detailed</c></b>。</summary>
+    /// <summary>默认详情模式。<b>桌面端是 <c>standard</c></b>。</summary>
     /// <remarks>
-    /// dsh 的注释：<c>DEFAULT_TRANSCRIPT_VIEW_MODE = 'detailed'</c>。
-    /// 猜成 standard 会让"分组标题只在历史轮次可折叠"这条悄悄失效。
-    /// </remarks>
-    /// <remarks>
+    /// README 原文（"Defaults and saving preferences"）：
+    /// "When the setting is missing, <c>null</c>, or invalid, **Desktop uses
+    /// <c>standard</c> and non-Desktop Web uses <c>detailed</c>**."
+    /// <para>
+    /// 我第一版取 <c>detailed</c>，理由写的是 "dsh 的 DEFAULT_TRANSCRIPT_VIEW_MODE
+    /// = detailed"——那个常量确实存在，但它是 **Web 侧**的默认。本产品是桌面端，
+    /// 取错了会让新用户的默认呈现整体偏"更展开"一档。
+    /// </para>
+    /// <para>
     /// 用 <c>static readonly</c> 而不是 <c>const</c>：<c>const</c> 是编译期常量，
     /// 调用方写 `if (DefaultMode != X)` 时编译器能把它当常量折叠，
     /// 于是断言句后面的代码被判"不可达"（CS0162）。检查里正好是这种写法。
+    /// </para>
     /// </remarks>
-    public static readonly TranscriptViewMode DefaultMode = TranscriptViewMode.Detailed;
+    public static readonly TranscriptViewMode DefaultMode = TranscriptViewMode.Standard;
 
     /// <summary>默认折叠时机。</summary>
     public const CollapseTiming DefaultTiming = CollapseTiming.Completion;

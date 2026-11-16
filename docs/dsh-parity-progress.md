@@ -52,8 +52,8 @@
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **25%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **40%** |
-| **P8g 中区会话域** | **12** | **2** | **3** | **0** | **6** | **23** | **82%** |
-| **合计** | **35** | **4** | **20** | **2** | **9** | **70** | **66%** |
+| **P8g 中区会话域** | **13** | **2** | **2** | **0** | **6** | **23** | **88%** |
+| **合计** | **36** | **5** | **19** | **2** | **9** | **70** | **69%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -229,8 +229,8 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 |---|---|---|---|---|---|
 | M13 | ⬜ | 轮次导航条 | `[自有]` | 右侧 28px 竖排刻度，hover 预览，≤900px 隐藏（`TurnNavigator.tsx:81-295`） | 无 |
 | M14 | ⬜ | 加载更早 | `[自有]` | 顶部按钮 + 锚点补偿（`ChatView.tsx:239-245`） | 无（无分页） |
-| M15 | ⬜ | 折叠四层模型 | `[自有]` | 轮次→分组→单条，不可互相绕过（`conversation-nodes/README.md:20-60`） | 只有单条折叠 |
-| M16 | 🟡 | 工作详情模式 | `[自有]` | 四模式策略表 + 两个偏好已落地：`ChatPresentation`（照抄 dsh 的 POLICIES）、遗留值 normal/expanded→detailed、设置页分段选择器、持久化 | 检查 `transcript-view-modes-match-dsh-table`（逐项比对四个能力开关）、`transcript-legacy-modes-read-as-detailed`（往返稳定）、`work-detail-picker-reflects-and-saves`、`settings-fields-load-independently`。**能力消费只接了 2 项**：FoldCompletedTurns / StepGrouping 需 M15 的分组层才能生效 |
+| M15 | 🟡 | 折叠四层模型 | `[自有]` | **两层已落地**：外层整轮折叠（`TurnProcessRoot` + `ProcessFold`）、内层过程组（`ProcessGrouping` 四动作 + 类别标题 + 计数排名）。层级包含语义成立：外层关着时内层开不开都不可见。**未做**：单条推理/工具体的手动展开（第三层）与「加载更早」的锚点保持（`conversation-nodes/README.md:20-60`） | 检查 `process-grouping-matches-dsh-examples`（6 个 README 示例 + 跨轮次）、`tool-categories-match-dsh-name-table`（31 条名字逐条比对，含 `_inspect` 先于 `subagent_`/`terminal_` 的顺序语义）、`group-title-matches-dsh-composition`（0/1/2/3/4 类别合成 + 排名并列规则 + 运行态取"正在跑"的类别）、`two-layer-folding-matches-dsh-modes`（22 个模式×状态组合）。全部有反证 |
+| M16 | ✅ | 工作详情模式 | `[自有]` | 四模式策略表 + 两个偏好已落地：`ChatPresentation`（照抄 dsh 的 POLICIES）、**桌面默认档 standard**（README：Desktop 用 standard、Web 用 detailed——原先取 detailed 是照搬了 Web 侧常量）、遗留值 normal/expanded→detailed、设置页分段选择器、持久化、能力已被 M15 消费 | 检查 `transcript-view-modes-match-dsh-table`、`desktop-default-mode-is-standard`（含未知值回落）、`transcript-legacy-modes-read-as-detailed`、`work-detail-picker-reflects-and-saves`、`settings-fields-load-independently`；全部有反证 |
 | M17 | ✅ | 列宽可拖拽 | `[自有]` | 右栏左边界 6px 拖拽区；宽度**不自己算**，仍交给 `Columns.Compute` 裁决；松手才持久化到 `ui.json`（`ConversationWidthControls.tsx:5-28`） | `drag-resize-cannot-bypass-column-limits`（拖到 900/2000 中栏都不低于下限）+ `saved-rightbar-width-is-revalidated`（坏值丢弃、正常值 576 保留） |
 
 **明确不做（dsh 也没有，别照想象补）**
@@ -370,4 +370,5 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
 | 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
 | 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-16 | **M15 两层折叠落地，M16 收口（🟡→✅）**。重读 dsh 的 `conversation-nodes/README.md` 后，把原先的一层折叠拆成**外层整轮 + 内层过程组**。对照源码修掉三处真实偏差：①**桌面默认档是 `standard` 不是 `detailed`**——`DEFAULT_TRANSCRIPT_VIEW_MODE='detailed'` 属 Web 侧，README 明写 Desktop 用 standard；②**组标题不是「使用了 N 个工具」**，而是按类别合成（`已读取文件，执行了命令，已写入文件等`），关组不显示数量，排名按计数降序+首次出现；③**失败/取消轮次永不折叠**（`alwaysOpen`）。新增 `ProcessActivity`（31 条名字逐条对照，含 `_inspect` 先于 `subagent_`/`terminal_` 的顺序语义）、`ProcessFold`（两层判定）；`ProcessGrouping` 补类别计数与标题。顺带修掉一个真 bug：**用户气泡限宽用自身宽度当容器宽，形成正反馈，塌成竖排单字**——改用列表视口宽度。无头检查新增 4 条并首次给无头层接上 `--break` 反证（此前无头检查从未被证明能变红）。检查 114 → **118** |
 | 2026-11-12 | **同一个 bug 一天内犯了三次**：把"某字段坏了"扩大成"整份设置作废"。①`RightbarWidth` 嵌在 `PaneSizes` 分支里 ②改成"两项都无效就返回空设置"，而只存偏好、没存布局时两项都无效 ③偏好三件套又栽在②上。已改为每字段独立保留，并加 `settings-fields-load-independently` 逐字段验证往返 |
