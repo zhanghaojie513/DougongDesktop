@@ -109,6 +109,9 @@ public static class Program
         // 事件投影（纯映射层，表驱动）
         failures += ProjectionChecks.Run(breakMode);
 
+        // 包版本约束：Arc 与 Avalonia 必须成对升级
+        failures += PackageVersionChecks.Run(breakMode);
+
         Console.WriteLine();
         Console.WriteLine(failures == 0
             ? "ARCHITECTURE: ALL PASS"

@@ -12,8 +12,8 @@
 
 [![repository](https://img.shields.io/badge/Dougong_SDK-repository-2f6f5e?style=flat-square)](https://github.com/zhanghaojie513/Dougong)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512bd4?style=flat-square)](https://dotnet.microsoft.com/)
-[![Avalonia](https://img.shields.io/badge/Avalonia-12.1.4-8b44ac?style=flat-square)](https://avaloniaui.net/)
-[![TKCode.Arc](https://img.shields.io/badge/TKCode.Arc-1.0.0-e07a5f?style=flat-square)](https://github.com/AIDotNet/TKCode.Arc)
+[![Avalonia](https://img.shields.io/badge/Avalonia-12.1.5-8b44ac?style=flat-square)](https://avaloniaui.net/)
+[![TKCode.Arc](https://img.shields.io/badge/TKCode.Arc-1.1.0-e07a5f?style=flat-square)](https://github.com/AIDotNet/TKCode.Arc)
 [![build](https://github.com/zhanghaojie513/DougongDesktop/actions/workflows/build.yml/badge.svg)](https://github.com/zhanghaojie513/DougongDesktop/actions/workflows/build.yml)
 [![license](https://img.shields.io/badge/license-MIT-1f883d?style=flat-square)](LICENSE)
 
@@ -22,7 +22,7 @@
 ---
 
 > [!WARNING]
-> **早期开发中。** SDK 处于 `0.1.x-alpha`，TKCode.Arc 处于 `1.0.0`。
+> **早期开发中。** SDK 处于 `0.2.0-alpha`，TKCode.Arc 处于 `1.1.0`。
 > 签名与行为可能在任意提交中变更，不适合作为依赖。
 
 > [!NOTE]
@@ -144,7 +144,7 @@ UI 与 SDK 彻底解耦。
 逐项状态见 [docs/dsh-parity-progress.md](docs/dsh-parity-progress.md)，
 规格与出处见 [docs/dsh-parity-spec.md](docs/dsh-parity-spec.md)。
 
-**118 条检查全部通过**（架构守卫 88 条 + 无头 UI 30 条，两者都能用 `--break=<名字>` 反证变红）。
+**119 条检查全部通过**（架构守卫 89 条 + 无头 UI 30 条，两者都能用 `--break=<名字>` 反证变红）。
 从没红过的检查等于没有检查——所以 `scripts/all-checks.sh` 跑的不只是正向。
 
 <details>
@@ -168,7 +168,7 @@ UI 与 SDK 彻底解耦。
 | `ContextWindow` | 617×200 |
 | 深浅主题切换 | `IsDark` False→True |
 
-**结论**：Arc 包真的能用（当时的 `0.3.2-preview` 三包；现为 `1.0.0` 七个包）。
+**结论**：Arc 包真的能用（当时的 `0.3.2-preview` 三包；现为 `1.1.0` 八个包）。
 </details>
 
 ---

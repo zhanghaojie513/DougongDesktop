@@ -103,7 +103,10 @@ public static class CommandPaletteModule
 
         dialog.ItemsSource = items;
 
-        dialog.ItemSelected += (_, e) =>
+        // `ItemSelected` 在 Arc 1.1.0 弃用，替代者是 `ItemInvoked`。
+        // 弃用说明写的是"It is raised together with ItemInvoked"——
+        // 即两者同时触发，所以换掉不会让回调跑两次，也不会漏掉。
+        dialog.ItemInvoked += (_, e) =>
         {
             if (e.Item?.Id is { Length: > 0 } id) onRun(id);
         };

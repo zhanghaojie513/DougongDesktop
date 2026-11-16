@@ -1,14 +1,107 @@
-# TKCode.Arc 1.0.0 组件盘点
+# TKCode.Arc 组件盘点（当前 1.1.0）
 
-> **这份文档回答什么**：升到 1.0.0 之后，哪些组件能用、哪些正好补上我们的缺口、
+> **这份文档回答什么**：当前版本哪些组件能用、哪些正好补上我们的缺口、
 > 哪些看着有用但用不了。
 >
 > 数据来源：**按 DLL 元数据扫的**，不是照文档站猜的。
-> 2026-11-09 实测 `1.0.0` 全部 13 个包。
+> 文件名保留 `arc-1.0` 是历史原因（多处文档引用），内容跟版本走。
 
 ---
 
-## 一、升级结论：向后兼容，零删除
+## 〇、1.0.0 → 1.1.0（2026-11-16）
+
+### 版本约束变了：Avalonia 必须一起升
+
+| | 1.0.0 | 1.1.0 |
+|---|---|---|
+| Arc 的 Avalonia 依赖 | `[12.1.4]` **精确锁定** | `[12.1.5, 13.0.0)` **区间** |
+
+所以升级是**成对**的：`Avalonia 12.1.4 → 12.1.5` + 八个 Arc 包 `1.0.0 → 1.1.0`。
+只升一边会 NU1605。
+
+Spyglass 0.2.3 的 nuspec 写的是裸 `12.1.4`，NuGet 语义等于 `>= 12.1.4`，
+因此与 12.1.5 共存（实测 restore 通过，不是推断）。
+
+### 元数据 diff
+
+按公开类型与成员逐名比对（八个包）：
+
+| 包 | 公开类型 | 新增 | 删除 |
+|---|---|---|---|
+| `TKCode.Arc` | 1040 → 1184 | +144 | **0** |
+| `TKCode.Arc.Blocks` | 1277 → 1903 | +626 | **0** |
+| `TKCode.Arc.Special` | 1041 → 1296 | +255 | **0** |
+| `TKCode.Arc.Core` | 152 → 153 | +1 | **0** |
+| Dock / Workflow / Terminal / Icons.Lucide | 不变 | 0 | **0** |
+| **合计** | | **+1026** | **0** |
+
+另 **54 处类型成员有变，全部是纯增（`+n/-0`）**，没有一处删成员或改签名。
+
+> **踩到一个假阴性，值得记**：第一版 diff 报「新增 771 / 删除 0」。
+> 那是假的——`Special` 包引用同版本的 `TKCode.Arc.dll`，
+> 而导出器没拿到它，`GetExportedTypes` 整体失败，脚本把空表当"无变化"跳过，
+> 于是 Special 的 255 个新增全被漏掉，还差点被当成"AgentTimeline 被删了"。
+> 修法是给导出器传入**同版本兄弟包目录**，并把"导出为空"与"无变化"分开报错。
+> 教训：**工具报 0 变化时先证明它能报出非 0**。
+
+### 唯一的破坏性变更
+
+`CommandPaletteDialog.ItemSelected` 弃用 → 改用 `ItemInvoked`（CS0618，本项目按错误处理）。
+弃用说明写明两者会**同时触发**，所以换掉既不会漏调也不会重调。
+
+### 视觉回归：逐像素比对
+
+无头渲染 `MainWindow`（`Avalonia.Headless` + `UseSkia`，因本机 `-6661` 起不了真窗口），
+升级前后各截一张 1280×820：
+
+- 差异像素 **479 / 1,049,600 = 0.046%**
+- 差异区域只有 `(10,798)` 起 67×12 一块——状态栏的「已连接」vs「启动引擎…」
+- 其余**逐像素一致**（布局、配色、字体、间距全没动）
+
+### 终端缺陷：1.1.0 仍未修
+
+用同一份 7 行最小复现重测：
+
+```
+Version = 0.1.0-dev
+Create FAILED: NullReferenceException
+```
+
+和 0.4.0-preview.1、1.0.0 完全一样。**F1 继续卡着**（F2 渲染控件不受影响）。
+升级前先验这条是既定做法——不然升完发现还是坏的更浪费时间。
+
+### 1.1.0 新增里值得注意的
+
+| 组件 | 包 | 与本项目的关系 |
+|---|---|---|
+| `ToggleGroup` / `ToggleGroupItem` / `ToggleGroupOption` | Arc | 多个独立开关成组。设置页若有多选用途 |
+| `TreeSelect`（29 个属性） | Arc | 树形单选/多选下拉，带搜索保留路径 |
+| `RadioCard` / `RadioGroupItem` | Arc | 需要解释的选项卡片——权限预设可能更适合它 |
+| `Form` / `FormItem` | Arc | 表单容器 + 校验布局 |
+| `SplitBar` / `SplitBarSegment` | Arc | 占比条，可悬停读数字、图例开关 |
+| `Rating` / `RulerSlider` / `RangeHistogramSlider` | Arc | 装饰性/统计类，暂不需要 |
+| `PresenceStack` | Arc | 多人头像堆叠，本项目无多人场景 |
+| `BackToTop` | Arc | 回到顶部——会话滚动可以用，但我们已有自己的回到底部 |
+| `SlotText` / `MetricTicker` | Arc | 数字滚动动画，装饰性 |
+| `OnScreenKeyboard` | Arc | 触屏键盘，桌面端不需要 |
+| `RadialMenu` / `OrbitMenu` | Arc | 环形菜单，不符合 dsh 形态 |
+| `PageHeader`（新增 `IsTitleBar` / `IsHeaderOnly` / `Size`） | Blocks | **`IsTitleBar` 可能替代我们手搭的标题区** |
+| `SettingsRow`（新增 `Leading` / `Details`） | Blocks | **设置行现在支持前置图标 + 详情区**，C3 可用 |
+| `SettingsSection`（新增 `Value` / `BadgeTone`） | Blocks | 分区可带值摘要与徽章 |
+| `Sidebar`（新增 `SelectionChanged` / `ExpandedWidth` / 成员可见性） | Blocks | 选中事件是我们缺的；成员 `IsVisible` 可做筛选 |
+| `AgentTimeline`（17 个类型，**1.0.0 就有，不是新增**） | Special | D4 Trajectory 视图可用它——但需先验证可实例化 |
+| `AgentRun` / `AgentTasks` / `AgentApprovals` / `McpServers` | Blocks | 与 P8d 后台任务、MCP 场景相关，**偏 SaaS 模板形态**，需评估形状 |
+| `TypewriterTerminal` / `TypewriterTerminalLine` | Special | 打字机终端效果——dsh 的终端不是这个形态，不用 |
+| `ToolDock` / `ToolDockItem` | Special | 底部工具坞，dsh 没有这个交互 |
+| `EmojiPicker` / `KeycapKeyboard` / `ConfirmPopover` / `UndoToast` | Special | 通用小件，按需 |
+
+Blocks 新增的 626 个里绝大多数是整页营销/SaaS 模板
+（`InvoiceStudio`、`KnowledgeBase`、`SeatMap`、`BookingPill`、`SupportWidget` …），
+与桌面客户端形态不匹配，**不采用**。
+
+---
+
+## 一、0.4.0 → 1.0.0 那次的结论（历史，保留作方法参考）
 
 按 `public` 顶层类型逐名比对 `0.4.0-preview.1` → `1.0.0`：
 
@@ -22,7 +115,7 @@
 **四个包全部零删除**，所以不需要改任何现有代码。实测印证：
 升级后构建 0 警告 0 错误，91 条检查全过，界面截图与升级前逐像素一致。
 
-Avalonia 仍精确锁 `[12.1.4]`，无需调整。
+Avalonia 当时仍精确锁 `[12.1.4]`，无需调整（**1.1.0 起改为 12.1.5**，见 §〇）。
 
 > 口径限于**类型名**；成员签名未逐个比对。`TerminalView` 单独查过：
 > 只多出 `CachedRowCount` / `GlyphOverride` / `RowRunBuilds` 三个属性，无移除。
@@ -68,7 +161,7 @@ Avalonia 仍精确锁 `[12.1.4]`，无需调整。
 
 ---
 
-## 四、1.0.0 新增里真正值得用的
+## 四、1.0.0 新增里真正值得用的（历史）
 
 ### 4.1 `ArcWindow` + `TitleBar` —— 该替换我们的手写实现
 
@@ -146,7 +239,7 @@ Dock 多出拖拽区、关闭按钮、浮动窗口，交互路径变了，要先
 
 ---
 
-## 五、看着该修但**没修**的：终端
+## 五、看着该修但**没修**的：终端（1.1.0 复测仍坏，见 §〇）
 
 **1.0.0 没有修复 `TerminalCore.Create` 的崩溃。** 用同一份 7 行最小复现重测：
 
