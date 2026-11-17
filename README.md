@@ -144,7 +144,7 @@ UI 与 SDK 彻底解耦。
 逐项状态见 [docs/dsh-parity-progress.md](docs/dsh-parity-progress.md)，
 规格与出处见 [docs/dsh-parity-spec.md](docs/dsh-parity-spec.md)。
 
-**122 条检查全部通过**（架构守卫 90 条 + 无头 UI 32 条，两者都能用 `--break=<名字>` 反证变红）。
+**123 条检查全部通过**（架构守卫 91 条 + 无头 UI 32 条，两者都能用 `--break=<名字>` 反证变红）。
 从没红过的检查等于没有检查——所以 `scripts/all-checks.sh` 跑的不只是正向。
 
 <details>

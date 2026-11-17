@@ -510,7 +510,16 @@ public sealed class AppShell : UserControl
         stack.Children.Add(bottom);
         BottomBar = bottom;
 
-        var root = new Grid { Background = DshTheme.Brush(DshTheme.SidebarFill) };
+        // **根底是 bg-base（白），不是侧栏灰。**
+        //
+        // dsh 的 `.frame` 底色是 `--dsw-alias-bg-base`（AppFrame.module.css:8），
+        // 只有 Windows 标题栏形态才改成 `sidebar-fill`（同文件 32-37:
+        // `[data-windows-titlebar] .frame { background: var(--dsw-specific-sidebar-fill) }`）。
+        //
+        // 我们此前无条件用灰，于是灰底从侧栏一路铺到右栏——
+        // 中栏自己有白底盖住，结果就是"中栏死白、右边一大片灰"。
+        // 侧栏的灰由 SidebarView 自己画（它设了 SidebarFill），不需要根底兜。
+        var root = new Grid { Background = DshTheme.Brush(DshTheme.PageBackground) };
         root.Children.Add(stack);
 
         // 右栏分隔条：叠加在 stack 之上，位置由 ApplyColumns 更新。

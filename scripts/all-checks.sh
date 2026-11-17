@@ -119,6 +119,7 @@ checks="$checks cols-match-dsh-constants cols-sidebar-default-280 cols-rightbar-
 checks="$checks cols-rightbar-drops-before-center cols-rightbar-default-45pct"
 checks="$checks cols-responsive-breakpoints color-mix-matches-css"
 checks="$checks arc-and-avalonia-version-pair progress-table-matches-its-rows"
+checks="$checks frame-ground-is-page-not-sidebar"
 checks="$checks dsh-tokens-complete dsh-tokens-themes-differ titlebar-tokens-match-dsh"
 # P8g 中区会话域：期望值照 dsh 源码写，不是从我们的常量反推
 checks="$checks chat-follow-threshold-is-25 chat-bubble-width-is-two-sided"

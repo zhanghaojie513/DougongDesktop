@@ -42,6 +42,8 @@ internal static class ConversationChecks
             slug => TitlebarBranchesForMac(breakMode == slug));
         failures += Case("markdown-codeblock-uses-arc-defaults",
             slug => MarkdownCodeBlockUsesArcDefaults(breakMode == slug));
+        failures += Case("frame-ground-is-page-not-sidebar",
+            slug => FrameGroundIsPage(breakMode == slug));
 
         return failures;
     }
@@ -562,5 +564,43 @@ internal static class ConversationChecks
 
         Console.WriteLine($"FAIL  {name}: {error}");
         return 1;
+    }
+
+    /// <summary>
+    /// 根布局的底色必须是 <c>bg-base</c>（白），不是侧栏灰。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查防的是"一片灰"</b>：根 Grid 用侧栏灰时，灰会从中栏一路
+    /// 铺到右栏。中栏自己有白底盖住，于是视觉上是"中栏死白、右边一大片灰"——
+    /// 用户实际报的就是这个。
+    /// <para>
+    /// dsh 的依据：<c>AppFrame.module.css:8</c> 的 <c>.frame</c> 是
+    /// <c>background: var(--dsw-alias-bg-base)</c>，
+    /// 只有 Windows 标题栏形态（同文件 32-37）才换成 sidebar-fill。
+    /// macOS 上 frame 甚至是 <c>transparent</c>（透出 vibrancy），
+    /// 不透明降级后等价于 bg-base。
+    /// </para>
+    /// </remarks>
+    private static string? FrameGroundIsPage(bool inject)
+    {
+        var src = File.ReadAllText(Path.Combine(
+            RepoRoot, "src", "DougongDesktop.App", "Shell", "AppShell.cs"));
+
+        // 定位根 Grid：`var root = new Grid { Background = ... }`
+        var m = System.Text.RegularExpressions.Regex.Match(
+            src, @"var root = new Grid \{ Background = DshTheme\.Brush\(DshTheme\.(\w+)\) \}");
+
+        if (!m.Success)
+            return "找不到根 Grid 的 Background 赋值（AppShell 的 root 那行改了？）";
+
+        var token = m.Groups[1].Value;
+
+        // 反证：把期望翻成"必须是 SidebarFill"，若实现用的是 Page 就会失败
+        var expected = inject ? "SidebarFill" : "PageBackground";
+
+        return token == expected
+            ? null
+            : $"根 Grid 底色用了 {token}，应为 {expected}"
+              + "（用侧栏灰会让灰从中栏铺到右栏，dsh 的 .frame 是 bg-base）";
     }
 }
