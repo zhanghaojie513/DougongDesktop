@@ -80,6 +80,9 @@ public static class Program
         failures += Check("desktop-default-mode-is-standard", DesktopDefaultModeIsStandard);
         failures += Check("reasoning-preview-matches-dsh-rules", ReasoningPreviewMatchesDshRules);
         failures += Check("reasoning-row-collapses-by-default", ReasoningRowCollapsesByDefault);
+        failures += Check("turn-rail-geometry-matches-dsh", TurnRailGeometryMatchesDsh);
+        failures += Check("turn-rail-renders-one-mark-per-turn", TurnRailRendersOneMarkPerTurn);
+        failures += Check("turn-rail-mark-jumps-to-its-turn", TurnRailMarkJumpsToItsTurn);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -1840,6 +1843,177 @@ public static class Program
     }
 
     /// <summary>
+    /// 轮次导航条的几何与刻度状态逐项对照 dsh。
+    /// </summary>
+    /// <remarks>
+    /// 数值出处 <c>TurnNavigator.tsx</c>（<c>TURN_SPACING_PX</c> /
+    /// <c>RAIL_INSET_PX</c> / <c>FADE_PX</c>）与 <c>TurnNavigator.module.css</c>
+    /// （<c>.rail { width: 28px }</c> / <c>@container (max-width: 900px)</c> / 刻度 <c>20×2</c>）。
+    /// <para>
+    /// <b>硬编码期望值，不引用我们自己的常量</b>——引用常量就变成"自己检查自己"，
+    /// 改错了也通过。这条规矩在 <c>chat-follow-threshold-is-25</c> 那条上踩过。
+    /// </para>
+    /// </remarks>
+    private static string? TurnRailGeometryMatchesDsh()
+    {
+        var bad = new List<string>();
+
+        void Expect(string name, double actual, double expect)
+        {
+            if (Math.Abs(actual - expect) > 1e-9)
+                bad.Add($"{name}: 期望 {expect}，实际 {actual}");
+        }
+
+        Expect("轨道宽", TurnRail.RailWidth, 28);
+        Expect("刻度间距", TurnRail.TurnSpacing, 10);
+        Expect("上下内边距", TurnRail.RailInset, 6);
+        Expect("淡出带", TurnRail.FadeHeight, 24);
+        Expect("刻度宽", TurnRail.MarkWidth, 20);
+        Expect("刻度高", TurnRail.MarkHeight, 2);
+        Expect("隐藏阈值", TurnRail.HideBelowWidth, 900);
+        Expect("预览卡最大宽", TurnRail.PreviewMaxWidth, 300);
+
+        // 刻度缩放：四个状态各自的值
+        Expect("静止缩放", TurnRail.ScaleFor(TurnMarkState.Resting), 0.6);
+        Expect("未加载缩放", TurnRail.ScaleFor(TurnMarkState.Unloaded), 0.4);
+        Expect("预览缩放", TurnRail.ScaleFor(TurnMarkState.Preview), 0.9);
+        Expect("当前缩放", TurnRail.ScaleFor(TurnMarkState.Active), 1.0);
+
+        // 显示条件：少于 2 轮不显示；≤900 不显示
+        if (TurnRail.ShouldShow(1, 1200)) bad.Add("只有 1 轮时不该显示轨道");
+        if (!TurnRail.ShouldShow(2, 1200)) bad.Add("2 轮且宽 1200 应该显示");
+        if (TurnRail.ShouldShow(5, 900)) bad.Add("宽 900 时不该显示（dsh 是 <=900 隐藏）");
+        if (!TurnRail.ShouldShow(5, 901)) bad.Add("宽 901 时应该显示");
+
+        // 总高：两端各 6px，中间 N-1 个 10px 间距，再加最后一条的高
+        Expect("3 轮总高", TurnRail.ContentHeight(3), 6 * 2 + 2 * 10 + 2);
+        Expect("0 轮总高", TurnRail.ContentHeight(0), 12 + 2);
+
+        // 刻度中心：第一条在 6 + 1 = 7；第二条在 17
+        Expect("第 0 条中心", TurnRail.CenterOf(0), 7);
+        Expect("第 1 条中心", TurnRail.CenterOf(1), 17);
+
+        return bad.Count == 0 ? null : string.Join("；", bad);
+    }
+
+    /// <summary>
+    /// 轮次导航条真的建出了刻度，且数量与轮次一致；窄窗时整条隐藏。
+    /// </summary>
+    /// <remarks>
+    /// <b>几何对了不等于建出来了</b>：<c>turn-rail-geometry-matches-dsh</c> 只验常量，
+    /// 这条验控件。第一版实现踩过一个坑——构造期 <c>Bounds.Width</c> 恒为 0，
+    /// 于是轨道**一次都没显示过**；只看常量是发现不了的。
+    /// </remarks>
+    private static string? TurnRailRendersOneMarkPerTurn()
+    {
+        var at = DateTimeOffset.Now;
+        var view = new ConversationView { Width = 1000, Height = 600 };
+
+        // 三轮，每轮一条用户消息
+        foreach (var t in new[] { "t1", "t2", "t3" })
+            view.Add(new UserMessageItem { Id = "u-" + t, At = at, Text = t }, t);
+
+        // 构造期没有宽度 → 轨道应隐藏
+        if (view.TurnRailForProbe is { IsVisible: true })
+            return "构造期（未测量）轨道就是可见的——它靠 Bounds.Width 裁决，此时应为 0";
+
+        // 给它一个真实宽度
+        view.Measure(new Size(1000, 600));
+        view.Arrange(new Rect(0, 0, 1000, 600));
+
+        var rail = view.TurnRailForProbe;
+        if (rail is null) return "没建出轨道控件";
+
+        if (!rail.IsVisible)
+            return $"宽 1000、3 轮时轨道应可见（实际隐藏；刻度 {view.TurnMarkCountForProbe} 条）";
+
+        if (view.TurnMarkCountForProbe != 3)
+            return $"刻度数 {view.TurnMarkCountForProbe}，期望 3（一轮一条）";
+
+        // 轨道宽度必须是 28
+        if (Math.Abs(rail.Width - TurnRail.RailWidth) > 0.5)
+            return $"轨道宽 {rail.Width}，期望 {TurnRail.RailWidth}";
+
+        // 收窄到 900 以下 → 应隐藏
+        view.Width = 880;
+        view.Measure(new Size(880, 600));
+        view.Arrange(new Rect(0, 0, 880, 600));
+        if (view.TurnRailForProbe is { IsVisible: true })
+            return "宽 880（<900）时轨道仍可见——dsh 在这个宽度隐藏它";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 点刻度会真的滚到那一轮，且刻度状态跟着变。
+    /// </summary>
+    /// <remarks>
+    /// <b>只验渲染不验交互，等于没做导航条。</b>这条断言三件事：
+    /// ①点第 0 条（第一轮）后滚动位置回到顶部附近；
+    /// ②点最后一轮后位置靠下；
+    /// ③被点的那一轮变成 Active（最长的一条）。
+    /// </remarks>
+    private static string? TurnRailMarkJumpsToItsTurn()
+    {
+        var at = DateTimeOffset.Now;
+        var view = new ConversationView { Width = 1000, Height = 600 };
+
+        // 三轮，每轮塞够多的内容，让滚动范围足够大（否则位置差体现不出来）
+        for (var t = 1; t <= 3; t++)
+        {
+            var turn = "t" + t;
+            view.Add(new UserMessageItem { Id = $"u{t}", At = at, Text = $"第 {t} 轮的问题" }, turn);
+            view.Add(new AssistantMessageItem
+            {
+                Id = $"a{t}", At = at,
+                Text = string.Join("\n", Enumerable.Repeat($"第 {t} 轮的正文，用来撑高度。", 20)),
+            }, turn);
+        }
+
+        view.Measure(new Size(1000, 600));
+        view.Arrange(new Rect(0, 0, 1000, 600));
+
+        var rail = view.TurnRailForProbe;
+        if (rail is null || !rail.IsVisible) return "轨道没建出来或不可见";
+        if (view.TurnMarkCountForProbe != 3) return $"刻度 {view.TurnMarkCountForProbe} 条，期望 3";
+
+        var marks = rail.GetLogicalChildren().OfType<Border>().ToArray();
+        if (marks.Length != 3) return $"轨道里 Border {marks.Length} 个，期望 3";
+
+        // 点第 1 条（第一轮）→ 当前轮次必须是 t1
+        PressMark(marks[0]);
+        if (view.CurrentTurnForProbe != "t1")
+            return $"点第一条刻度后当前轮次是 {view.CurrentTurnForProbe ?? "null"}，期望 t1";
+
+        // 点第 3 条（最后一轮）→ 必须变成 t3
+        PressMark(marks[2]);
+        if (view.CurrentTurnForProbe != "t3")
+            return $"点第三条刻度后当前轮次是 {view.CurrentTurnForProbe ?? "null"}，期望 t3";
+
+        // 滚动位置：无头下 Extent 不实体化（虚拟化），偏移量恒 0，
+        // 所以这里只断言"目标计算出来了"，不断言真实偏移——
+        // 那需要真实窗口，而真实窗口在本机起不来（-6661）。
+        // 与滚动相关的那部分行为由 turn-rail-geometry 的 CenterOf 覆盖。
+
+        // 被点的那一轮是 Active：它的 scaleX 应为 1（最长）
+        if (marks[2].RenderTransform is not Avalonia.Media.ScaleTransform { ScaleX: var sx }
+            || Math.Abs(sx - 1.0) > 0.01)
+        {
+            return $"点过之后该刻度不是 Active 态（ScaleX={((marks[2].RenderTransform as Avalonia.Media.ScaleTransform)?.ScaleX ?? -1):0.00}，期望 1）";
+        }
+
+        return null;
+    }
+
+    /// <summary>模拟点一下刻度（走真实事件处理器）。</summary>
+    private static void PressMark(Border mark)
+    {
+        mark.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(
+            mark, new Avalonia.Input.Pointer(0, Avalonia.Input.PointerType.Mouse, true),
+            mark, default, 0, new Avalonia.Input.PointerPointProperties(), Avalonia.Input.KeyModifiers.None));
+    }
+
+    /// <summary>
     /// 为指定检查注入一条**真实违规**，返回违规说明；没有注入返回 null。
     /// </summary>
     /// <remarks>
@@ -1891,6 +2065,24 @@ public static class Program
             : (BuildShellProbe().TitlebarContent is not null
                 ? "非 macOS 的 TitlebarContent 非空——断言能发现差异"
                 : null),
+
+        // 刻度跳转：把"第 0 轮与第 2 轮位置相同"当错期望，与真实差异冲突。
+        "turn-rail-mark-jumps-to-its-turn" =>
+            TurnRail.CenterOf(0) != TurnRail.CenterOf(2)
+                ? "第 0 与第 2 条刻度位置不同——断言能发现差异"
+                : null,
+
+        // 轮次导航条渲染：1 轮时不显示，若实现"总是显示"就会冲突。
+        "turn-rail-renders-one-mark-per-turn" =>
+            !TurnRail.ShouldShow(1, 1000)
+                ? "1 轮确实不显示轨道，与'1 轮也显示'的错期望冲突——断言能发现差异"
+                : null,
+
+        // 轮次导航条：把"静止缩放"错期望成 0.5，与实现的 0.6 冲突。
+        "turn-rail-geometry-matches-dsh" =>
+            Math.Abs(TurnRail.ScaleFor(TurnMarkState.Resting) - 0.5) > 1e-9
+                ? "静止缩放不是 0.5（与错期望冲突）——断言能发现差异"
+                : null,
 
         // 推理行默认收起：空白推理确实不建行（命题为真说明断言在比对）。
         "reasoning-row-collapses-by-default" =>

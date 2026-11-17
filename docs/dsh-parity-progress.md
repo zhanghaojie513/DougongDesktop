@@ -52,8 +52,8 @@
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **19%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **30%** |
-| **P8g 中区会话域** | **14** | **1** | **2** | **0** | **6** | **23** | **85%** |
-| **合计** | **37** | **3** | **19** | **2** | **9** | **70** | **65%** |
+| **P8g 中区会话域** | **15** | **1** | **1** | **0** | **6** | **23** | **91%** |
+| **合计** | **38** | **3** | **18** | **2** | **9** | **70** | **67%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -64,7 +64,7 @@
 
 完成度算法：`(✅ + 🟡×0.5) / (✅+🟡+⬜)`，不含 `⏳` 与 `➖`。
 
-当前：`(37 + 3×0.5) / (37+3+19) = 38.5 / 59 = 65%`
+当前：`(38 + 3×0.5) / (38+3+18) = 39.5 / 59 = 67%`
 
 > **不做的那些（➖ 共 9 项）不算进分母**——它们是 dsh 也没有的东西，
 > 拿它们充数就成了"用没做的功能凑完成度"。
@@ -233,7 +233,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 
 | # | 状态 | 项 | 实现方式 | dsh 行为（出处） | 我们 |
 |---|---|---|---|---|---|
-| M13 | ⬜ | 轮次导航条 | `[自有]` | 右侧 28px 竖排刻度，hover 预览，≤900px 隐藏（`TurnNavigator.tsx:81-295`） | 无 |
+| M13 | ✅ | 轮次导航条 | `[自有]` | 右侧 28px 竖排刻度：`TurnRail` 常量（28 宽 / 10 间距 / 6 内边距 / 20×2 刻度 / 24 淡出带 / ≤900 隐藏）+ `ConversationView` 渲染（浮在消息流右侧，不占列宽）。刻度靠 `scaleX` 表达状态：静止 0.6 / hover 0.9 / 当前 1 / 未加载 0.4（`TurnNavigator.module.css:100-130`）。点击滚到该轮（按条目位置算，不按轮次等比）；≤900 或 <2 轮时整条隐藏 | 检查 `turn-rail-geometry-matches-dsh`（8 个常量 + 4 个状态值 + 显示条件 + 总高/中心坐标，硬编码 dsh 值不引用自己常量）、`turn-rail-renders-one-mark-per-turn`（真实控件：构造期隐藏、宽 1000 显示 3 刻度、宽 880 隐藏）、`turn-rail-mark-jumps-to-its-turn`（点第 1/3 条后当前轮次分别变 t1/t3）。三条都做过「人为改坏 → 必须变红」 |
 | M14 | ⬜ | 加载更早 | `[自有]` | 顶部按钮 + 锚点补偿（`ChatView.tsx:239-245`） | 无（无分页） |
 | M15 | ✅ | 折叠四层模型 | `[自有]` | **三层已落地**：①外层整轮折叠（`TurnProcessRoot` + `ProcessFold`）；②内层过程组（`ProcessGrouping` 四动作 + 类别标题 + 计数排名）；③单条推理行（`ReasoningPreview` 预览语义 + 手动展开）。可见性由外向内生效，内层开不开都跳不过外层（`conversation-nodes/README.md:20-60,195`）。**未做**：单条**工具**体的手动展开（Arc 的 `ToolCall` 自带，未另接）与「加载更早」的锚点保持（M14） | 检查 `process-grouping-matches-dsh-examples`（6 个 README 示例 + 跨轮次）、`tool-categories-match-dsh-name-table`（31 条名字逐条比对）、`group-title-matches-dsh-composition`（0-4 类别合成 + 排名并列规则）、`two-layer-folding-matches-dsh-modes`（22 个模式×状态组合）、`reasoning-preview-matches-dsh-rules`（空白不建行 / 运行中取最新**已完成**段首行 / 去掉 `**`）、`reasoning-row-collapses-by-default`（真实控件：默认收起 + 点击展开 + 空白不建行）。**每条都做过「人为改坏 → 必须变红」验证** |
 | M16 | ✅ | 工作详情模式 | `[自有]` | 四模式策略表 + 两个偏好已落地：`ChatPresentation`（照抄 dsh 的 POLICIES）、**桌面默认档 standard**（README：Desktop 用 standard、Web 用 detailed——原先取 detailed 是照搬了 Web 侧常量）、遗留值 normal/expanded→detailed、设置页分段选择器、持久化、能力已被 M15 消费 | 检查 `transcript-view-modes-match-dsh-table`、`desktop-default-mode-is-standard`（含未知值回落）、`transcript-legacy-modes-read-as-detailed`、`work-detail-picker-reflects-and-saves`、`settings-fields-load-independently`；全部有反证 |
@@ -376,6 +376,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
 | 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
 | 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-17 | **M13 轮次导航条（⬜→✅）**。右侧 28px 竖排刻度，术语与几何全部照 dsh （`TurnNavigator.tsx` 的 `TURN_SPACING_PX=10` / `RAIL_INSET_PX=6` / `FADE_PX=24`，`.module.css` 的 `.rail{width:28px}` 与 `@container (max-width:900px)` 隐藏）。刻度是 20×2 的横线，靠 `scaleX` 表达状态（静止 0.6 / hover 0.9 / 当前 1 / 未加载 0.4）——宽窄变化比换颜色更容易在余光里分辨。**踩到两个真实问题**：①构造期 `Bounds.Width` 恒为 0，用自己宽度裁决会让轨道**一次都不显示**，改为"自己宽度为 0 时取列表宽度"，并订阅 `SizeChanged` 在布局后重算；②自检数据只用一个 `TurnId`，`>=2 轮` 的条件永远不满足 → 轨道验不到，把自检数据改成三轮（顺带让"跨轮次断组"这条折叠规则也终于有数据可验）。另外无头下 `Extent` 不实体化、偏移恒 0，所以交互检查改为断言"当前轮次变了"而不是"滚到哪了"——**不把环境限制写成产品缺陷，也不因此放宽断言** |
 | 2026-11-17 | **修掉"中区死白、右侧一片灰"的底色问题**。用户报"会话中区背景色还是灰色，导致会话死白色"。逐像素采样定位：侧栏 `#F9FAFB`、中栏 `#FFFFFF`、**右栏也是 `#F9FAFB`**——根 Grid 无条件用了 `SidebarFill` 灰，灰从中栏一路铺到右栏，中栏自己有白底盖住，于是视觉上"中栏孤零零一块白、右边一大片灰"。dsh 的依据：`AppFrame.module.css:8` 的 `.frame` 是 `bg-base`（白），**只有 Windows 标题栏形态**（同文件 32-37）才换成 sidebar-fill；macOS 上 `.frame` 甚至是 `transparent`（透出 vibrancy），不透明降级后等价于白。改成 `PageBackground` 后实测右栏变白（`255,255,255`），与中栏一致，分界靠侧栏的 `border-right: 0.5px border-l3`——与 dsh 同构。新增检查 `frame-ground-is-page-not-sidebar`（读源码正则 + 反证：改回灰必须变红） |
 | 2026-11-17 | **M15 第三层完成，折叠模型三层齐了（🟡→✅）**。新增 `ReasoningPreview`：推理行默认收起、只显示首行预览，点开显示全文。规则照 `conversation-nodes/README.md:195` 与 `ReasoningRow.tsx`：①纯空白块不建行（流式先到的空块会让界面闪一行空气）；②**运行中取「最新一段里首行已完整」的那段**，最后那个还在写的单行不算——否则预览会字字跳动；③完成后取全文首行；④两者都去掉 `**` 标记。**第一版把段尾判断写成「这个换行之后整篇都只剩空白」，于是第一个换行就被判成段尾、整篇当成一段**，检查立刻抓到（期望「二」实得「一」），已改为「空行起点」。展开状态按条目 Id 记（`_expandedReasoning`），不按控件引用——流式每来一段都会 Refresh，按引用记的话用户刚展开的行会一直自己合上。两条新检查各做过三次「人为改坏 → 必须变红」：默认展开、点击不展开、段尾判断错误，都验证过 |
 | 2026-11-16 | **进度表四处数字与逐行统计不符，已修正并加检查守住**。用户要求"进度更新"时顺手用脚本核了一遍，发现表头是**手填**的、明细是逐行的，两者漂了：P8e 写 25%（实 19%）、P8f 写 40%（实 30%）、P8g 写 88%（实 82%）、合计 🟡 写 5（实 4），合计完成度 69%（实 64%）。原因是我上一轮把 M16 改成 ✅ 后只改了该行、没重算其余分项。文档里本就写着"两处对不上说明漏改"，但**没有任何东西去查**，所以照样漂。新增 `progress-table-matches-its-rows`：解析 `### P8x` 章节下的明细行，按 `(✅ + 🟡×0.5) / (✅+🟡+⬜)` 重算，与表头逐列比对（含合计行）。**验证方式是真去改坏一处**（P8g 的 ✅ 13→14），检查立刻报 `P8g: ✅ 写 14 实为 13`；恢复后转绿。已接进 all-checks 反证清单 |

@@ -72,6 +72,14 @@ public static class DshTheme
         ? DshTokens.Dark.DswAliasLabelSecondary
         : DshTokens.Light.DswAliasLabelSecondary;
 
+    /// <summary>第三级文字（比次级更弱：占位、辅助刻度）。</summary>
+    /// <remarks>
+    /// 轮次导航条的 hover 预览刻度用它（dsh 的 <c>.markPreview::before</c>）。
+    /// </remarks>
+    public static Color LabelTertiary => IsDark
+        ? DshTokens.Dark.DswAliasLabelTertiary
+        : DshTokens.Light.DswAliasLabelTertiary;
+
     /// <summary>第三级描边（侧栏与主区的分隔线用它）。</summary>
     public static Color BorderL3 => IsDark
         ? DshTokens.Dark.DswAliasBorderL3

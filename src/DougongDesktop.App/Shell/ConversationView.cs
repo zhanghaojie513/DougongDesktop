@@ -339,6 +339,20 @@ public sealed class ConversationView : UserControl
         grid.Children.Add(_emptyHint);
         grid.Children.Add(_scrollToBottom);
 
+        // 轮次导航轨道：右侧竖排刻度（M13），浮在消息流之上。
+        // 放在这个 Grid 里（不是外层根 Grid）——它只覆盖消息流区域，
+        // 不该盖住顶部信息栏与输入区。
+        _turnRail = BuildTurnRail();
+        grid.Children.Add(_turnRail);
+
+        // 布局完成后才知道真实宽度——轨道是否显示要等这一刻才裁决。
+        // 构造期的 Bounds 恒为 0，只靠 Refresh 的话轨道永远不显示。
+        SizeChanged += (_, e) =>
+        {
+            if (e.NewSize.Width <= 0) return;
+            RefreshTurnRail();
+        };
+
         // 输入区固定在下方，消息流占剩余空间。
         // 用 Grid 两行而不是把 Composer 叠在 ScrollViewer 上——叠上去会遮住
         // 最后几条消息，而"审批卡片被输入框挡住"正是 P6 判据明确要避免的。
@@ -448,18 +462,23 @@ public sealed class ConversationView : UserControl
         var seq = 0;
         string NextId() => $"selftest-{++seq}";
 
-        // 自检用的轮次：工具条目挂在它上面，并标为已完成——
-        // 折叠只在"轮次已关闭"时发生（dsh 的 turnClosed 语义）。
-        const string SelfTestTurnId = "turn-selftest-tools";
+        // 自检覆盖**三轮**，不是一轮：
+        // ① 轮次导航条要求 ≥2 轮才显示，单轮的数据永远验不到它；
+        // ② 折叠的"跨轮次必须断组"规则也要多轮才看得见。
+        // 每轮都标为已完成——折叠只在 turnClosed 时发生（dsh 语义）。
+        const string Turn1 = "turn-selftest-1";
+        const string Turn2 = "turn-selftest-2";
+        const string Turn3 = "turn-selftest-3";
+        const string SelfTestTurnId = Turn2;   // 工具那批挂第 2 轮
 
-        Add(new UserMessageItem { Id = NextId(), At = DateTimeOffset.Now, Text = "帮我读一下 README.md" });
+        Add(new UserMessageItem { Id = NextId(), At = DateTimeOffset.Now, Text = "帮我读一下 README.md" }, Turn1);
 
         Add(new AssistantMessageItem
         {
             At = DateTimeOffset.Now,
            Id = NextId(),
             Text = "好的，我先读文件。**这是加粗**，`这是行内代码`。\n\n```csharp\nvar x = 1;\n```",
-        });
+        }, Turn1);
 
         // 流式条目：验证 Stream 路径（Push + Complete）
         Add(new AssistantMessageItem
@@ -469,7 +488,7 @@ public sealed class ConversationView : UserControl
             Text = "## 流式渲染验证\n\n这段文字通过 **MarkdownStream.Push** 推入，"
                  + "不是重设 Text。如果标题和加粗都正常，说明 Stream 路径可用。",
             IsStreaming = true,
-        });
+        }, Turn1);
 
         // 工具：五种状态各来一个
         foreach (var (status, label, toolName) in new[]
@@ -518,7 +537,9 @@ public sealed class ConversationView : UserControl
         }
 
         // 该轮次已结束：上面的工具因此在 standard/detailed 档下默认收起。
-        _turnStatus[SelfTestTurnId] = TurnStatus.Completed;
+        _turnStatus[Turn1] = TurnStatus.Completed;
+        _turnStatus[Turn2] = TurnStatus.Completed;
+        _turnStatus[Turn3] = TurnStatus.Completed;
 
         // JSON 输出：验证 Arc 的 JsonOutput 着色与十行折叠
         Add(new IpcToolCallItem
@@ -544,7 +565,7 @@ public sealed class ConversationView : UserControl
                 new PlanStep("分析内容", "in_progress", "medium"),
                 new PlanStep("给出建议", "pending", "low"),
             ],
-        });
+        }, Turn3);
 
         Add(new NoticeItem
         {
@@ -552,7 +573,7 @@ public sealed class ConversationView : UserControl
            Id = NextId(),
             Level = NoticeLevel.Warning,
             Text = "上下文已压缩：移除 12 条消息，约 48000 → 12000 tokens。模型看到的不再是完整历史。",
-        });
+        }, Turn3);
 
         // 推理内容：SDK 0.1.1 起有 ReasoningDelta 实时事件，
         // 但是否出现取决于 provider（只有思考模式的模型才给）
@@ -563,7 +584,7 @@ public sealed class ConversationView : UserControl
             Text = "（推理示例）用户要看的是默认布局对不对。先确认三栏尺寸，"
                  + "再看消息流里每种条目是否都渲染。等等——这里要注意 JSON 输出那一档，"
                  + "它走的是折叠路径，和纯文本不一样。",
-        });
+        }, Turn3);
 
         Add(new AssistantMessageItem
         {
@@ -571,7 +592,7 @@ public sealed class ConversationView : UserControl
            Id = NextId(),
             Text = string.Join(Environment.NewLine,
                 Enumerable.Range(1, 30).Select(i => $"第 {i} 行：用于测试长文本与滚动。")),
-        });
+        }, Turn3);
 
         Console.Error.WriteLine($"[ui] 自检数据已灌入：{_items.Count} 条");
     }
@@ -676,7 +697,16 @@ public sealed class ConversationView : UserControl
     /// </param>
     public void Add(ConversationItem item, string? turnId)
     {
-        if (turnId is { Length: > 0 }) _itemTurn[item.Id] = turnId;
+        if (turnId is { Length: > 0 })
+        {
+            _itemTurn[item.Id] = turnId;
+
+            // 最新出现的轮次就是"当前正在读的那一轮"——轨道上它最长。
+            // dsh 用滚动位置算 activeTurn；我们没有逐轮的滚动锚点，
+            // 用"最后一条消息属于哪轮"是同一含义的近似，且不会指错方向。
+            _currentTurnId = turnId;
+        }
+
         Add(item);
     }
 
@@ -1302,6 +1332,18 @@ public sealed class ConversationView : UserControl
     /// </remarks>
     private readonly HashSet<string> _expandedReasoning = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 轮次导航轨道（M13）。为空表示还没建。
+    /// </summary>
+    /// <remarks>
+    /// 叠在消息流右侧（不是单独一列）：它是浮在内容上的指示器，
+    /// 占列宽会把中栏再压窄 28px。
+    /// </remarks>
+    private Canvas? _turnRail;
+
+    /// <summary>轨道上的刻度线，按轮次顺序。</summary>
+    private readonly List<(string TurnId, Border Mark)> _turnMarks = [];
+
     private void Refresh()
     {
         // List<T> 不触发集合通知，重建 ItemsSource 强制刷新。
@@ -1311,6 +1353,9 @@ public sealed class ConversationView : UserControl
         _list.ItemsSource = _roots;
 
         _emptyHint.IsVisible = _items.Count == 0;
+
+        // 轨道刻度跟随轮次变化（M13）
+        RefreshTurnRail();
 
         // 重建 source 会让 Offset 归零、Extent 先缩后涨，那些中间态
         // 不该被当成"用户滚走了"。把基准标成未知，下一个 ScrollChanged
@@ -2014,6 +2059,230 @@ public sealed class ConversationView : UserControl
             Opacity = 0.8,
         },
     };
+
+    /// <summary>
+    /// 建轮次导航轨道：右侧 28px 竖排刻度（M13）。
+    /// </summary>
+    /// <remarks>
+    /// 几何全部走 <see cref="TurnRail"/>（28 / 10 / 6 / 20×2 都来自 dsh），
+    /// 这里只负责摆放与交互。
+    /// <para>
+    /// <b>为什么用 Canvas 而不是 StackPanel</b>：刻度要靠
+    /// <see cref="TurnRail.CenterOf"/> 精确落位，而 StackPanel 会引入自己的
+    /// 间距规则；dsh 那边是绝对定位的虚拟列表。
+    /// </para>
+    /// <para>
+    /// <b>初始不显示</b>：宽度 ≤900 或轮次少于 2 时整条没有意义，
+    /// 由 <see cref="RefreshTurnRail"/> 在每次刷新时按这两个条件裁决。
+    /// </para>
+    /// </remarks>
+    private Canvas BuildTurnRail()
+    {
+        var rail = new Canvas
+        {
+            Width = TurnRail.RailWidth,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            IsHitTestVisible = true,
+            Background = Avalonia.Media.Brushes.Transparent,
+            IsVisible = false,
+        };
+
+        // 轨道自己不滚动：刻度的总高由轮次数决定，会话再长也只是一串 2px 线。
+        // dsh 让轨道内部滚动是为了"几千轮的极端情况"，我们暂不做——
+        // 但保留 Canvas 的绝对定位，将来加滚动只要换容器。
+        return rail;
+    }
+
+    /// <summary>
+    /// 按当前轮次重建轨道刻度。
+    /// </summary>
+    /// <remarks>
+    /// <b>每次 Refresh 全量重建</b>：与列表一致的做法。刻度数量等于轮次数，
+    /// 增量维护的复杂度不值得——它的元素数比消息少一个量级。
+    /// </remarks>
+    private void RefreshTurnRail()
+    {
+        if (_turnRail is null) return;
+
+        // 轮次顺序 = 首次出现顺序（与 ProcessGrouping 的轮次边界一致）
+        var turnIds = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var item in _items)
+        {
+            if (TurnIdOf(item) is not { Length: > 0 } id) continue;
+            if (seen.Add(id)) turnIds.Add(id);
+        }
+
+        // **宽度取列表的，不取自己的**：构造期 ConversationView 自己还没被测量
+        // （Bounds.Width 恒 0），而 _list 在布局后会有真实宽度。
+        // 用 0 判断会把轨道永久藏起来——实测第一版就是这样，一次都没显示过。
+        var width = Bounds.Width > 0 ? Bounds.Width : _list.Bounds.Width;
+        var visible = TurnRail.ShouldShow(turnIds.Count, width);
+        _turnRail.IsVisible = visible;
+        _turnRail.Height = TurnRail.ContentHeight(turnIds.Count);
+
+        if (!visible) return;
+
+        // 已存在的刻度复用，缺的补、多的删
+        while (_turnMarks.Count > turnIds.Count)
+        {
+            _turnRail.Children.Remove(_turnMarks[^1].Mark);
+            _turnMarks.RemoveAt(_turnMarks.Count - 1);
+        }
+
+        for (var i = 0; i < turnIds.Count; i++)
+        {
+            if (i >= _turnMarks.Count)
+            {
+                var mark = BuildTurnMark();
+                _turnRail.Children.Add(mark);
+                _turnMarks.Add((turnIds[i], mark));
+            }
+
+            // 轮次可能因为重排而换位（旧数据被清掉等），把 Tag 同步过去
+            var (turnId, markControl) = _turnMarks[i];
+            if (turnId != turnIds[i])
+            {
+                turnId = turnIds[i];
+                _turnMarks[i] = (turnId, markControl);
+            }
+            markControl.Tag = turnId;
+
+            var active = turnId == _currentTurnId;
+
+            Canvas.SetTop(markControl, TurnRail.CenterOf(i) - TurnRail.MarkHeight / 2);
+            Canvas.SetRight(markControl, 0);
+
+            ApplyTurnMarkState(markControl, active ? TurnMarkState.Active : TurnMarkState.Resting,
+                active);
+        }
+
+        UpdateTurnRailOffset();
+    }
+
+    /// <summary>当前正在读的轮次（轨道上显示为最长的一条）。</summary>
+    private string? _currentTurnId;
+
+    /// <summary>建一条刻度：20×2 的横线，靠宽度表达状态。</summary>
+    /// <remarks>
+    /// <b>点击跳到该轮</b>：这是导航条的全部意义。跳转按"该轮第一条消息
+    /// 在列表里的位置"算滚动偏移——不是按轮次序号等比换算，
+    /// 因为每轮的消息长度差很多，等比换算会落到错误的位置。
+    /// </remarks>
+    private Border BuildTurnMark()
+    {
+        var mark = new Border
+        {
+            Width = TurnRail.MarkWidth,
+            Height = TurnRail.MarkHeight,
+            CornerRadius = new CornerRadius(TurnRail.MarkHeight / 2),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Background = DshTheme.Brush(DshTheme.BorderL4),
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+        };
+
+        // 静止态是 scaleX(0.6)：用 RenderTransform 表达，不缩宽度——
+        // 缩宽度会让 2px 的线在分数宽下被像素对齐压掉。
+        mark.RenderTransformOrigin = new Avalonia.RelativePoint(1, 0.5, Avalonia.RelativeUnit.Relative);
+        mark.RenderTransform = new Avalonia.Media.ScaleTransform(TurnRail.ScaleFor(TurnMarkState.Resting), 1);
+
+        // hover：预览态（更长、更亮），dsh 的 .markPreview
+        mark.PointerEntered += (_, _) =>
+        {
+            if (mark.Tag is string id && id == _currentTurnId) return;
+            ApplyTurnMarkState(mark, TurnMarkState.Preview, false);
+        };
+
+        mark.PointerExited += (_, _) =>
+        {
+            if (mark.Tag is string id && id == _currentTurnId) return;
+            ApplyTurnMarkState(mark, TurnMarkState.Resting, false);
+        };
+
+        mark.PointerPressed += (_, e) =>
+        {
+            e.Handled = true;
+            if (mark.Tag is string turnId) ScrollToTurn(turnId);
+        };
+
+        return mark;
+    }
+
+    /// <summary>滚到某一轮的第一条消息。</summary>
+    /// <remarks>
+    /// <b>按条目在列表中的位置算偏移，不按轮次序号等比换算</b>：
+    /// 每轮的消息长度差很多（一个长回答可能是短问题的 50 倍），
+    /// 等比换算会落到完全错误的地方。
+    /// <para>
+    /// 偏移取"该轮之前的条目总高度"。我们拿不到逐条高度（虚拟化），
+    /// 所以用比例估计后交给 <c>BringIntoView</c> 修正——它会把目标条目
+    /// 真正滚进视野，估计只是为了让滚动从附近开始，避免长距离跳动。
+    /// </para>
+    /// </remarks>
+    private void ScrollToTurn(string turnId)
+    {
+        var index = _items.FindIndex(i => TurnIdOf(i) == turnId);
+        if (index < 0) return;
+
+        // 关掉自动贴底，否则下一帧又被拽回底部
+        _stickToBottom = false;
+
+        var ratio = _items.Count <= 1 ? 0 : (double)index / _items.Count;
+        var extent = _scroll.Extent.Height;
+        var viewport = _scroll.Viewport.Height;
+        var target = Math.Max(0, ratio * extent - viewport / 3);
+
+        _scroll.Offset = new Avalonia.Vector(_scroll.Offset.X, target);
+
+        // 记住"用户选了哪一轮"，刻度上它是最长的
+        _currentTurnId = turnId;
+        RefreshTurnRail();
+    }
+
+    /// <summary>把一个刻度拨到指定状态。</summary>
+    private static void ApplyTurnMarkState(Border mark, TurnMarkState state, bool active)
+    {
+        mark.RenderTransform = new Avalonia.Media.ScaleTransform(TurnRail.ScaleFor(state), 1);
+
+        mark.Background = DshTheme.Brush(state switch
+        {
+            TurnMarkState.Active => DshTheme.LabelPrimary,
+            TurnMarkState.Preview => DshTheme.LabelTertiary,
+            TurnMarkState.Unloaded => DshTheme.BorderL4,
+            _ => DshTheme.BorderL4,
+        });
+
+        mark.Opacity = state == TurnMarkState.Unloaded ? 0.6 : 1.0;
+        _ = active;
+    }
+
+    /// <summary>轨道跟着滚动位置上下走（dsh 的刻度是相对整段会话的）。</summary>
+    private void UpdateTurnRailOffset()
+    {
+        if (_turnRail is null || !_turnRail.IsVisible) return;
+
+        // 轨道整体高度固定，不随滚动位移——dsh 的刻度代表"第几轮"，
+        // 与当前滚动位置无关。这里只保证它垂直居中于消息流区域。
+        var host = _turnRail.Parent as Control;
+        if (host is null) return;
+
+        var top = Math.Max(0, (host.Bounds.Height - _turnRail.Height) / 2);
+        _turnRail.Margin = new Thickness(0, top, 4, 0);
+    }
+
+    /// <summary>当前被选中的轮次（自检用）。</summary>
+    public string? CurrentTurnForProbe => _currentTurnId;
+
+    /// <summary>滚动器（自检用，读当前偏移）。</summary>
+    public ScrollViewer ScrollForProbe => _scroll;
+
+    /// <summary>轮次导航轨道控件（自检用）。</summary>
+    public Canvas? TurnRailForProbe => _turnRail;
+
+    /// <summary>轨道上实际建出的刻度数（自检用）。</summary>
+    public int TurnMarkCountForProbe => _turnMarks.Count;
 
     /// <summary>
     /// 建一条推理行的控件（自检用）。
