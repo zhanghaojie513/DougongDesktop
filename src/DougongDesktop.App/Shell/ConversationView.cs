@@ -943,6 +943,37 @@ public sealed class ConversationView : UserControl
     public void ScrollToTopForProbe() => _scroll.Offset = new Avalonia.Vector(_scroll.Offset.X, 0);
 
     /// <summary>
+    /// 滚到第一条推理行（自检用）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要它</b>：自检内容里推理条目排在中后段，视口只有 ~350px，
+    /// 不滚就永远看不见——而"看不见"和"没渲染"必须分清。
+    /// 只用 <c>BringIntoView</c> 找控件：无头下虚拟化不实体化容器，
+    /// 但真实窗口里能拿到。
+    /// </remarks>
+    public void ScrollToReasoningForProbe()
+    {
+        // 虚拟化下，视口外的条目根本没实体化——直接找控件必然找不到。
+        // 所以先滚到尾部（推理条目在自检数据后段），等实体化后再定位。
+        _stickToBottom = false;
+        _scroll.Offset = new Avalonia.Vector(_scroll.Offset.X, _scroll.Extent.Height);
+    }
+
+    /// <summary>第二轮：条目已实体化后，把推理行滚进视野。</summary>
+    public void BringReasoningIntoViewForProbe()
+    {
+        var row = _list.GetVisualDescendants()
+            .OfType<Border>()
+            .FirstOrDefault(b => b.GetVisualDescendants()
+                .OfType<TKCode.Arc.Icons.Lucide.LucideIcon>()
+                .Any(i => i.Kind == TKCode.Arc.Icons.Lucide.LucideIconKind.Brain));
+
+        if (row is null) return;
+
+        row.BringIntoView();
+    }
+
+    /// <summary>
     /// 把所有整轮块与过程组都展开（自检用）。
     /// </summary>
     /// <remarks>
@@ -1260,6 +1291,16 @@ public sealed class ConversationView : UserControl
 
     /// <summary>用户手动收起过的整轮块（外层）。</summary>
     private readonly HashSet<string> _collapsedTurns = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 用户手动展开过的推理行（第三层）。
+    /// </summary>
+    /// <remarks>
+    /// 按条目 Id 记，不按控件引用：<see cref="Refresh"/> 每次都重建控件，
+    /// 引用一变状态就丢——流式过程中每来一段推理都会 Refresh 一次，
+    /// 拿引用记的话用户刚展开的行会一直自己合上。
+    /// </remarks>
+    private readonly HashSet<string> _expandedReasoning = new(StringComparer.Ordinal);
 
     private void Refresh()
     {
@@ -1974,19 +2015,123 @@ public sealed class ConversationView : UserControl
         },
     };
 
-    private static Control BuildReasoning(ReasoningItem item) => new Border
+    /// <summary>
+    /// 建一条推理行的控件（自检用）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要把构建路径暴露出来</b>：列表用虚拟化面板，
+    /// 无头环境下不实体化容器（实测 Bounds 恒 0x0、容器 0 个），
+    /// 所以从视觉树里查不到条目控件。
+    /// 但"默认收起"这条必须验到**真实控件**——纯函数测不了"正文是否可见"。
+    /// 这里返回的就是 <see cref="BuildReasoning"/> 的产物，
+    /// 与列表里渲染走的同一段代码，不是另建一条路。
+    /// </remarks>
+    public Control BuildReasoningForProbe(ReasoningItem item) => BuildReasoning(item);
+
+    /// <summary>
+    /// 推理行：默认收起，只显示首行预览；点开后显示全文（第三层折叠）。
+    /// </summary>
+    /// <remarks>
+    /// <b>第三层是独立的一层</b>：整轮 → 过程组 → 单条推理，可见性由外向内生效。
+    /// 这里只管自己这一条展开与否，不关心外层开着没开。
+    /// <para>
+    /// <b>预览文案随状态变化</b>：运行中取「最新一段已完成的首行」，
+    /// 完成后取「全文首行」，两者都去掉 <c>**</c> 标记；纯空白块不建行。
+    /// 规则见 <see cref="ReasoningPreview"/>，检查
+    /// <c>reasoning-preview-matches-dsh-rules</c> 钉住这些语义。
+    /// </para>
+    /// <para>
+    /// <b>展开状态要持久</b>：<see cref="Refresh"/> 会重建所有控件，
+    /// 只存在局部变量里的话，流式过程中每来一段推理用户的展开状态就丢一次。
+    /// 所以按条目 Id 记到 <c>_expandedReasoning</c>。
+    /// </para>
+    /// </remarks>
+    private Control BuildReasoning(ReasoningItem item)
     {
-        Margin = new Thickness(12, 4),
-        Padding = new Thickness(12, 6),
-        Child = new TextBlock
+        // 纯空白推理不产生行（README: "Only reasoning blocks with
+        // non-whitespace text produce individual rows"）。流式过程中会先推
+        // 一个空块，为它建行会让界面闪一行空气。
+        if (!ReasoningPreview.ProducesRow(item.Text))
+            return new Panel { IsVisible = false };
+
+        var preview = ReasoningPreview.PreviewFor(
+            _presentation, item.Text, item.IsStreaming, _expandedReasoning.Contains(item.Id));
+
+        // 预览为空说明该块没有可显示的首行（未完成的单行）——
+        // 这时用一行占位，而不是把整段正文摊开。
+        var collapsedLabel = preview ?? "思考中";
+
+        var body = new TextBlock
         {
             Text = item.Text,
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
             Opacity = 0.5,
             FontStyle = FontStyle.Italic,
-        },
-    };
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+
+        var previewText = new TextBlock
+        {
+            Text = collapsedLabel,
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            FontSize = 12,
+            Opacity = 0.5,
+            FontStyle = FontStyle.Italic,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            Children =
+            {
+                new TKCode.Arc.Icons.Lucide.LucideIcon
+                {
+                    Kind = TKCode.Arc.Icons.Lucide.LucideIconKind.Brain,
+                    Size = 14,
+                    Opacity = 0.5,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                previewText,
+            },
+        };
+
+        var content = new StackPanel { Children = { row, body } };
+        var expanded = _expandedReasoning.Contains(item.Id);
+        body.IsVisible = expanded;
+
+        var host = new Border
+        {
+            Margin = new Thickness(12, 2),
+
+            // 展开/收起都只改 Padding，不换控件——避免展开时整行重新布局
+            Padding = new Thickness(12, 4),
+            CornerRadius = new CornerRadius(Columns.RadiusSm),
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+            Child = content,
+        };
+
+        host.PointerPressed += (_, e) =>
+        {
+            e.Handled = true;
+            var nowExpanded = !body.IsVisible;
+
+            _expandedReasoning.Remove(item.Id);
+            if (nowExpanded) _expandedReasoning.Add(item.Id);
+
+            body.IsVisible = nowExpanded;
+            // 展开后预览行不再重复显示首行（全文里有）
+            row.IsVisible = !nowExpanded;
+        };
+
+        // 已经展开过的（Refresh 重建时）保持展开态
+        if (expanded) row.IsVisible = false;
+
+        return host;
+    }
 
     /// <summary>
     /// 未知 kind 的降级卡片。

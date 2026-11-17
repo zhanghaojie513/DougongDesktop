@@ -78,6 +78,8 @@ public static class Program
         failures += Check("group-title-matches-dsh-composition", GroupTitleMatchesDshComposition);
         failures += Check("two-layer-folding-matches-dsh-modes", TwoLayerFoldingMatchesDshModes);
         failures += Check("desktop-default-mode-is-standard", DesktopDefaultModeIsStandard);
+        failures += Check("reasoning-preview-matches-dsh-rules", ReasoningPreviewMatchesDshRules);
+        failures += Check("reasoning-row-collapses-by-default", ReasoningRowCollapsesByDefault);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -1697,6 +1699,147 @@ public static class Program
     }
 
     /// <summary>
+    /// 推理行预览：空白不建行、运行中取最新完整段首行、完成后取全文首行。
+    /// </summary>
+    /// <remarks>
+    /// 规则出自 dsh <c>conversation-nodes/README.md:195</c> 与
+    /// <c>ReasoningRow.tsx</c> 的 <c>firstLine</c> /
+    /// <c>latestCompletedParagraphFirstLine</c>。
+    /// <para>
+    /// <b>最容易写错的三处</b>，都在这条检查里：
+    /// <list type="number">
+    /// <item>纯空白块不产生行——否则流式时先到的空块会让界面闪一行空气</item>
+    /// <item>运行中取「最新一段的**已完成**首行」——最后那个还在写的单行不算，
+    /// 否则预览会字字跳动</item>
+    /// <item>预览要去掉 <c>**</c> 标记——原样带星号显示很难看</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private static string? ReasoningPreviewMatchesDshRules()
+    {
+        var bad = new List<string>();
+
+        // ① 纯空白不建行
+        foreach (var blank in new[] { null, "", "   ", "\n\n", "\t \r\n" })
+            if (ReasoningPreview.ProducesRow(blank))
+                bad.Add($"「{blank ?? "null"}」不该产生行");
+
+        foreach (var real in new[] { "想了", " a " })
+            if (!ReasoningPreview.ProducesRow(real))
+                bad.Add($"「{real}」应产生行");
+
+        // ② 完成态：全文首行
+        var settledCases = new (string Text, string Expect, string Why)[]
+        {
+            ("第一行\n第二行", "第一行", "取首行"),
+            ("只有一行", "只有一行", "没有换行就是全文"),
+            ("**加粗的首行**\n后文", "加粗的首行", "去掉 ** 标记"),
+            ("前导空白行没有\n\n真正的首行", "前导空白行没有", "首行含内容就取它"),
+        };
+        foreach (var (text, expect, why) in settledCases)
+        {
+            var actual = ReasoningPreview.FirstLine(text);
+            if (actual != expect)
+                bad.Add($"{why}: 期望「{expect}」，实际「{actual}」");
+        }
+
+        // ③ 运行态：最新**已完成**段的首行
+        var runningCases = new (string Text, string Expect, string Why)[]
+        {
+            // 三段：前两段已完成，第三段还在写 → 取第二段
+            ("一\n正文\n\n二\n正文\n\n三还在写", "二", "取最后一个已完成段的首行"),
+            // 单段未完成 → 没有预览
+            ("还在写没有换行", "", "未完成的单行不给预览"),
+            // 第一段已完成、第二段未完成 → 取第一段
+            ("一\n正文\n\n二未完成", "一", "跳过未完成段"),
+            // 带 ** 标记
+            ("**一**\n正文\n\n二\n正文", "二", "运行态也去标记"),
+        };
+        foreach (var (text, expect, why) in runningCases)
+        {
+            var actual = ReasoningPreview.LatestCompletedParagraphFirstLine(text);
+            if (actual != expect)
+                bad.Add($"{why}: 期望「{expect}」，实际「{actual}」");
+        }
+
+        // ④ 模式：compact 在已结算后不给预览，但运行中给
+        var compact = ChatPresentation.Resolve(TranscriptViewMode.Compact);
+        var detailed = ChatPresentation.Resolve(TranscriptViewMode.Detailed);
+
+        if (ReasoningPreview.PreviewFor(compact, "首行\n后文", running: false, expanded: false) is not null)
+            bad.Add("compact 已结算后不该给推理预览（SettledReasoningPreview=false）");
+
+        if (ReasoningPreview.PreviewFor(compact, "首行\n后文", running: true, expanded: false) is null)
+            bad.Add("compact 运行中仍应给预览（那条与 running 绑定，不是 settled）");
+
+        if (ReasoningPreview.PreviewFor(detailed, "首行\n后文", running: false, expanded: false) != "首行")
+            bad.Add("detailed 已结算应给预览");
+
+        // 展开后不再显示预览（显示全文）
+        if (ReasoningPreview.PreviewFor(detailed, "首行\n后文", running: false, expanded: true) is not null)
+            bad.Add("手动展开后不该再显示预览文本");
+
+        return bad.Count == 0 ? null : string.Join("；", bad);
+    }
+
+    /// <summary>
+    /// 推理行真的默认收起，且**一条纯空白推理不产生行**。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么要看控件而不是只测纯函数</b>：<see cref="ReasoningPreview"/> 的语义
+    /// 有检查了（<c>reasoning-preview-matches-dsh-rules</c>），但那条证明不了
+    /// 渲染层真的用了它。这里把 <see cref="ConversationView"/> 建出来，
+    /// 断言：①正文默认不可见；②预览行可见；③空白推理不建行。
+    /// <para>
+    /// 不挂 Window：<see cref="ConversationView"/> 的列表用虚拟化面板，
+    /// 无头下不实体化容器。所以这里直接查**逻辑树**（<c>GetLogicalDescendants</c>），
+    /// 它由 <see cref="ConversationView"/> 自己构建，不依赖布局。
+    /// </para>
+    /// </remarks>
+    private static string? ReasoningRowCollapsesByDefault()
+    {
+        var at = DateTimeOffset.Now;
+        var view = new ConversationView { Width = 900, Height = 600 };
+        view.SetPresentation(ChatPresentation.Resolve(TranscriptViewMode.Detailed));
+
+        // ① 一条正常推理：预览可见、正文默认不可见
+        var row = view.BuildReasoningForProbe(new ReasoningItem
+        {
+            Id = "r1", At = at, Text = "**想一下**\n这里是正文，默认不该看见。",
+        });
+
+        var texts = row.GetLogicalDescendants().OfType<TextBlock>().ToArray();
+
+        var preview = texts.FirstOrDefault(t => t.Text == "想一下");
+        if (preview is null)
+            return $"没找到预览行（文字：{string.Join(" / ", texts.Select(t => t.Text))}）";
+        if (!preview.IsVisible) return "预览行不可见";
+
+        var body = texts.FirstOrDefault(t => t.Text is { } x && x.Contains("默认不该看见", StringComparison.Ordinal));
+        if (body is null) return "推理正文控件不存在";
+        if (body.IsVisible) return "推理正文默认可见——第三层折叠没生效";
+
+        // ② 纯空白推理：不产生可见行
+        var blankRow = view.BuildReasoningForProbe(new ReasoningItem { Id = "r2", At = at, Text = "   " });
+        var blankTexts = blankRow.GetLogicalDescendants().OfType<TextBlock>().Where(t => t.IsVisible).ToArray();
+        if (blankTexts.Length > 0 || blankRow.IsVisible)
+            return "空白推理建出了可见行——流式时会闪一行空气";
+
+        // ③ 点一下应该展开（走真实的事件处理器）
+        var border = row as Border ?? row.GetLogicalDescendants().OfType<Border>().FirstOrDefault();
+        if (border is null) return "推理行不是 Border，点不到";
+
+        border.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(
+            border, new Avalonia.Input.Pointer(0, Avalonia.Input.PointerType.Mouse, true),
+            border, default, 0, new Avalonia.Input.PointerPointProperties(), Avalonia.Input.KeyModifiers.None));
+
+        if (!body.IsVisible)
+            return "点过之后正文仍不可见——展开没接上";
+
+        return null;
+    }
+
+    /// <summary>
     /// 为指定检查注入一条**真实违规**，返回违规说明；没有注入返回 null。
     /// </summary>
     /// <remarks>
@@ -1732,6 +1875,12 @@ public static class Program
                 ? "standard 历史组体默认收起，符合预期值——断言能发现差异"
                 : null,
 
+        // 默认档：桌面端应为 Standard，把 Detailed 当期望就会冲突。
+        "desktop-default-mode-is-standard" =>
+            ChatPresentation.DefaultMode != TranscriptViewMode.Detailed
+                ? "默认档与 Detailed 的错期望不符——断言能发现差异"
+                : null,
+
         // 标题栏形态按平台分：macOS 应无 TitlebarContent、按钮在侧栏。
         // 注入方式是断言"macOS 上 TitlebarContent 非空才正确"——真实实现里
         // 它是 null，所以这条命题为假，说明检查真的在比对。
@@ -1743,10 +1892,16 @@ public static class Program
                 ? "非 macOS 的 TitlebarContent 非空——断言能发现差异"
                 : null),
 
-        // 默认档：桌面端应为 Standard，把 Detailed 当期望就会冲突。
-        "desktop-default-mode-is-standard" =>
-            ChatPresentation.DefaultMode != TranscriptViewMode.Detailed
-                ? "默认档与 Detailed 的错期望不符——断言能发现差异"
+        // 推理行默认收起：空白推理确实不建行（命题为真说明断言在比对）。
+        "reasoning-row-collapses-by-default" =>
+            !ReasoningPreview.ProducesRow("  ")
+                ? "空白推理确实不建行，与'应该建行'的错期望冲突——断言能发现差异"
+                : null,
+
+        // 推理预览：把"未完成的单行也给预览"当期望，与真实实现冲突。
+        "reasoning-preview-matches-dsh-rules" =>
+            ReasoningPreview.LatestCompletedParagraphFirstLine("还在写没有换行") == string.Empty
+                ? "未完成的单行确实不给预览，与'应该给'的错期望冲突——断言能发现差异"
                 : null,
 
         _ => null,

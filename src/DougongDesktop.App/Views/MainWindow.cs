@@ -314,6 +314,15 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 Console.Error.WriteLine("[shell] 已展开全部整轮块与过程组（折叠自检）");
             }
 
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_REASONING") is "1")
+            {
+                _conversation.ScrollToReasoningForProbe();
+                await Task.Delay(600);
+                _conversation.BringReasoningIntoViewForProbe();
+                await Task.Delay(400);
+                Console.Error.WriteLine("[shell] 已滚到推理行（第三层折叠自检）");
+            }
+
             if (Environment.GetEnvironmentVariable("DOUGONG_UI_TOPGUARD") is "1")
             {
                 _conversation.ScrollToTopForProbe();

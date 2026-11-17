@@ -52,8 +52,8 @@
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **19%** |
 | P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **30%** |
-| **P8g 中区会话域** | **13** | **2** | **2** | **0** | **6** | **23** | **82%** |
-| **合计** | **36** | **4** | **19** | **2** | **9** | **70** | **64%** |
+| **P8g 中区会话域** | **14** | **1** | **2** | **0** | **6** | **23** | **85%** |
+| **合计** | **37** | **3** | **19** | **2** | **9** | **70** | **65%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -64,7 +64,7 @@
 
 完成度算法：`(✅ + 🟡×0.5) / (✅+🟡+⬜)`，不含 `⏳` 与 `➖`。
 
-当前：`(36 + 4×0.5) / (36+4+19) = 38 / 59 = 64%`
+当前：`(37 + 3×0.5) / (37+3+19) = 38.5 / 59 = 65%`
 
 > **不做的那些（➖ 共 9 项）不算进分母**——它们是 dsh 也没有的东西，
 > 拿它们充数就成了"用没做的功能凑完成度"。
@@ -235,7 +235,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 |---|---|---|---|---|---|
 | M13 | ⬜ | 轮次导航条 | `[自有]` | 右侧 28px 竖排刻度，hover 预览，≤900px 隐藏（`TurnNavigator.tsx:81-295`） | 无 |
 | M14 | ⬜ | 加载更早 | `[自有]` | 顶部按钮 + 锚点补偿（`ChatView.tsx:239-245`） | 无（无分页） |
-| M15 | 🟡 | 折叠四层模型 | `[自有]` | **两层已落地**：外层整轮折叠（`TurnProcessRoot` + `ProcessFold`）、内层过程组（`ProcessGrouping` 四动作 + 类别标题 + 计数排名）。层级包含语义成立：外层关着时内层开不开都不可见。**未做**：单条推理/工具体的手动展开（第三层）与「加载更早」的锚点保持（`conversation-nodes/README.md:20-60`） | 检查 `process-grouping-matches-dsh-examples`（6 个 README 示例 + 跨轮次）、`tool-categories-match-dsh-name-table`（31 条名字逐条比对，含 `_inspect` 先于 `subagent_`/`terminal_` 的顺序语义）、`group-title-matches-dsh-composition`（0/1/2/3/4 类别合成 + 排名并列规则 + 运行态取"正在跑"的类别）、`two-layer-folding-matches-dsh-modes`（22 个模式×状态组合）。全部有反证 |
+| M15 | ✅ | 折叠四层模型 | `[自有]` | **三层已落地**：①外层整轮折叠（`TurnProcessRoot` + `ProcessFold`）；②内层过程组（`ProcessGrouping` 四动作 + 类别标题 + 计数排名）；③单条推理行（`ReasoningPreview` 预览语义 + 手动展开）。可见性由外向内生效，内层开不开都跳不过外层（`conversation-nodes/README.md:20-60,195`）。**未做**：单条**工具**体的手动展开（Arc 的 `ToolCall` 自带，未另接）与「加载更早」的锚点保持（M14） | 检查 `process-grouping-matches-dsh-examples`（6 个 README 示例 + 跨轮次）、`tool-categories-match-dsh-name-table`（31 条名字逐条比对）、`group-title-matches-dsh-composition`（0-4 类别合成 + 排名并列规则）、`two-layer-folding-matches-dsh-modes`（22 个模式×状态组合）、`reasoning-preview-matches-dsh-rules`（空白不建行 / 运行中取最新**已完成**段首行 / 去掉 `**`）、`reasoning-row-collapses-by-default`（真实控件：默认收起 + 点击展开 + 空白不建行）。**每条都做过「人为改坏 → 必须变红」验证** |
 | M16 | ✅ | 工作详情模式 | `[自有]` | 四模式策略表 + 两个偏好已落地：`ChatPresentation`（照抄 dsh 的 POLICIES）、**桌面默认档 standard**（README：Desktop 用 standard、Web 用 detailed——原先取 detailed 是照搬了 Web 侧常量）、遗留值 normal/expanded→detailed、设置页分段选择器、持久化、能力已被 M15 消费 | 检查 `transcript-view-modes-match-dsh-table`、`desktop-default-mode-is-standard`（含未知值回落）、`transcript-legacy-modes-read-as-detailed`、`work-detail-picker-reflects-and-saves`、`settings-fields-load-independently`；全部有反证 |
 | M17 | ✅ | 列宽可拖拽 | `[自有]` | 右栏左边界 6px 拖拽区；宽度**不自己算**，仍交给 `Columns.Compute` 裁决；松手才持久化到 `ui.json`（`ConversationWidthControls.tsx:5-28`） | `drag-resize-cannot-bypass-column-limits`（拖到 900/2000 中栏都不低于下限）+ `saved-rightbar-width-is-revalidated`（坏值丢弃、正常值 576 保留） |
 
@@ -376,6 +376,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
 | 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
 | 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-17 | **M15 第三层完成，折叠模型三层齐了（🟡→✅）**。新增 `ReasoningPreview`：推理行默认收起、只显示首行预览，点开显示全文。规则照 `conversation-nodes/README.md:195` 与 `ReasoningRow.tsx`：①纯空白块不建行（流式先到的空块会让界面闪一行空气）；②**运行中取「最新一段里首行已完整」的那段**，最后那个还在写的单行不算——否则预览会字字跳动；③完成后取全文首行；④两者都去掉 `**` 标记。**第一版把段尾判断写成「这个换行之后整篇都只剩空白」，于是第一个换行就被判成段尾、整篇当成一段**，检查立刻抓到（期望「二」实得「一」），已改为「空行起点」。展开状态按条目 Id 记（`_expandedReasoning`），不按控件引用——流式每来一段都会 Refresh，按引用记的话用户刚展开的行会一直自己合上。两条新检查各做过三次「人为改坏 → 必须变红」：默认展开、点击不展开、段尾判断错误，都验证过 |
 | 2026-11-16 | **进度表四处数字与逐行统计不符，已修正并加检查守住**。用户要求"进度更新"时顺手用脚本核了一遍，发现表头是**手填**的、明细是逐行的，两者漂了：P8e 写 25%（实 19%）、P8f 写 40%（实 30%）、P8g 写 88%（实 82%）、合计 🟡 写 5（实 4），合计完成度 69%（实 64%）。原因是我上一轮把 M16 改成 ✅ 后只改了该行、没重算其余分项。文档里本就写着"两处对不上说明漏改"，但**没有任何东西去查**，所以照样漂。新增 `progress-table-matches-its-rows`：解析 `### P8x` 章节下的明细行，按 `(✅ + 🟡×0.5) / (✅+🟡+⬜)` 重算，与表头逐列比对（含合计行）。**验证方式是真去改坏一处**（P8g 的 ✅ 13→14），检查立刻报 `P8g: ✅ 写 14 实为 13`；恢复后转绿。已接进 all-checks 反证清单 |
 | 2026-11-16 | **dsh 基线 `0.2.2-rc.2` → `0.2.2-rc.3`**（commit `39163dd3`）。6 个提交、110 个文件，但规格里 **49 处 `文件:行号` 一处未漂移**——rc.3 只动了三块：①`experimental/deepseek-chat-import` 新包（DeepSeek 官网对话导入，我们不用）；②`ui-workspace` 的工作区选择器改造成 `WorkspacePickerFactory`；③`ui-sidebar` 把「新会话」按钮包进 `sidebar.session.action` slot。**三份最关键的实现依据文件 rc.3 完全没碰**（`conversation-nodes/README.md` 最后改动 11-03、`presentation-policy.ts` 10-16、`apps/desktop/src/main.ts` 11-06），所以 M15/M16/macOS 标题栏一行都不用改。另外核对了 `ui-sidebar` 的 CSS 改动细节：改的是 `newSession` 的包裹结构，`topStrip`（macOS 标题条的几何依据）未动。唯一有前瞻价值的是 D1：rc.3 给了 `workspace.picker` Factory 与 `workspace.picker.directoryFlow` 洞的完整契约，已记进 D1 行 |
 | 2026-11-16 | **Arc 升 `1.0.0` → `1.1.0`，Avalonia `12.1.4` → `12.1.5`**（必须成对：Arc 1.1.0 的依赖从 `[12.1.4]` 精确锁定改成 `[12.1.5, 13.0.0)` 区间）。按元数据逐类型比对八个包：**新增 1026 / 删除 0 / 成员变更 54 处全为纯增**。唯一破坏点是 `CommandPaletteDialog.ItemSelected` 弃用（→ `ItemInvoked`，弃用说明写明两者同时触发）。视觉回归用无头渲染逐像素比对（本机 `-6661` 起不了真窗口）：**差异 0.046%，仅状态栏一块**，其余逐像素一致。**升级前先复验终端**：同一份 7 行复现仍抛 `NullReferenceException`，1.1.0 没修，F1 继续卡着。新增检查 `arc-and-avalonia-version-pair` 守"成对升级"（读 `Directory.Packages.props` 实际文本，不读缓存）。**顺带记一个假阴性**：第一版 diff 报「新增 771」，实为 Special 包导出失败被当成"无变化"跳过，真实是 1026——工具报 0 变化时得先证明它能报非 0。盘点见 `docs/arc-1.0-inventory.md` §〇 |
