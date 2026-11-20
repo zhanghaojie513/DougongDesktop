@@ -35,6 +35,7 @@
     <PackageReference Include="TKCode.Arc.Terminal" />
     <PackageReference Include="TKCode.Arc.Workflow" />
     <PackageReference Include="TKCode.Arc.Icons.Lucide" />
+    <PackageReference Include="TKCode.Arc.Markdown" />
     <!-- Dock：右栏的分裂标签树（P8e E4） -->
     <PackageReference Include="TKCode.Arc.Dock" />
 

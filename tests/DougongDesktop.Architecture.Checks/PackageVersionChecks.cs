@@ -73,10 +73,21 @@ internal static class PackageVersionChecks
         if (!Version.TryParse(avalonia.Split('-')[0], out var avaloniaVersion))
             return $"Avalonia 版本无法解析：{avalonia}";
 
-        // Arc 1.1+ 要求 Avalonia >= 12.1.5
-        if (arcVersion >= new Version(1, 1, 0) && avaloniaVersion < new Version(12, 1, 5))
-            return $"Arc {arc} 要求 Avalonia ≥ 12.1.5，当前是 {avalonia}"
-                 + "（1.1.0 的依赖是 [12.1.5, 13.0.0)，低于会 NU1605）";
+        // 每个 Arc 大版本对 Avalonia 的下限（逐版核过 nuspec）：
+        //   1.0.x → [12.1.4]（精确锁定）
+        //   1.1.x → [12.1.5, 13.0.0)
+        //   1.3.x → [12.1.6, 13.0.0)
+        // 这张表随每次升级追加一行；写死"最新下限"会漏掉回落的情况。
+        var floors = new (Version Arc, Version Avalonia, string Why)[]
+        {
+            (new Version(1, 3, 0), new Version(12, 1, 6), "1.3.0 的依赖是 [12.1.6, 13.0.0)"),
+            (new Version(1, 1, 0), new Version(12, 1, 5), "1.1.0 的依赖是 [12.1.5, 13.0.0)"),
+        };
+
+        var floor = floors.FirstOrDefault(f => arcVersion >= f.Arc);
+        if (floor.Avalonia is not null && avaloniaVersion < floor.Avalonia)
+            return $"Arc {arc} 要求 Avalonia ≥ {floor.Avalonia}，当前是 {avalonia}"
+                 + $"（{floor.Why}，低于会 NU1605）";
 
         // Arc 1.0 要求 Avalonia 恰好 12.1.4（精确锁定）
         if (arcVersion < new Version(1, 1, 0) && avaloniaVersion != new Version(12, 1, 4))

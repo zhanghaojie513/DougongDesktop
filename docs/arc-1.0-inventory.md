@@ -137,6 +137,59 @@ Blocks 新增的 626 个里绝大多数是整页营销/SaaS 模板
 
 ---
 
+### 1.1.1-preview.2 → 1.3.0（2026-11-20）
+
+**Avalonia 必须一起升**：1.3.0 的依赖从 `[12.1.5, 13.0.0)` 提到
+**`[12.1.6, 13.0.0)`**，所以 `Avalonia 12.1.5 → 12.1.6`。
+
+| 包 | 公开类型 | 新增 | 删除 |
+|---|---|---|---|
+| `TKCode.Arc` | 1189 → 1161 | 0 | **28** |
+| `TKCode.Arc.Blocks` | 1920 → 1941 | +21 | 0 |
+| `TKCode.Arc.Special` | 1325 → 1357 | +32 | 0 |
+| `TKCode.Arc.Terminal` | 77 → 87 | +10 | 0 |
+| `TKCode.Arc.Core` | 153 → 154 | +1 | 0 |
+| Dock / Workflow / Icons.Lucide | 不变 | 0 | 0 |
+| **合计** | | **+64** | **28** |
+
+#### 那 28 个"删除"是搬家，不是消失
+
+主包里少了 `Markdown`、`MarkdownHighlightPlugin`、`MarkdownServices`
+与整个 `Chat*` 系列（`ChatThread` / `ChatComposer` / `ChatMessage` …）
+以及它们的 token 类。
+
+**`Markdown` 拆成了独立包 `TKCode.Arc.Markdown` 1.3.0**——
+它作为 `TKCode.Arc` 的依赖被自动引入，所以 `new Markdown()` 照常编译。
+实测：`typeof(Markdown).Assembly.GetName().Name == "TKCode.Arc.Markdown"`。
+
+> **因此把它改成显式引用**：我们直接 `new Markdown()`，靠传递依赖意味着
+> 上游再拆一次就会编译失败。`Chat*` 系列我们没用，不处理。
+
+`MarkdownServices` 是**真的没了**（同包里查不到）。我们没用它，无影响。
+
+> **踩到的坑，值得记**：元数据 diff 报"删除 28"，我一度以为要停下来。
+> 但**编译器没报错**——两个信号矛盾时，先信编译器，再查清为什么。
+> 导出器只覆盖单一程序集，看不到类型搬到了哪个包；
+> 用 `typeof(X).Assembly` 一问就清楚了。
+
+**视觉回归**：无头渲染逐像素比对，差异 **479 / 1,049,600 = 0.046%**，
+与上两次升级**完全相同的那一块**（状态栏「已连接/启动引擎…」，
+连接时序），其余逐像素一致。
+
+**终端缺陷复测**：同一份 7 行最小复现仍抛 `NullReferenceException`
+（`Version = 0.1.0-dev` 握手正常）。**1.3.0 也没修**，F1 继续卡着。
+
+**1.3.0 新增里可选用的**：
+
+| 组件 | 包 | 说明 |
+|---|---|---|
+| `CodeReview` 系列（9 个类型） | Blocks | 代码审查：diff 行、评论线程、建议、PR 元数据。P8d 交付物卡片可能用得上 |
+| `TerminalView` +34 个成员 | Terminal | 光标闪烁、下划线/删除线度量、自定义字形、渲染层——**但 `TerminalCore.Create` 仍抛 NRE**，F1 依旧卡着 |
+| `ArmingSwitch` / `CelebrateButton` / `FeedbackMorph` / `FeedbackMood` | Special | 交互特效件，与桌面客户端形态不匹配，不用 |
+| `CodeMagicMove` | Special | 代码块动画，dsh 没有这个形态 |
+
+---
+
 ## 一、0.4.0 → 1.0.0 那次的结论（历史，保留作方法参考）
 
 按 `public` 顶层类型逐名比对 `0.4.0-preview.1` → `1.0.0`：
