@@ -40,7 +40,9 @@ internal static class Program
                 .UseArcSpecial()     // agent 组件：ToolCall/AgentStatus/AgentPlan/ContextWindow
                 .UseArcBlocks()      // Blocks：Sidebar 等复合控件。漏了它 Sidebar 会
                                      // 有尺寸但没有视觉子节点（ControlTheme 没应用）——实测踩过
-                .UseArcDock())       // Dock：右栏分裂标签树（P8e E4）。漏了它 DockLayout 没模板，窗口直接空白
+                .UseArcDock()        // Dock：右栏分裂标签树（P8e E4）。漏了它 DockLayout 没模板，窗口直接空白
+                .UseArcMarkdown())   // Markdown：1.3.0 起拆成独立包，手册要求显式注册
+                                     // （components/markdown.api.md: "registered with UseArcMarkdown()"）
             // Spyglass：Avalonia 的 out-of-process 调试器（视觉树/样式级联/绑定/性能）。
             //
             // **只在 Debug 构建里挂**：生产包里不该带调试探针——

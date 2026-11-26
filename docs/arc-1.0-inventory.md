@@ -190,6 +190,72 @@ Blocks 新增的 626 个里绝大多数是整页营销/SaaS 模板
 
 ---
 
+### 1.3.0 → 1.3.2-preview.4（2026-11-26）
+
+**Avalonia 再升一档**：`12.1.6 → 12.2.0`（1.3.2 的依赖是 `[12.2.0, 13.0.0)`）。
+
+元数据 diff（九个包，**9/9 导出成功**）：
+
+| 包 | 类型 | 新增 | 删除 |
+|---|---|---|---|
+| `TKCode.Arc` | 1161 → 1174 | +13 | 0 |
+| `TKCode.Arc.Blocks` | 1941 → 1943 | +2 | 0 |
+| `TKCode.Arc.Special` | 1357 → 1359 | +2 | 0 |
+| Core / Markdown / Dock / Workflow / Terminal / Icons | 不变 | 0 | 0 |
+| **合计** | | **+17** | **0** |
+
+16 处成员变更**全部纯增**。新增里可用的是 `ProgressRing`、`RadioGroupVariant`、
+`TabsVariant` / `TabCloseRequestedEventArgs`、`TimePickerPrecision`，
+以及 `Sidebar` 的 +24 个成员（含 `SidebarTrailingPlacement`）。
+
+#### 三件必须记的事
+
+**① diff 工具的假阴性，这次踩得更深**
+
+第一次跑报"特殊包导出为空"。原因是解压出的 nupkg 被截断了（`unzip -t` 报
+"End-of-central-directory signature not found"）。重新下载后仍失败——
+因为 `PathAssemblyResolver` 对同名程序集只认第一个匹配，而我把
+**新旧两版的 `TKCode.Arc.dll` 都塞进了 probe 列表**。
+
+修法：把同一侧的所有 dll 复制进一个临时目录，作为唯一 probe。
+修完才得到上面那张真实的表（新增 17）。**这已经是第三次被"导出失败当成无变化"骗到**，
+所以脚本现在把"导出为空"和"确实无变化"分成两种输出。
+
+**② 漏了 `UseArcMarkdown()`，而且差点没发现**
+
+手册（`components/markdown.api.md`）写着 `Markdown` 由
+`TKCode.Arc.Markdown` 提供、要 "registered with `UseArcMarkdown()` in `UseArc(...)`"。
+我们从 1.3.0 起把 Markdown 加成了显式引用，却**从未注册**——不注册照样编译，
+只是控件拿不到自己的 ControlTheme（与 `Sidebar` 漏 `UseArcBlocks()` 是同类问题）。
+已补。
+
+**③ 顺手抓到一个死引用**
+
+新增检查 `arc-packages-register-their-builder` 第一次运行就报：
+`TKCode.Arc.Workflow 已引用但 Program.cs 没有 UseArcWorkflow()`。
+查证：代码里从未用过 `WorkflowCanvas`，是纯死引用。**已删除该包引用**。
+
+> 这条检查本身也修过一次：它最初用 `Contains("UseArcMarkdown")` 查 `Program.cs`，
+> 而注释里正好写着这串字——删掉真实调用它照样通过。
+> 改成先剥注释再查，重验才真正变红。
+
+#### 视觉变化：字重变实了，是 Avalonia 12.2.0 的字体渲染
+
+逐像素比对 1.3.0 vs 1.3.2-preview.4（同一版本两次截图完全一致，排除了时序噪音）：
+
+- 差异 **914 / 1,049,600 = 0.087%**，集中在审批卡片标题那一行
+- 具体表现：`需要批准：write_file` 的深色像素增加 **16.8%**，字重更实
+
+查证：Avalonia 12.2.0 的 release notes 有大批字形改动
+（`Glyph Outline` 系列、shaped buffer glyph indices、Unicode segmentation trie），
+属于字体整形路径的改进，**不是回退**。我们的代码写的一直是 `SemiBold`，两版没变。
+
+> 无法用"只升 Avalonia、不升 Arc"来隔离：Arc 1.3.0 与 Avalonia 12.2.0
+> 会产生 NU1605 包降级冲突（1.3.0 的依赖上限是 12.1.x）。
+> 所以这条结论的依据是 release notes + 代码未变，不是隔离实验。
+
+---
+
 ## 一、0.4.0 → 1.0.0 那次的结论（历史，保留作方法参考）
 
 按 `public` 顶层类型逐名比对 `0.4.0-preview.1` → `1.0.0`：

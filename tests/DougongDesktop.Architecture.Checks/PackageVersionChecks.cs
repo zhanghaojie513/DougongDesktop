@@ -32,7 +32,74 @@ internal static class PackageVersionChecks
     {
         var failures = 0;
         failures += Case("arc-and-avalonia-version-pair", slug => VersionPair(breakMode == slug));
+        failures += Case("arc-packages-register-their-builder", slug => RegisterBuilders(breakMode == slug));
         return failures;
+    }
+
+    /// <summary>
+    /// 每个被引用的 Arc 包都要在 <c>UseArc(...)</c> 里注册。
+    /// </summary>
+    /// <remarks>
+    /// <b>漏注册不会编译失败，只会静默坏掉</b>：<c>Sidebar</c> 少了
+    /// <c>UseArcBlocks()</c> 会有尺寸却没有视觉子节点；<c>DockLayout</c> 少了
+    /// <c>UseArcDock()</c> 窗口直接空白。两种都实测过。
+    /// <para>
+    /// <b>Markdown 是 1.3.0 起新拆出的包</b>，手册
+    /// （<c>components/markdown.api.md</c>）写着 "registered with
+    /// <c>UseArcMarkdown()</c> in <c>UseArc(...)</c>"。我们在升级时确实漏了它——
+    /// 因为不注册也能编译，只是 Markdown 拿不到自己的 ControlTheme。
+    /// 这条检查把"包引用"和"注册调用"绑在一起。
+    /// </para>
+    /// </remarks>
+    private static string? RegisterBuilders(bool breakMode)
+    {
+        var csproj = Path.Combine(RepoRoot, "src", "DougongDesktop.App", "DougongDesktop.App.csproj");
+        var program = Path.Combine(RepoRoot, "src", "DougongDesktop.App", "Program.cs");
+        if (!File.Exists(csproj) || !File.Exists(program))
+            return "找不到 App.csproj 或 Program.cs";
+
+        var proj = File.ReadAllText(csproj);
+
+        // **去掉注释再查**：注释里写着"registered with UseArcMarkdown()"，
+        // 直接 Contains 会被它骗过——删掉真实调用仍然"通过"。
+        // 实测踩到：删了注册调用，检查照样绿。
+        var prog = string.Join("\n",
+            File.ReadAllLines(program).Where(l =>
+            {
+                var t = l.TrimStart();
+                return !t.StartsWith("//", StringComparison.Ordinal)
+                    && !t.StartsWith("/*", StringComparison.Ordinal)
+                    && !t.StartsWith("*", StringComparison.Ordinal);
+            }));
+
+        // 包引用 → 必须存在的注册调用
+        var requires = new (string Package, string Call)[]
+        {
+            ("TKCode.Arc.Special", "UseArcSpecial"),
+            ("TKCode.Arc.Blocks", "UseArcBlocks"),
+            ("TKCode.Arc.Dock", "UseArcDock"),
+            ("TKCode.Arc.Markdown", "UseArcMarkdown"),
+            ("TKCode.Arc.Workflow", "UseArcWorkflow"),
+        };
+
+        var missing = new List<string>();
+        foreach (var (pkg, call) in requires)
+        {
+            if (!proj.Contains($"PackageReference Include=\"{pkg}\"", StringComparison.Ordinal))
+                continue;   // 没引用这个包，就不用注册
+            if (!prog.Contains(call, StringComparison.Ordinal))
+                missing.Add($"{pkg} 已引用但 Program.cs 没有 {call}()");
+        }
+
+        if (breakMode)
+        {
+            // 反证：故意要求一个必然不存在的调用名
+            return !prog.Contains("UseArcThisDoesNotExist", StringComparison.Ordinal)
+                ? "已确认断言在读真实源码（不存在的调用名查不到）"
+                : null;
+        }
+
+        return missing.Count == 0 ? null : string.Join("；", missing);
     }
 
     /// <summary>
@@ -97,7 +164,7 @@ internal static class PackageVersionChecks
         string[] packages =
         [
             "TKCode.Arc", "TKCode.Arc.Fonts", "TKCode.Arc.Special", "TKCode.Arc.Blocks",
-            "TKCode.Arc.Terminal", "TKCode.Arc.Workflow", "TKCode.Arc.Icons.Lucide", "TKCode.Arc.Dock",
+            "TKCode.Arc.Terminal", "TKCode.Arc.Icons.Lucide", "TKCode.Arc.Dock", "TKCode.Arc.Markdown",
         ];
 
         foreach (var p in packages)
