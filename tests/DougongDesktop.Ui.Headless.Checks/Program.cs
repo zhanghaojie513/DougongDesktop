@@ -54,7 +54,7 @@ public static class Program
         failures += Check("settings-check-count-matches-guards", CheckCountMatchesGuards);
         failures += Check("settings-shows-chinese-state-words", ShowsChineseStateWords);
         failures += Check("settings-plugins-lists-loaded-only", PluginsListLoadedOnly);
-        failures += Check("terminal-panel-reports-unavailable", TerminalPanelReportsUnavailable);
+        failures += Check("terminal-panel-parses-escape-sequences", TerminalPanelParsesEscapeSequences);
         failures += Check("titlebar-uses-arc-slots", TitlebarUsesArcSlots);
         failures += Check("titlebar-menus-are-windows-only", TitlebarMenusAreWindowsOnly);
         failures += Check("run-duration-format-matches-dsh", RunDurationFormatMatchesDsh);
@@ -1390,22 +1390,51 @@ public static class Program
     /// 上游修好之后，这条检查要跟着改成"VT 真的解析了字节"。
     /// </para>
     /// </remarks>
-    private static string? TerminalPanelReportsUnavailable()
+    /// <summary>
+    /// 终端面板：VT 状态机真的能建起来，且能解析转义序列。
+    /// </summary>
+    /// <remarks>
+    /// <b>这条检查曾经断言的是"不可用"</b>——因为
+    /// <c>TerminalCore.Create</c> 一直抛 <c>NullReferenceException</c>，
+    /// 我把它当成上游缺陷，四个版本都只验"如实报告不可用"。
+    /// <para>
+    /// <b>实际是我们自己的用法错</b>：<c>TerminalCoreOptions</c> 只有一个带参
+    /// 构造函数，属性的默认值只在构造函数里赋值。写
+    /// <c>new TerminalCoreOptions { Size = ... }</c> 时 C# 合成的是
+    /// <c>(TerminalSize)default</c> 调用，于是 <c>Replies</c> / <c>TerminfoName</c> /
+    /// <c>ScrollbackMaxLines</c> 全停在 null/0，原生回调解引用 <c>Replies</c> 就崩。
+    /// </para>
+    /// <para>
+    /// 所以这条检查现在断言**能工作**：<c>Probe()</c> 灌入清屏 + 定位 + 着色的
+    /// 转义序列，然后看快照里的文字是否真的按预期出现——
+    /// "控件在、尺寸非零"证明不了 VT 在解析，一个只画空白格的控件也能满足。
+    /// </para>
+    /// </remarks>
+    private static string? TerminalPanelParsesEscapeSequences()
     {
         var panel = new DougongDesktop.App.Shell.TerminalPanel();
-        var texts = CollectTexts(panel).ToArray();
 
-        if (!texts.Any(t => t.Contains("暂不可用", StringComparison.Ordinal)))
-            return "面板没有说明「暂不可用」，实际文本：" + string.Join(" | ", texts.Take(6));
+        // Probe 走的是产品的 Write 路径（惰性建 core → 写入 → CaptureFrame）
+        panel.Probe();
 
-        // 不能用假提示符冒充可用终端
-        var fakePrompt = new[] { "$ ", "# ", "> ", "C:\\" };
-        var hasFake = texts.Any(t => fakePrompt.Any(p => t.EndsWith(p, StringComparison.Ordinal)));
-        if (hasFake)
-            return "出现了假提示符——不可用的终端不该装成能用";
+        if (!panel.IsCoreReady)
+        {
+            var texts = CollectTexts(panel).ToArray();
+            return "VT 状态机没有建起来（IsCoreReady=false），面板文本："
+                 + string.Join(" | ", texts.Take(4));
+        }
 
-        if (panel.IsCoreReady)
-            return "IsCoreReady 为 true，但上游缺陷下不应就绪；若上游已修复，请更新这条检查";
+        // 缓冲区文本里必须出现 Probe 写入的标记。
+        // Probe 的脚本先 [2J 清屏，所以剩下的只有它写的那几行——
+        // 这两行能同时出现，就说明清屏、定位、着色序列都被执行了。
+        var text = panel.PlainText;
+        if (!text.Contains("VT 解析正常", StringComparison.Ordinal))
+            return $"缓冲区里没有「VT 解析正常」（实际内容：{text.Replace("\n", " / ")}）";
+        if (!text.Contains("TerminalView 渲染正常", StringComparison.Ordinal))
+            return "缓冲区里没有第二行——换行或定位序列没生效";
+
+        // 快照也要有，否则是"解析了但渲染层没拿到"
+        if (panel.View.Snapshot is null) return "Probe 之后 View.Snapshot 为 null（解析了但没出帧）";
 
         return null;
     }

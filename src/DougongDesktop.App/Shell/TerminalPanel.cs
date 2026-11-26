@@ -42,10 +42,11 @@ public sealed class TerminalPanel : UserControl
     {
         _status = new TextBlock
         {
-            // 说实话：终端渲染控件已接，但 VT 状态机现在建不起来（上游缺陷），
-            // 而且 PTY 也还没接。不给一个看起来能用、打不了字的假终端。
-            Text = "终端暂不可用：VT 状态机无法创建（上游缺陷），PTY 也尚未接入。\n"
-                 + "已接入 TerminalView 渲染控件与其原生库，但 TerminalCore.Create 抛异常。",
+            // VT 状态机现在能建起来了（2026-11-26 修的那个 options 构造问题），
+            // 但 PTY 还没接——所以能显示内容、打不了字。
+            // 如实说明缺的是哪一半，不给一个看起来完整、实际不可交互的假终端。
+            Text = "VT 解析与渲染已可用（清屏/定位/着色/换行都按终端协议执行），"
+                 + "但 PTY 尚未接入：这里的按键还送不到 shell。",
             FontSize = 12,
             Opacity = 0.6,
             Margin = new Thickness(12, 8),
@@ -68,6 +69,17 @@ public sealed class TerminalPanel : UserControl
 
     /// <summary>VT 核心是否已创建（原生库是否加载成功）。</summary>
     public bool IsCoreReady => _core is not null;
+
+    /// <summary>
+    /// 当前终端缓冲区的纯文本（自检用）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么用它而不是看快照</b>：<c>FrameSnapshot</c> 的格子是打包的
+    /// <c>UInt64</c> 码点 + 字形字典，自己解码等于重写一遍渲染层。
+    /// <c>TerminalCore.FormatPlainText()</c> 是官方给纯文本的入口，
+    /// 用它验"转义序列真的被解析了"最直接——清屏后只剩我们写入的那两行。
+    /// </remarks>
+    public string PlainText => _core?.FormatPlainText() ?? string.Empty;
 
     /// <summary>
     /// 往 VT 状态机里写一段字节并刷新渲染。
@@ -130,50 +142,56 @@ public sealed class TerminalPanel : UserControl
 
     private static TerminalCore CreateCore()
     {
-        // 尺寸按面板初始值给，后续 resize 由 TerminalView 自己的度量决定。
-        var options = new TerminalCoreOptions
-        {
-            // CellWidth/Height 给典型等宽字号的度量；PTY 接上后要按实际字体重算。
-            Size = new TerminalSize(Columns: 80, Rows: 24, CellWidth: 8, CellHeight: 16),
-        };
+        // **必须用构造函数，不能用对象初始化器。**
+        //
+        // `TerminalCoreOptions` 只有一个带参构造函数 `(TerminalSize Size)`，
+        // 那些"看起来可以初始化"的属性（ScrollbackMaxLines / Replies /
+        // TerminfoName …）的默认值**只在构造函数里赋值**。
+        // 走 `new TerminalCoreOptions { Size = ... }` 时 C# 会合成
+        // `(TerminalSize)default` 的调用，于是只有 Size 被覆盖，
+        // 其余字段全停在零值：
+        //
+        //   Replies = null          ← 原生回调解引用它 → NullReferenceException
+        //   TerminfoName = null
+        //   ScrollbackMaxLines = null
+        //
+        // CellWidth/Height 给典型等宽字号的度量；PTY 接上后要按实际字体重算。
+        var options = new TerminalCoreOptions(
+            new TerminalSize(Columns: 80, Rows: 24, CellWidth: 8, CellHeight: 16));
 
         // Create 的第一个参数是 in（只读引用），不是值传递。
         return TerminalCore.Create(in options, new NoopEffects());
     }
 
     /// <summary>
-    /// 上游缺陷的最小复现（2026-11-06 实测，`TKCode.Arc.Terminal 0.4.0-preview.1`）。
+    /// 曾经以为是上游缺陷、实际是我们用法错的那条记录。
     /// </summary>
     /// <remarks>
-    /// <b>症状</b>：<c>TerminalCore.Create</c> 必然抛
-    /// <c>NullReferenceException</c>，栈顶在
-    /// <c>TerminalCore..ctor(IntPtr terminal, ...)</c>——即拿到的 terminal 指针是 null。
+    /// <b>症状</b>：<c>TerminalCore.Create</c> 抛 <c>NullReferenceException</c>，
+    /// 栈顶在 <c>TerminalCore..ctor(IntPtr terminal, ...)</c>——终端指针为 null。
     /// <para>
-    /// <b>已排除的</b>（都验过，不是这些原因）：
-    /// <list type="bullet">
-    /// <item>原生库没落地：<c>runtimes/osx-arm64/native/libghostty-vt.dylib</c> 在输出目录里，
-    /// <c>deps.json</c> 的 runtimeTargets 也有它。</item>
-    /// <item>库加载不了：用 NuGet 正确引用时 <c>GhosttyRuntime.Version</c> 返回
-    /// <c>0.1.0-dev</c>，说明 dlopen 成功、版本握手通了。</item>
-    /// <item>我们的调用方式：改用 <c>in</c> 传参、换 <c>TerminalSize</c> 的四个参数都试过。</item>
-    /// <item><c>libghostty-vt.dylib</c> 本身：直接用 <c>ctypes.CDLL</c> 能加载，
-    /// <c>ghostty_build_info</c> / <c>ghostty_terminal_new</c> 符号都在。</item>
-    /// </list>
+    /// <b>我当时的误判</b>（2026-11-06 起，连错四个版本 0.4.0 → 1.3.2）：
+    /// 用独立控制台工程复现后认定是上游缺陷。逐一排除过原生库缺失、
+    /// DllImport 名字、<c>in</c> 传参、库损坏（<c>ctypes</c> 能加载，
+    /// <c>GhosttyRuntime.Version</c> 返回 <c>0.1.0-dev</c>），
+    /// 但**没有逐字段对比两种构造方式的产物**。
     /// </para>
     /// <para>
-    /// <b>复现</b>：新建控制台工程，只加
-    /// <c>&lt;PackageReference Include="TKCode.Arc.Terminal" Version="0.4.0-preview.1" /&gt;</c>，
-    /// 三行就能复现——与桌面端的集成代码无关。
+    /// <b>真正的原因</b>：<c>TerminalCoreOptions</c> 只有一个带参构造函数
+    /// <c>(TerminalSize Size)</c>，其余属性的默认值（<c>Replies</c>、
+    /// <c>TerminfoName</c>、<c>ScrollbackMaxLines</c>、<c>ScrollbackMaxBytes</c>、
+    /// <c>ContinuationMaxBytes</c>、<c>DefaultCursorStyle</c>）**只在构造函数里赋值**。
+    /// 写 <c>new TerminalCoreOptions { Size = ... }</c> 时 C# 合成的是
+    /// <c>(TerminalSize)default</c> 调用，于是这些字段全是 null/0，
+    /// 原生回调解引用 <c>Replies</c> 就崩。
     /// </para>
     /// <para>
-    /// <b>所以 F1/F2 不能标完成</b>：控件在、库在、版本号能读，但"字节 → 帧"这一步
-    /// 走不通。按本项目的规矩，跑不通就不算接上。等上游修，
-    /// 或在 <c>ghostty_terminal_new</c> 上自己封一层。
+    /// <b>教训</b>：复现"只加包就能复现"只能证明问题不在我的集成代码里，
+    /// **不能证明库有缺陷**——同一份复现代码本身可能就是我写错的用法。
+    /// 该做的是把两种写法并排跑一次（五分钟），而不是连续四个版本只验"仍然失败"。
     /// </para>
     /// </remarks>
-    public static string KnownUpstreamIssue =>
-        "TerminalCore.Create 抛 NullReferenceException（终端指针为 null），"
-        + "原生库与版本握手均正常，疑为 TKCode.Arc.Terminal 0.4.0-preview.1 的上游缺陷";
+    public static string KnownUpstreamIssue => "（已澄清）曾误判为上游缺陷，实为 TerminalCoreOptions 构造方式错误——见本成员注释";
 
     /// <summary>不处理任何终端副作用（本轮没有 PTY 可写回）。</summary>
     private sealed class NoopEffects : ITerminalEffects

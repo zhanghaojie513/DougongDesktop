@@ -51,9 +51,9 @@
 | P8c 设置域 | 6 | 0 | 0 | 1 | 1 | 8 | **100%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **19%** |
-| P8f 终端与浏览器 | 1 | 1 | 3 | 0 | 0 | 5 | **30%** |
+| P8f 终端与浏览器 | 2 | 0 | 3 | 0 | 0 | 5 | **40%** |
 | **P8g 中区会话域** | **15** | **1** | **1** | **0** | **6** | **23** | **91%** |
-| **合计** | **38** | **3** | **18** | **2** | **9** | **70** | **67%** |
+| **合计** | **39** | **2** | **18** | **2** | **9** | **70** | **68%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -64,7 +64,7 @@
 
 完成度算法：`(✅ + 🟡×0.5) / (✅+🟡+⬜)`，不含 `⏳` 与 `➖`。
 
-当前：`(38 + 3×0.5) / (38+3+18) = 39.5 / 59 = 67%`
+当前：`(39 + 2×0.5) / (39+2+18) = 40 / 59 = 68%`
 
 > **不做的那些（➖ 共 9 项）不算进分母**——它们是 dsh 也没有的东西，
 > 拿它们充数就成了"用没做的功能凑完成度"。
@@ -192,7 +192,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 
 | # | 状态 | 项 | 实现方式 | 我们 | 验证 |
 |---|---|---|---|---|---|
-| F1 | 🟡 | 终端 VT 解析 | `[Arc]` | **代码已接**（`TerminalPanel` 走 `TerminalCore.Write` → `CaptureFrame` → `TerminalView.Snapshot`），但**跑不通**：`TerminalCore.Create` 必抛 `NullReferenceException`（上游缺陷） | **最小复现**：新建控制台工程只加 `TKCode.Arc.Terminal 0.4.0-preview.1`，三行复现。已排除：原生库缺失、DllImport 名字、`in`/`ref` 传参、库本身损坏（`ctypes` 能加载，`GhosttyRuntime.Version` = `0.1.0-dev`，握手正常） |
+| F1 | ✅ | 终端 VT 解析 | `[Arc]` | `TerminalPanel` 走 `TerminalCore.Write` → `CaptureFrame` → `TerminalView.Snapshot`。**2026-11-26 修好**：此前四个版本都以为 `TerminalCore.Create` 抛 NRE 是上游缺陷，实际是我们把 `TerminalCoreOptions` 用对象初始化器构造——它只有带参构造函数，`Replies`/`TerminfoName`/`ScrollbackMaxLines` 等默认值只在构造函数里赋值，`new TerminalCoreOptions { Size = ... }` 合成的是 `(TerminalSize)default`，这些字段全为 null，原生回调解引用 `Replies` 就崩。改用构造函数后 VT 正常 | 检查 `terminal-panel-parses-escape-sequences`：`Probe()` 灌清屏+定位+着色序列，断言缓冲区里出现那两行文字且 `View.Snapshot` 非空。**反证**：把构造改回对象初始化器，检查报 `IsCoreReady=false` + NRE |
 | F2 | ✅ | 终端控件 | `[Arc]` | **已接进右栏 dock tab**：终端 tab 从"未实现"改为可点开，内容为 `TerminalPanel`（`TerminalView` + 状态说明） | 运行时 `核心就绪=False` + 面板显示原因。无头检查 `terminal-panel-reports-unavailable` 断言"不许装成能用" |
 | F3 | ⬜ | PTY 接入 | `[自有]` | Windows `ConPTY` / Unix `forkpty`，双向字节流 | 待做 |
 | F4 | ⬜ | 终端面板（dock tab） | `[Arc]` | `TerminalView` 放进右栏 | 待做 |
@@ -348,9 +348,9 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-06 | **修了 `all-checks.sh` 一个静默失败**：构建失败时 `set -e` 不够，后面每个 `dotnet run --no-build` 会拿旧产物跑、全绿。实测踩到——给设置页注入反证时构建报 CS1061，而无头检查照样 PASS。已改为显式判断构建退出码并 `exit 1` |
 | 2026-11-06 | **P8c 收尾：C4 插件页完成，C5/C6 归 ⏳，C7 归 ➖**。C4 用真实 `SampleUiPlugin` 验证（`示例插件（sample.ui-plugin）→ shell.trailing`）。C5/C6 查到 `PermissionPreset`/`AgentPreset` 在 `HostProtocol` 里**各 0 处**——与 C8 同一类缺口，硬做只能做成"看起来能配、实际不生效"。C7 明确不做（没有可调并行数）。P8c 至此 2✅/2🟡/3⏳/1➖ = 100% |
 | 2026-11-06 | **无头检查又修了一处取样缺陷**：`CollectTexts` 只扫 `TextBlock`，而 `SettingsRow.Header`/`Description` 是 ContentControl 的属性、不是子控件，导致"插件 Id 没显示出来"的**误报**——实际渲染是好的。已改为 TextBlock + 行标题 + 行说明三路合并。这条是"误报比漏报更伤"的又一例 |
-| 2026-11-06 | **P8f 开工：F2 完成，F1 卡在上游缺陷**。终端 tab 从"未实现"改为可点开，接 `TerminalPanel`（`TerminalView` + 状态说明）。**但 VT 状态机建不起来**：`TerminalCore.Create` 必抛 `NullReferenceException`，栈顶在 `..ctor(IntPtr terminal, ...)` 即终端指针为 null。已在独立控制台工程用 7 行复现（只加包，无我方代码）——**是上游缺陷，不是集成问题**。逐一排除过：原生库在输出目录、`deps.json` 有 runtimeTargets、`ctypes` 能 dlopen、`GhosttyRuntime.Version` 返回 `0.1.0-dev`（握手成功）、`in` 传参与四参数 `TerminalSize` 都试过 |
+| 2026-11-06 | ~~**P8f 开工：F2 完成，F1 卡在上游缺陷**~~ **（2026-11-26 更正：不是上游缺陷，是我们用法错，见当日记录）**。终端 tab 从"未实现"改为可点开，接 `TerminalPanel`（`TerminalView` + 状态说明）。**但 VT 状态机建不起来**：`TerminalCore.Create` 必抛 `NullReferenceException`，栈顶在 `..ctor(IntPtr terminal, ...)` 即终端指针为 null。已在独立控制台工程用 7 行复现（只加包，无我方代码）——**是上游缺陷，不是集成问题**。逐一排除过：原生库在输出目录、`deps.json` 有 runtimeTargets、`ctypes` 能 dlopen、`GhosttyRuntime.Version` 返回 `0.1.0-dev`（握手成功）、`in` 传参与四参数 `TerminalSize` 都试过 |
 | 2026-11-06 | **修订 `dock-unimplemented-tabs-are-labeled`**。原检查无条件要求「终端」tab 标「未实现」且禁用，接终端后误报。但它的**意图是对的**——用户不该点进去才发现是空的。改为两个可接受形态：要么"禁用+标题标注"，要么"可点开+首屏说明原因"。两种都验证过反证能变红 |
-| 2026-11-09 | **Arc 升 `0.4.0-preview.1` → `1.0.0`**（正式版）。按元数据逐类型比对：四个包**删除 0 个**，Arc +87 / Special +179 / Blocks +142，纯增量。91 条检查全过，界面逐像素一致，Avalonia 仍锁 `[12.1.4]`。**升级前先验了终端**：同一份 7 行复现仍抛 `NullReferenceException`——1.0.0 没修，F1 继续卡着。盘点见 `docs/arc-1.0-inventory.md` |
+| 2026-11-09 | **Arc 升 `0.4.0-preview.1` → `1.0.0`**（正式版）。按元数据逐类型比对：四个包**删除 0 个**，Arc +87 / Special +179 / Blocks +142，纯增量。91 条检查全过，界面逐像素一致，Avalonia 仍锁 `[12.1.4]`。~~升级前先验了终端：同一份 7 行复现仍抛 NRE——1.0.0 没修~~ **（2026-11-26 更正：所谓"仍抛 NRE"是复现代码本身的用法错，不是版本没修）**。盘点见 `docs/arc-1.0-inventory.md` |
 | 2026-11-09 | **标题栏换成 Arc 的 `ArcWindow` + `TitleBar`**（1.0.0 新提供）。先建最小探针窗口验证 macOS 交通灯让位真的由组件处理（截图确认左侧内容距交通灯约 24px，未被压住），再改产品代码。**删掉**：`Columns.MacTrafficLightInset = 80`（截图估的魔数）、`IsMacOS()` 平台分支、`BuildWindowButtons()` + `TitleButton()` 约 100 行死代码、根布局的标题栏行。**踩坑**：第一次改完两套标题栏叠加（`ArcWindow` 一条 + `AppShell` 一条），源码看不出，是运行时「标题栏按钮 7 个」暴露的。新增无头检查 `titlebar-uses-arc-slots` 守这个；检查总数 91 → **92** |
 | 2026-11-09 | **`titlebar-branches-for-macos` 的判据换了，并修掉一处反证失效**。旧判据断言"存在 IsMacOS 分支 + BuildWindowButtons + MacTrafficLightInset"，换 `ArcWindow` 后这些**都该消失**，旧判据会因正确改动而失败。改为断言"继承 ArcWindow + 走 TitleBar.LeftContent + 无自绘按钮痕迹"。**关键**：改完先验反证，发现注入后仍 PASS——因为注入用的 `Replace("private Control BuildWindowButtons()")` 在方法删掉后什么也没做。改成直接给源码追加违规内容才正确变红。**不验反证的检查等于没有检查** |
 | 2026-11-09 | **P8e E4 接上 `TKCode.Arc.Dock`**。用 `DockLayout` + 5 个 `DockPane`（文件/改动/计划/上下文 走 ToolsSource，终端 走 DocumentsSource——工具与文档是 Dock 的固有区分）。运行时实测 `pane 5 个，根=DockSplit`，无头与真实 GUI 都确认了。**用 `DOUGONG_UI_DOCK=1` 开关而非直接切默认**：Dock 多出拖拽区、关闭按钮、浮动窗口，整条交互路径变了，要先做视觉验收。顺带修了一条误导诊断：Dock 模式下没有 `TabItem`，旧诊断照报「tab 0 个（期望 5）」的假警报 |
@@ -376,6 +376,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
 | 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
 | 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-26 | **F1 修好，而且我之前四个版本的判断全错**（🟡→✅）。一直以为 `TerminalCore.Create` 抛 NRE 是上游缺陷，从 0.4.0 到 1.3.2 每次升级都"复验一遍仍然失败"。用户问"是什么问题"时我去查了真实原因：**`TerminalCoreOptions` 只有一个带参构造函数**，`Replies` / `TerminfoName` / `ScrollbackMaxLines` / `ScrollbackMaxBytes` / `ContinuationMaxBytes` / `DefaultCursorStyle` 的默认值**只在构造函数里赋值**。写 `new TerminalCoreOptions { Size = ... }` 时 C# 合成的是 `(TerminalSize)default` 调用，于是这些字段全是 null/0，原生回调解引用 `Replies` 就崩。并排跑两种写法（五分钟的事）立刻分明：初始化器 NRE、构造函数成功。**教训**：复现"只加包就能复现"只能证明问题不在集成代码里，**不能证明库有缺陷**——复现代码本身可能就是错的用法。我连错四个版本的原因正是"只验仍然失败"，从不把两种写法并排跑。检查 `terminal-panel-reports-unavailable` 改成 `terminal-panel-parses-escape-sequences`（断言 VT 真的解析出文字，而不是断言它坏）；`dock-unimplemented-tabs-are-labeled` 里那条"必须写暂不可用"也一并改掉，并加了一条反向断言"不许再说暂不可用" |
 | 2026-11-26 | **Arc 升 `1.3.0` → `1.3.2-preview.4`，Avalonia `12.1.6` → `12.2.0`**（依赖上限再提一档：`[12.1.6,)` → `[12.2.0, 13.0.0)`）。元数据 diff 九包 **9/9 导出成功**：新增 17 / 删除 0 / 16 处成员变更全为纯增。**三件踩到的事**：①diff 工具的假阴性更深了——nupkg 解压被截断（`unzip -t` 报签名缺失），重下后仍失败，因为 `PathAssemblyResolver` 对同名程序集只认第一个匹配，而我把新旧两版 `TKCode.Arc.dll` 都塞进了 probe 列表；改成"同侧 dll 复制进唯一临时目录"才拿到真表。**这是第三次被"导出失败当成无变化"骗到**，脚本已把两种情形分开输出。②**漏了 `UseArcMarkdown()`**：手册写明要注册，我们从 1.3.0 起引用了 Markdown 包却从未注册——不注册照样编译，只是控件拿不到 ControlTheme（与 Sidebar 漏 UseArcBlocks 同类）。已补。③新增检查 `arc-packages-register-their-builder` 第一次跑就抓到**`TKCode.Arc.Workflow` 是死引用**（代码从未用过 WorkflowCanvas），已删除该包。那条检查本身也修过一次：最初用 Contains 查 Program.cs，而注释里正好写着这串字，删掉真实调用它照样绿；改成先剥注释再查才真正变红。视觉：差异 0.087%，是审批卡片标题字重变实（深色像素 +16.8%）——Avalonia 12.2.0 的字体整形改进（Glyph Outline 系列），不是回退；无法用"只升 Avalonia"隔离，因为 Arc 1.3.0 与 Avalonia 12.2.0 会 NU1605 |
 | 2026-11-20 | **Arc 升 `1.1.1-preview.2` → `1.3.0`，Avalonia `12.1.5` → `12.1.6`**（1.3.0 的依赖从 `[12.1.5, 13.0.0)` 提到 `[12.1.6, 13.0.0)`，必须成对升）。元数据 diff：新增 64 / **删除 28**。删除全部集中在主包，是 `Markdown` 与 `Chat*` 系列。**`Markdown` 拆成了独立包 `TKCode.Arc.Markdown` 1.3.0**——作为依赖被自动引入，所以 `new Markdown()` 照常编译。已改成显式引用（我们直接用它的类型，靠传递依赖意味着上游再拆一次就编译失败）。`MarkdownServices` 真没了，我们没用。**这里踩到一次"两个信号矛盾"**：diff 说删了 28 个，编译器却说零错误。处理顺序是先信编译器、再查清为什么（导出器只看单程序集，看不到类型搬去哪个包；`typeof(Markdown).Assembly` 一问就清楚）。若当时按 diff 停手，会白改一轮。视觉回归：无头逐像素差异 0.046%，仍是状态栏那一块，其余一致。终端复测：`TerminalCore.Create` 在 1.3.0 **仍未修**（握手正常、Create 抛 NRE），F1 继续卡。版本约束检查改成"下限表"（1.0→12.1.4 / 1.1→12.1.5 / 1.3→12.1.6），实测把 Avalonia 降回 12.1.5 会准确报错 |
 | 2026-11-17 | **M13 轮次导航条（⬜→✅）**。右侧 28px 竖排刻度，术语与几何全部照 dsh （`TurnNavigator.tsx` 的 `TURN_SPACING_PX=10` / `RAIL_INSET_PX=6` / `FADE_PX=24`，`.module.css` 的 `.rail{width:28px}` 与 `@container (max-width:900px)` 隐藏）。刻度是 20×2 的横线，靠 `scaleX` 表达状态（静止 0.6 / hover 0.9 / 当前 1 / 未加载 0.4）——宽窄变化比换颜色更容易在余光里分辨。**踩到两个真实问题**：①构造期 `Bounds.Width` 恒为 0，用自己宽度裁决会让轨道**一次都不显示**，改为"自己宽度为 0 时取列表宽度"，并订阅 `SizeChanged` 在布局后重算；②自检数据只用一个 `TurnId`，`>=2 轮` 的条件永远不满足 → 轨道验不到，把自检数据改成三轮（顺带让"跨轮次断组"这条折叠规则也终于有数据可验）。另外无头下 `Extent` 不实体化、偏移恒 0，所以交互检查改为断言"当前轮次变了"而不是"滚到哪了"——**不把环境限制写成产品缺陷，也不因此放宽断言** |

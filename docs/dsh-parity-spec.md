@@ -60,9 +60,15 @@ git sparse-checkout set \
 
 - **纯增量**：四个包删除 **0 个**类型，Arc +87 / Special +179 / Blocks +142。
   不需要改任何现有代码。Avalonia 仍精确锁 `[12.1.4]`。
-- **`TerminalCore.Create` 的崩溃没有修复**——同一份 7 行最小复现仍抛
-  `NullReferenceException`，F1 继续卡着。升级前先验这一条，
-  免得升完再发现还在。
+- ~~**`TerminalCore.Create` 的崩溃没有修复**~~ —— **2026-11-26 更正：这不是上游缺陷。**
+  崩溃原因是我们把 `TerminalCoreOptions` 用对象初始化器构造
+  （`new TerminalCoreOptions { Size = ... }`），而它只有带参构造函数，
+  `Replies` / `TerminfoName` / `ScrollbackMaxLines` 等默认值只在构造函数里赋值。
+  C# 合成的是 `(TerminalSize)default` 调用，那些字段全为 null，
+  原生回调解引用 `Replies` 就抛 NRE。**改用构造函数后 VT 正常工作**（F1 已 ✅）。
+  > 教训：复现"只加包就能复现"只能证明问题不在集成代码里，
+  > **不能证明库有缺陷**——复现代码本身可能就是错的用法。
+  > 我当时连续四个版本只验"仍然失败"，从没把两种写法并排跑一次。
 - 新增组件里最值得用：`ArcWindow` + `TitleBar`（替代我们手写的标题栏，
   含 macOS 交通灯）、`TKCode.Arc.Dock`（补 E4 分裂标签树）、
   `PageViewer`（补 E7 的 PDF 预览）。

@@ -187,7 +187,7 @@ internal static class DockChecks
         if (!contextLine.Contains("false", StringComparison.Ordinal))
             return "「上下文」tab 没有禁用（IsEnabled 应为 false）";
 
-        // 终端：可点开，但必须有面板且面板首屏说明"暂不可用"
+        // 终端：可点开，但必须有面板，且面板首屏如实说明缺的是哪一半
         if (terminalLine.Contains("未实现", StringComparison.Ordinal))
             return "「终端」tab 标着「未实现」，但控件已经接了——状态不准确";
 
@@ -200,8 +200,17 @@ internal static class DockChecks
             return "找不到 TerminalPanel.cs——终端 tab 会打开一片空白";
 
         var panel = File.ReadAllText(panelPath);
-        if (!panel.Contains("暂不可用", StringComparison.Ordinal))
-            return "终端面板首屏没有说明「暂不可用」——用户会以为它坏了";
+
+        // **2026-11-26 改**：以前这里断言首屏写「暂不可用」，
+        // 因为 VT 状态机建不起来。那不是上游缺陷，是我们把
+        // TerminalCoreOptions 用对象初始化器构造，导致 Replies 等字段为 null。
+        // 修好后 VT 可用了，缺的只剩 PTY——断言也要跟着变成"如实说明缺 PTY"。
+        if (!panel.Contains("PTY 尚未接入", StringComparison.Ordinal))
+            return "终端面板首屏没有说明「PTY 尚未接入」——VT 已可用，缺的是交互，不说明会让人以为能打字";
+
+        // 也不能反过来宣称"暂不可用"：VT 确实在工作了
+        if (panel.Contains("暂不可用", StringComparison.Ordinal))
+            return "面板仍说「暂不可用」，但 VT 解析已经可用——状态过时";
 
         return null;
     }
