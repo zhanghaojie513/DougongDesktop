@@ -35,7 +35,7 @@ App (Avalonia UI)  ──禁引 SDK──►  Ipc (纯契约)  ◄── Framewo
 ### 1. 前置
 
 ```bash
-dotnet --version     # 需要 .NET 10 SDK（global.json 钉 10.0.402，rollForward latestFeature）
+dotnet --version     # 需要 .NET 11 SDK（global.json 钉 11.0.100，rollForward latestFeature）
 python3 --version    # 只有改配色 token 时才需要
 ```
 
