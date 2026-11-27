@@ -168,13 +168,11 @@ internal static class DockChecks
 
         var source = File.ReadAllText(path);
 
-        if (inject) return "反证注入：未实现的 tab 没有标注";
-
-        // 不可用的 tab 要么"禁用 + 标题标注"，要么"可点开 + 首屏说明原因"。
+        // 不可用的 tab 要么"禁用 + 标题标注"，要么"可点开 + 完整实现/说明"。
         //
-        // 「上下文」是前者：完全没数据，禁用最诚实。
-        // 「终端」是后者：控件与原生库都接了，卡在上游缺陷，
-        //   所以可点开、且内容首屏必须写明原因（见 TerminalPanel 的状态文字）。
+        // 「上下文」：完全没数据，禁用 + 标题写「未实现」最诚实。
+        // 「终端」：F1–F4 已全部接入（VT + TerminalView + 跨平台 PTY + Dock 生命周期），
+        //   必须可点开、走 IPtySession / StartShell，且不得残留旧的「PTY 尚未接入」「暂不可用」文案。
         var contextLine = FindTabDeclaration(source, "上下文");
         var terminalLine = FindTabDeclaration(source, "终端");
 
@@ -187,12 +185,15 @@ internal static class DockChecks
         if (!contextLine.Contains("false", StringComparison.Ordinal))
             return "「上下文」tab 没有禁用（IsEnabled 应为 false）";
 
-        // 终端：可点开，但必须有面板，且面板首屏如实说明缺的是哪一半
+        // 终端：可点开，有面板构建方法，且右栏实现 IDisposable 回收子进程
         if (terminalLine.Contains("未实现", StringComparison.Ordinal))
-            return "「终端」tab 标着「未实现」，但控件已经接了——状态不准确";
+            return "「终端」tab 标着「未实现」，但控件与 PTY 已经接了——状态不准确";
 
         if (!source.Contains("BuildTerminalTab", StringComparison.Ordinal))
             return "「终端」tab 可点开却没有对应的面板构建方法";
+
+        if (!source.Contains("IDisposable", StringComparison.Ordinal))
+            return "RightDock 没有实现 IDisposable——关闭窗口时会残留孤儿 shell 进程";
 
         var panelPath = Path.Combine(
             RepoRoot, "src", "DougongDesktop.App", "Shell", "TerminalPanel.cs");
@@ -200,17 +201,20 @@ internal static class DockChecks
             return "找不到 TerminalPanel.cs——终端 tab 会打开一片空白";
 
         var panel = File.ReadAllText(panelPath);
+        if (inject)
+            panel += "\n// 注入过时文案：PTY 尚未接入";
 
-        // **2026-11-26 改**：以前这里断言首屏写「暂不可用」，
-        // 因为 VT 状态机建不起来。那不是上游缺陷，是我们把
-        // TerminalCoreOptions 用对象初始化器构造，导致 Replies 等字段为 null。
-        // 修好后 VT 可用了，缺的只剩 PTY——断言也要跟着变成"如实说明缺 PTY"。
-        if (!panel.Contains("PTY 尚未接入", StringComparison.Ordinal))
-            return "终端面板首屏没有说明「PTY 尚未接入」——VT 已可用，缺的是交互，不说明会让人以为能打字";
+        // **2026-11-27 改**：F3/F4 跨平台 PTY 已接入，不再允许保留「PTY 尚未接入」或「暂不可用」文案，
+        // 同时断言 TerminalPanel 真实接线到 IPtySession 与 StartShell。
+        if (panel.Contains("PTY 尚未接入", StringComparison.Ordinal))
+            return "终端面板仍写「PTY 尚未接入」，但 PTY 已经接入——状态过时";
 
-        // 也不能反过来宣称"暂不可用"：VT 确实在工作了
         if (panel.Contains("暂不可用", StringComparison.Ordinal))
-            return "面板仍说「暂不可用」，但 VT 解析已经可用——状态过时";
+            return "面板仍说「暂不可用」，但 VT 与 PTY 均已可用——状态过时";
+
+        if (!panel.Contains("IPtySession", StringComparison.Ordinal)
+            || !panel.Contains("StartShell", StringComparison.Ordinal))
+            return "终端面板未接入 IPtySession / StartShell——PTY 接线缺失";
 
         return null;
     }

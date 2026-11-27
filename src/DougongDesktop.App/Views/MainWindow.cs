@@ -194,10 +194,14 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         _conversation.StopRequested += () => _ = StopTurnAsync();
 
         // 右栏：点目录进入、点文件选中（选中目前只记日志，P8d 的交付物视图再用）
+        _rightDock.WorkingDirectory = Environment.CurrentDirectory;
         _rightDock.DirectoryRequested += path => _ = RequestDirectoryAsync(path);
         _rightDock.DirectoryUpRequested += path => _ = RequestDirectoryAsync(path);
         _rightDock.FileSelected += path =>
             Console.Error.WriteLine($"[ui] 选中文件：{path}（预览见 P8e）");
+
+        // 窗口关闭时回收右栏持有的 PTY 子进程，不留孤儿 shell。
+        Closed += (_, _) => _rightDock.Dispose();
 
         // 消息反馈 → 引擎（宿主侧只落本地诊断，不改会话状态）
         _conversation.FeedbackRequested += (itemId, rating, reason) =>
@@ -343,7 +347,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
             {
                 _rightDock.SelectTab("terminal");
                 Console.Error.WriteLine(
-                    $"[shell] 终端面板 核心就绪={_rightDock.Terminal?.IsCoreReady}");
+                    $"[shell] 终端面板 核心就绪={_rightDock.Terminal?.IsCoreReady} PTY运行={_rightDock.Terminal?.IsPtyRunning}");
             }
 
             if (Environment.GetEnvironmentVariable("DOUGONG_UI_NAV") is "1")

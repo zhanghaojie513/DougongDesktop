@@ -66,7 +66,8 @@ for check in tool-categories-match-dsh-name-table group-title-matches-dsh-compos
              turn-rail-renders-one-mark-per-turn turn-rail-mark-jumps-to-its-turn \
              conversation-uses-arc-scroll-area approval-card-uses-button-variants \
              message-actions-uses-copy-button right-dock-breadcrumb-uses-arc-control \
-             feedback-bar-uses-arc-feedback-actions sidebar-uses-new-arc-apis; do
+             feedback-bar-uses-arc-feedback-actions sidebar-uses-new-arc-apis \
+             terminal-panel-runs-real-pty-shell terminal-panel-encodes-key-input; do
   printf '%-42s ' "$check"
   if "$DOTNET" run --project tests/DougongDesktop.Ui.Headless.Checks \
         -c Release --no-build -- --break="$check" > /dev/null 2>&1; then

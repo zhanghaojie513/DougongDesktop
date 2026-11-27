@@ -51,9 +51,9 @@
 | P8c 设置域 | 6 | 0 | 0 | 1 | 1 | 8 | **100%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **19%** |
-| P8f 终端与浏览器 | 2 | 0 | 3 | 0 | 0 | 5 | **40%** |
+| P8f 终端与浏览器 | 4 | 0 | 1 | 0 | 0 | 5 | **80%** |
 | **P8g 中区会话域** | **15** | **1** | **1** | **0** | **6** | **23** | **91%** |
-| **合计** | **40** | **2** | **17** | **2** | **9** | **70** | **69%** |
+| **合计** | **42** | **2** | **15** | **2** | **9** | **70** | **73%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -64,7 +64,7 @@
 
 完成度算法：`(✅ + 🟡×0.5) / (✅+🟡+⬜)`，不含 `⏳` 与 `➖`。
 
-当前：`(40 + 2×0.5) / (40+2+17) = 41 / 59 = 69%`
+当前：`(42 + 2×0.5) / (42+2+15) = 43 / 59 = 73%`
 
 > **不做的那些（➖ 共 9 项）不算进分母**——它们是 dsh 也没有的东西，
 > 拿它们充数就成了"用没做的功能凑完成度"。
@@ -194,8 +194,8 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 |---|---|---|---|---|---|
 | F1 | ✅ | 终端 VT 解析 | `[Arc]` | `TerminalPanel` 走 `TerminalCore.Write` → `CaptureFrame` → `TerminalView.Snapshot`。**2026-11-26 修好**：此前四个版本都以为 `TerminalCore.Create` 抛 NRE 是上游缺陷，实际是我们把 `TerminalCoreOptions` 用对象初始化器构造——它只有带参构造函数，`Replies`/`TerminfoName`/`ScrollbackMaxLines` 等默认值只在构造函数里赋值，`new TerminalCoreOptions { Size = ... }` 合成的是 `(TerminalSize)default`，这些字段全为 null，原生回调解引用 `Replies` 就崩。改用构造函数后 VT 正常 | 检查 `terminal-panel-parses-escape-sequences`：`Probe()` 灌清屏+定位+着色序列，断言缓冲区里出现那两行文字且 `View.Snapshot` 非空。**反证**：把构造改回对象初始化器，检查报 `IsCoreReady=false` + NRE |
 | F2 | ✅ | 终端控件 | `[Arc]` | **已接进右栏 dock tab**：终端 tab 从"未实现"改为可点开，内容为 `TerminalPanel`（`TerminalView` + 状态说明） | 运行时 `核心就绪=False` + 面板显示原因。无头检查 `terminal-panel-reports-unavailable` 断言"不许装成能用" |
-| F3 | ⬜ | PTY 接入 | `[自有]` | Windows `ConPTY` / Unix `forkpty`，双向字节流 | 待做 |
-| F4 | ⬜ | 终端面板（dock tab） | `[Arc]` | `TerminalView` 放进右栏 | 待做 |
+| F3 | ✅ | PTY 接入 | `[自有]` | `Services/PtySession.cs` 跨平台适配：macOS/Linux 走 POSIX `forkpty` + `ioctl(TIOCSWINSZ)`（含 macOS ARM64 变参栈占位、fork 前 `Marshal.PrelinkAll`、`FD_CLOEXEC`、启动首包缓冲、`SIGHUP`/`SIGKILL` + `waitpid` 回收），Windows 走原生 `ConPTY`（`CreatePseudoConsole` / `ResizePseudoConsole`） | 无头检查 `terminal-panel-runs-real-pty-shell`（真实启动 `/bin/sh -i`、回显 `DOUGONG_PTY_OK`、动态 `ResizeTo(100,35)` 并经 `stty size` 实测 `35 100`、`Dispose` 回收进程，含反证） |
+| F4 | ✅ | 终端面板（dock tab） | `[Arc]` | `TerminalPanel` 双向接线 `IPtySession` + `TerminalCore` + `TerminalView` + `InputEncoder`（UI 线程合并消费、`ITerminalEffects.WriteToPty` 查询应答、键盘/IME/复制粘贴/滚轮/焦点/自适应 `GridSizeFor`、顶部工具栏配 Arc `Button` 清屏/重启）；`RightDock` 传工作区路径、切 tab 保活、`MainWindow.Closed` 调用 `Dispose()` | 无头检查 `terminal-panel-encodes-key-input`（含反证）+ `dock-unimplemented-tabs-are-labeled`（断言已去除旧文案并接入 `IPtySession`/`IDisposable`） |
 | F5 | ⬜ | 内置浏览器 | `[自有]` | WebView2（Windows）/ WebKitGTK（Linux） | 待做 |
 
 ### P8g 中区会话域
@@ -376,6 +376,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
 | 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
 | 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-27 | **P8f `F3 + F4` 落地：右栏交互式终端打通（P8f 40% → 80%，总体 69% → 73%）**。①在 `Services/PtySession.cs` 实现零 `unsafe` 的跨平台 `IPtySession` 适配层（macOS/Linux `forkpty` + `ioctl(TIOCSWINSZ)` + ARM64 变参栈对齐 + fork 前 `Marshal.PrelinkAll` + 首包输出缓冲 + `SIGHUP`/`SIGKILL` 回收；Windows 原生 `ConPTY`）；②`TerminalPanel` 完成 `IPtySession` ↔ `TerminalCore` ↔ `TerminalView` ↔ `InputEncoder` 双向接线，含 UI 线程合并消费、`WriteToPty` 查询应答、键盘/文本/IME/粘贴/滚轮/焦点/自适应 `GridSizeFor` 以及顶部工具栏（Arc `Button` Ghost/Small 清屏与重启）；③`RightDock` 注入工作区路径、切 tab 保活、`IDisposable` 接入 `MainWindow.Closed` 防孤儿进程；④更新 `dock-unimplemented-tabs-are-labeled`，新增 2 条无头 UI 检查与反证（`terminal-panel-runs-real-pty-shell` 实测 `echo` + `stty size` = `35 100`、`terminal-panel-encodes-key-input` 验 `ArrowUp`→`ESC[A` 与 DA1 应答），总检查数 133 → **135**（架构 92 + 无头 43） |
 | 2026-11-27 | **Arc 升 `1.3.2-preview.4` → `1.3.2-preview.6` + 接入 `FeedbackActions` + 清理 `SidebarView` 新 API**。①元数据比对 `1.3.2-preview.6`：`TKCode.Arc` 净增 9 类型（`SelectMenuSizing`、富文本/右键本地化资源），其余 6 包零删零增；②`FeedbackBar` 改用 Arc `FeedbackActions`（`Leading` 放 `CopyButton`、`Trailing` 放时间、中文化 `ResponseFeedbackLabels`、`PrivacyNote=null`，顺带补齐 M3 复制与时间）；③`SidebarView` 启用 `ExpandedWidth=280`、`ItemInvoked`（删掉手写 `RelayCommand`）、`MoreKey` 标 `IsAction=true`、新会话卡片改用 `Arc.Button(Secondary)`。新增 2 条无头检查与反证（无头 39 → 41，总计 133 条） |
 | 2026-11-27 | **对照 Arc `1.3.2-preview.4` 手册修正 3 处用法并完成 3 处减债（A13 ⬜→✅，P8a 达 100%）**。①补齐 `TKCode.Arc.Highlighting` + `UseArcHighlighting()`（此前 `TKCode.Arc.Markdown` 未传递引入该包，代码块高亮有静默失效风险），同步纳入 `PackageVersionChecks` 的版本与注册守卫；②`SettingsView` 的 4 个 `SegmentedControl` 子项从误用的 `Arc.Button` 改为官方 `SegmentedOption`（补无头断言）；③`ApprovalCard` 删掉无效的 Fluent `Classes.Add("accent")`，改用 `ButtonVariant`（Primary / Secondary / Danger）；④中区与右栏滚动区迁至 `Arc.ScrollArea`（`OverlayScrollbarMode = Always`，完成 A13）；⑤`MessageActions` 改用 `Arc.CopyButton`（`ResetAfter=1000ms`）；⑥`RightDock` 路径面包屑改用 `Arc.Breadcrumb`（`MaxVisibleItems=4`）。新增 4 条无头 UI 检查及反证（无头 35 → 39，总计 131 条） |
 | 2026-11-26 | **F1 修好，而且我之前四个版本的判断全错**（🟡→✅）。一直以为 `TerminalCore.Create` 抛 NRE 是上游缺陷，从 0.4.0 到 1.3.2 每次升级都"复验一遍仍然失败"。用户问"是什么问题"时我去查了真实原因：**`TerminalCoreOptions` 只有一个带参构造函数**，`Replies` / `TerminfoName` / `ScrollbackMaxLines` / `ScrollbackMaxBytes` / `ContinuationMaxBytes` / `DefaultCursorStyle` 的默认值**只在构造函数里赋值**。写 `new TerminalCoreOptions { Size = ... }` 时 C# 合成的是 `(TerminalSize)default` 调用，于是这些字段全是 null/0，原生回调解引用 `Replies` 就崩。并排跑两种写法（五分钟的事）立刻分明：初始化器 NRE、构造函数成功。**教训**：复现"只加包就能复现"只能证明问题不在集成代码里，**不能证明库有缺陷**——复现代码本身可能就是错的用法。我连错四个版本的原因正是"只验仍然失败"，从不把两种写法并排跑。检查 `terminal-panel-reports-unavailable` 改成 `terminal-panel-parses-escape-sequences`（断言 VT 真的解析出文字，而不是断言它坏）；`dock-unimplemented-tabs-are-labeled` 里那条"必须写暂不可用"也一并改掉，并加了一条反向断言"不许再说暂不可用" |

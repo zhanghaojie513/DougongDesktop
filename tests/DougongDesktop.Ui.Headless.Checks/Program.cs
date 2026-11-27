@@ -89,6 +89,8 @@ public static class Program
         failures += Check("right-dock-breadcrumb-uses-arc-control", RightDockBreadcrumbUsesArcControl);
         failures += Check("feedback-bar-uses-arc-feedback-actions", FeedbackBarUsesArcFeedbackActions);
         failures += Check("sidebar-uses-new-arc-apis", SidebarUsesNewArcApis);
+        failures += Check("terminal-panel-runs-real-pty-shell", TerminalPanelRunsRealPtyShell);
+        failures += Check("terminal-panel-encodes-key-input", TerminalPanelEncodesKeyInput);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -1425,7 +1427,7 @@ public static class Program
     /// </remarks>
     private static string? TerminalPanelParsesEscapeSequences()
     {
-        var panel = new DougongDesktop.App.Shell.TerminalPanel();
+        using var panel = new DougongDesktop.App.Shell.TerminalPanel();
 
         // Probe 走的是产品的 Write 路径（惰性建 core → 写入 → CaptureFrame）
         panel.Probe();
@@ -2177,6 +2179,12 @@ public static class Program
                 ? "Sidebar 确已设 ExpandedWidth=280，与'未设置'的错期望冲突——断言能发现差异"
                 : null,
 
+        // 终端真 PTY 会话：真实 StartShell 后 IsPtyRunning=true 且 Dispose 后转 false，与'无 PTY'冲突。
+        "terminal-panel-runs-real-pty-shell" => VerifyPtyCounterProof(),
+
+        // 终端按键编码与工具栏：真实面板把 ArrowUp 编成 ESC[A 并含两颗 Arc Ghost Button，与'空壳'冲突。
+        "terminal-panel-encodes-key-input" => VerifyTerminalEncoderCounterProof(),
+
         _ => null,
     };
 
@@ -2334,6 +2342,204 @@ public static class Program
             return $"新会话卡片 Variant 期望 Secondary，实际 {newSessionBtn.Variant}";
 
         return null;
+    }
+
+    /// <summary>
+    /// 终端面板（P8f F3+F4）：真实启动跨平台 PTY shell，验证双向字节流、
+    /// 动态尺寸调整（macOS/Linux 通过 <c>stty size</c> 实测 <c>TIOCSWINSZ</c>）与关闭回收。
+    /// </summary>
+    private static string? TerminalPanelRunsRealPtyShell()
+    {
+        using var panel = new TerminalPanel();
+        var opts = OperatingSystem.IsWindows()
+            ? new DougongDesktop.App.Services.PtyStartOptions(
+                WorkingDirectory: Environment.CurrentDirectory,
+                Columns: 80,
+                Rows: 24)
+            : new DougongDesktop.App.Services.PtyStartOptions(
+                WorkingDirectory: Environment.CurrentDirectory,
+                Shell: "/bin/sh",
+                Arguments: ["-i"],
+                Columns: 80,
+                Rows: 24);
+
+        if (!panel.StartShell(overrideOptions: opts))
+            return "StartShell 返回 false，真实 PTY 未能启动";
+        if (!panel.IsCoreReady)
+            return "StartShell 后 VT 核心未就绪（IsCoreReady=false）";
+        if (!panel.IsPtyRunning)
+            return "StartShell 后 PTY 未处于运行态（IsPtyRunning=false）";
+
+        var nl = OperatingSystem.IsWindows() ? "\r\n" : "\n";
+        panel.SendInput(System.Text.Encoding.UTF8.GetBytes($"echo DOUGONG_PTY_OK{nl}"));
+
+        if (!PumpUntil(() => panel.PlainText.Contains("DOUGONG_PTY_OK", StringComparison.Ordinal), TimeSpan.FromSeconds(4)))
+        {
+            return $"真实 shell 4s 内未回显 DOUGONG_PTY_OK（当前缓冲区：{panel.PlainText.Replace("\n", " / ")}）";
+        }
+
+        if (panel.View.Snapshot is null)
+            return "收到 PTY 输出后 TerminalView.Snapshot 仍为 null";
+
+        // 同步调整网格尺寸并触发内核 SIGWINCH / ConPTY ResizePseudoConsole。
+        panel.ResizeTo(100, 35);
+        if (panel.GridSize.Columns != 100 || panel.GridSize.Rows != 35)
+            return $"ResizeTo(100, 35) 后 GridSize 为 {panel.GridSize.Columns}×{panel.GridSize.Rows}";
+
+        if (!OperatingSystem.IsWindows())
+        {
+            // macOS ARM64 上 ioctl 变参走栈，stty size 是内核真实 winsize 的唯一铁证。
+            panel.SendInput("stty size\n"u8);
+            if (!PumpUntil(() => panel.PlainText.Contains("35 100", StringComparison.Ordinal), TimeSpan.FromSeconds(3)))
+            {
+                return $"ioctl(TIOCSWINSZ) 未生效：stty size 未输出 \"35 100\"（当前缓冲区：{panel.PlainText.Replace("\n", " / ")}）";
+            }
+        }
+
+        panel.Dispose();
+        if (panel.IsPtyRunning)
+            return "Dispose 之后 IsPtyRunning 仍为 true（子进程未回收）";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 终端面板输入编码与工具栏：按键通过 <see cref="TKCode.Terminal.Core.InputEncoder"/> 编码进 PTY、
+    /// VT 查询应答写回 PTY、Resize 转发给 PTY、工具栏提供 Arc Ghost 按钮。
+    /// </summary>
+    private static string? TerminalPanelEncodesKeyInput()
+    {
+        var mock = new MockPtySession();
+        using var panel = new TerminalPanel(ptyFactory: _ => mock);
+
+        var buttons = panel.GetLogicalDescendants().OfType<TKCode.Arc.Button>().ToArray();
+        if (buttons.Length < 2)
+            return $"终端工具栏只有 {buttons.Length} 个 Arc Button（期望至少 2：清屏/重启）";
+        if (buttons.Any(b => b.Variant != ButtonVariant.Ghost || b.Size != ControlSize.Small))
+            return "终端工具栏按钮应为 Ghost + Small";
+
+        if (!panel.StartShell())
+            return "Mock PTY 启动失败";
+
+        var arrowUp = new TKCode.Terminal.Core.KeyInput(
+            TKCode.Terminal.Core.TerminalKey.ArrowUp,
+            TKCode.Terminal.Core.KeyAction.Press,
+            TKCode.Terminal.Core.KeyMods.None,
+            null,
+            TKCode.Terminal.Core.KeyMods.None,
+            0,
+            false);
+
+        if (!panel.EncodeAndSendKey(arrowUp))
+            return "EncodeAndSendKey(ArrowUp) 返回 false";
+
+        var sent = mock.ReadWrittenAscii();
+        if (!sent.Contains("\u001b[A", StringComparison.Ordinal))
+            return $"ArrowUp 未编码为 ESC[A，实际写入：{EscapeAscii(sent)}";
+
+        // 验证 ITerminalEffects.WriteToPty：给 VT 喂 DA1 查询 ESC[c，核心应向 PTY 写回应答。
+        mock.EmitOutput("\u001b[c"u8.ToArray());
+        if (!PumpUntil(() => mock.ReadWrittenAscii().Contains("\u001b[?", StringComparison.Ordinal), TimeSpan.FromSeconds(2)))
+            return $"VT 收到 DA1 查询 ESC[c] 后未向 PTY 写回应答（实际：{EscapeAscii(mock.ReadWrittenAscii())}）";
+
+        panel.ResizeTo(110, 40);
+        if (mock.LastColumns != 110 || mock.LastRows != 40)
+            return $"ResizeTo(110, 40) 未转发给 PTY（实际 {mock.LastColumns}×{mock.LastRows}）";
+
+        panel.Dispose();
+        if (!mock.Disposed)
+            return "TerminalPanel.Dispose 未调用 IPtySession.Dispose";
+
+        return null;
+    }
+
+    private static string? VerifyPtyCounterProof()
+    {
+        using var panel = new TerminalPanel();
+        var ok = panel.StartShell(overrideOptions: OperatingSystem.IsWindows()
+            ? new DougongDesktop.App.Services.PtyStartOptions(Columns: 80, Rows: 24)
+            : new DougongDesktop.App.Services.PtyStartOptions(Shell: "/bin/sh", Arguments: ["-i"], Columns: 80, Rows: 24));
+        var running = panel.IsPtyRunning;
+        panel.Dispose();
+        return ok && running && !panel.IsPtyRunning
+            ? "真实 PTY 确能启动并在 Dispose 后退出，与'无 PTY'的错期望冲突——断言能发现差异"
+            : null;
+    }
+
+    private static string? VerifyTerminalEncoderCounterProof()
+    {
+        var mock = new MockPtySession();
+        using var panel = new TerminalPanel(ptyFactory: _ => mock);
+        panel.StartShell();
+        panel.EncodeAndSendKey(new TKCode.Terminal.Core.KeyInput(
+            TKCode.Terminal.Core.TerminalKey.ArrowUp,
+            TKCode.Terminal.Core.KeyAction.Press,
+            TKCode.Terminal.Core.KeyMods.None,
+            null,
+            TKCode.Terminal.Core.KeyMods.None,
+            0,
+            false));
+        return mock.ReadWrittenAscii().Contains("\u001b[A", StringComparison.Ordinal)
+            ? "TerminalPanel 确已把 ArrowUp 编为 ESC[A] 写入 PTY，与'按键无输出'的错期望冲突——断言能发现差异"
+            : null;
+    }
+
+    private static bool PumpUntil(Func<bool> predicate, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            Dispatcher.UIThread.RunJobs();
+            if (predicate()) return true;
+            Thread.Sleep(20);
+        }
+
+        Dispatcher.UIThread.RunJobs();
+        return predicate();
+    }
+
+    private static string EscapeAscii(string s) =>
+        s.Replace("\u001b", "\\x1b").Replace("\r", "\\r").Replace("\n", "\\n");
+
+    private sealed class MockPtySession : DougongDesktop.App.Services.IPtySession
+    {
+        private readonly object _lock = new();
+        private readonly MemoryStream _written = new();
+
+        public bool IsRunning => !Disposed;
+        public int? ExitCode => Disposed ? 0 : null;
+        public string ShellName => "mock-sh";
+        public bool Disposed { get; private set; }
+        public int LastColumns { get; private set; }
+        public int LastRows { get; private set; }
+
+        public event Action<byte[]>? OutputReceived;
+        public event Action<int>? Exited;
+
+        public void Write(ReadOnlySpan<byte> data)
+        {
+            lock (_lock) _written.Write(data);
+        }
+
+        public void Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0)
+        {
+            LastColumns = columns;
+            LastRows = rows;
+        }
+
+        public void EmitOutput(byte[] bytes) => OutputReceived?.Invoke(bytes);
+
+        public string ReadWrittenAscii()
+        {
+            lock (_lock) return System.Text.Encoding.Latin1.GetString(_written.ToArray());
+        }
+
+        public void Dispose()
+        {
+            if (Disposed) return;
+            Disposed = true;
+            Exited?.Invoke(0);
+        }
     }
 
     /// <summary>建一个最小 AppShell，供反证用。</summary>

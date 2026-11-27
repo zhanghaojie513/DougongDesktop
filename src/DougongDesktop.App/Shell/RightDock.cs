@@ -16,22 +16,21 @@ namespace DougongDesktop.App.Shell;
 /// 右栏 dock：文件 / 改动 / 计划 / 上下文 / 终端。
 /// </summary>
 /// <remarks>
-/// <b>五个 tab 里只有三个有真实数据</b>，另外两个必须如实标注"未实现"，
-/// 不放假内容。方案文档的原话是"本期只做占位面板，明确标注未实现，
-/// 不做假功能"——假功能比没有更糟：用户会以为它坏了。
+/// <b>五个 tab 里四个已有真实能力</b>，剩下的「上下文」必须如实标注"未实现"，
+/// 不放假内容。方案文档的原话是"不做假功能"——假功能比没有更糟：用户会以为它坏了。
 /// <para>
 /// 各 tab 的数据来源与限制：
 /// <list type="table">
-/// <item><term>文件</term><description>真实：新增 <c>fs/list</c> IPC 命令</description></item>
-/// <item><term>改动</term><description>真实：比对工具调用记录里出现过的写操作路径</description></item>
+/// <item><term>文件</term><description>真实：走 <c>fs/list</c> IPC 命令 + Arc <c>Breadcrumb</c></description></item>
+/// <item><term>改动</term><description>真实：回合前后由 SDK 版本哈希比对得出差异</description></item>
 /// <item><term>计划</term><description>真实：复用 P5 的 <c>PlanItem</c></description></item>
 /// <item><term>上下文</term><description><b>未实现</b>：SDK 只给累计消耗（<c>UsageLedger</c>），
 /// 不给"当前上下文占用多少"</description></item>
-/// <item><term>终端</term><description><b>未实现</b>：PTY 是独立进程 + 独立契约，工作量约等于一个阶段</description></item>
+/// <item><term>终端</term><description>真实：libghostty-vt + <c>TerminalView</c> + 跨平台 PTY（F1–F4）</description></item>
 /// </list>
 /// </para>
 /// </remarks>
-public sealed class RightDock : UserControl
+public sealed class RightDock : UserControl, IDisposable
 {
     private readonly TKCode.Arc.Tabs _tabs = new();
     private readonly Dictionary<string, TKCode.Arc.TabItem> _tabItems = new(StringComparer.Ordinal);
@@ -203,13 +202,24 @@ public sealed class RightDock : UserControl
         };
     }
 
+    /// <summary>终端启动时的工作目录（默认当前工作区目录）。</summary>
+    public string WorkingDirectory { get; set; } = Environment.CurrentDirectory;
+
     /// <summary>
-    /// 终端面板（P8f F1/F2）。惰性创建——不点这个 tab 就不加载原生库。
+    /// 终端面板（P8f F1–F4）。惰性创建——不点这个 tab 就不加载原生库、也不起 shell 进程；
+    /// 创建后跨 tab 切换保持存活，窗口关闭时通过 <see cref="Dispose"/> 回收。
     /// </summary>
     private TerminalPanel? _terminal;
 
     /// <summary>终端面板实例（诊断与自检用）。</summary>
     public TerminalPanel? Terminal => _terminal;
+
+    /// <summary>回收右栏持有的外部资源（例如运行中的终端 PTY 子进程）。</summary>
+    public void Dispose()
+    {
+        _terminal?.Dispose();
+        _terminal = null;
+    }
 
     /// <summary>
     /// 按 key 选中某个 tab（同步 Arc 的选中状态）。
@@ -221,6 +231,12 @@ public sealed class RightDock : UserControl
     /// </remarks>
     public void SelectTab(string key)
     {
+        if (_dockPanes.ContainsKey(key))
+        {
+            ShowTab(key);
+            return;
+        }
+
         if (!_tabItems.TryGetValue(key, out var item)) return;
         item.IsSelected = true;
     }
@@ -229,12 +245,17 @@ public sealed class RightDock : UserControl
     {
         if (_terminal is null)
         {
-            _terminal = new TerminalPanel();
+            _terminal = new TerminalPanel(workingDirectory: WorkingDirectory);
 
-            // 自检：灌一段带转义序列的内容，验证 VT 真的在解析。
-            // 不灌的话面板是空白的，"空白"与"坏了"看起来一样。
             if (Environment.GetEnvironmentVariable("DOUGONG_UI_TERMINAL") is "1")
+            {
+                // VT 自检模式：灌一段带转义序列的内容，不额外起交互式 shell。
                 _terminal.Probe();
+            }
+            else
+            {
+                _terminal.StartShell(WorkingDirectory);
+            }
         }
 
         return _terminal;
