@@ -135,6 +135,48 @@ public sealed record DirectoryListedEvent : ServerEvent
 public sealed record DirectoryEntry(string Name, bool IsDirectory, long Size);
 
 // ─────────────────────────────────────────────────────────────
+// 文档预览（右栏文件点击读取，P8e E7）
+// ─────────────────────────────────────────────────────────────
+
+/// <summary>只读读取工作区内单个文件用于文档预览（受工作区逃逸边界保护）。</summary>
+public sealed record ReadFileCommand : ClientCommand
+{
+    /// <summary>相对工作区根的文件路径。</summary>
+    public required string Path { get; init; }
+
+    /// <summary>可选工作区根路径；null 时沿用引擎默认工作区。</summary>
+    public string? Workspace { get; init; }
+}
+
+/// <summary>单个文件的只读预览载荷（响应 <see cref="ReadFileCommand"/>）。</summary>
+public sealed record FileReadEvent : ServerEvent
+{
+    /// <summary>请求的相对路径。</summary>
+    public required string Path { get; init; }
+
+    /// <summary>文件总字节数。</summary>
+    public long SizeBytes { get; init; }
+
+    /// <summary>UTF-8 文本内容（Markdown / 代码 / 纯文本）；二进制或出错时为 null。</summary>
+    public string? TextContent { get; init; }
+
+    /// <summary>图片预览的 Base64 字节载荷；非图片或超限时为 null。</summary>
+    public string? Base64Content { get; init; }
+
+    /// <summary>推断的 MIME 类型（例如 <c>text/markdown</c>、<c>image/png</c>）。</summary>
+    public string? MimeType { get; init; }
+
+    /// <summary>是否为非图片二进制文件（PDF / Office / 编译产物等）。</summary>
+    public bool IsBinary { get; init; }
+
+    /// <summary>内容被截断时的说明；null 表示完整读取。</summary>
+    public string? Truncated { get; init; }
+
+    /// <summary>读取失败或被拒绝的原因；null 表示成功。</summary>
+    public string? Error { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────
 // 文件改动（回合结束时）
 // ─────────────────────────────────────────────────────────────
 

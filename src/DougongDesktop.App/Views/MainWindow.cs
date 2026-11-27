@@ -215,12 +215,11 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
             Console.Error.WriteLine($"[ui] 选择模型 {modelId}（切换需重开会话，P8d 接入）");
         _conversation.StopRequested += () => _ = StopTurnAsync();
 
-        // 右栏：点目录进入、点文件选中（选中目前只记日志，P8d 的交付物视图再用）
+        // 右栏：点目录进入、点文件经 fs/read 在右栏内预览（P8e E7）
         _rightDock.WorkingDirectory = _workspaceOwner.ActiveWorkspace ?? Environment.CurrentDirectory;
         _rightDock.DirectoryRequested += path => _ = RequestDirectoryAsync(path);
         _rightDock.DirectoryUpRequested += path => _ = RequestDirectoryAsync(path);
-        _rightDock.FileSelected += path =>
-            Console.Error.WriteLine($"[ui] 选中文件：{path}（预览见 P8e）");
+        _rightDock.FileSelected += path => _ = RequestFilePreviewAsync(path);
 
         // 窗口关闭时回收右栏持有的 PTY 子进程，不留孤儿 shell。
         Closed += (_, _) => _rightDock.Dispose();
@@ -814,6 +813,10 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 _conversation.Composer.SetMentionGroups(ContextItemProjection.Groups);
                 break;
 
+            case FileReadEvent fileRead:
+                _rightDock.ApplyFilePreview(fileRead);
+                break;
+
             case TurnStartedEvent started:
                 _capsule.OnTurnStarted();
                 // 生成中：发送键变停止键（Arc 的 AiComposer 自带这个切换）
@@ -1193,6 +1196,31 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[ui] 列目录失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>请求只读读取工作区内单个文件用于右栏预览（P8e E7）。</summary>
+    private async Task RequestFilePreviewAsync(string path)
+    {
+        _rightDock.ShowFileLoading(path);
+        try
+        {
+            await _engine.SendAsync(new ReadFileCommand
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                Path = path,
+                Workspace = _workspaceOwner.ActiveWorkspace,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 读取文件预览失败：{ex.Message}");
+            _rightDock.ApplyFilePreview(new FileReadEvent
+            {
+                Sequence = 0,
+                Path = path,
+                Error = $"无法读取文件：{ex.Message}",
+            });
         }
     }
 

@@ -648,8 +648,10 @@ internal static class DockChecks
         var expected = new (Type Derived, Type Base, string Discriminator)[]
         {
             (typeof(ListDirectoryCommand), typeof(ClientCommand), "fs/list"),
+            (typeof(ReadFileCommand), typeof(ClientCommand), "fs/read"),
             (typeof(ListModelsCommand), typeof(ClientCommand), "model/list"),
             (typeof(DirectoryListedEvent), typeof(ServerEvent), "fs/listed"),
+            (typeof(FileReadEvent), typeof(ServerEvent), "fs/file"),
             (typeof(WorkspaceChangedEvent), typeof(ServerEvent), "fs/changed"),
             (typeof(ModelsListedEvent), typeof(ServerEvent), "model/listed"),
         };

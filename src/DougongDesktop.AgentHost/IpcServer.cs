@@ -240,6 +240,10 @@ public sealed class IpcServer : IAsyncDisposable
                     await ListDirectoryAsync(list, connection, cancellationToken).ConfigureAwait(false);
                     break;
 
+                case ReadFileCommand readFile:
+                    await ReadFileAsync(readFile, connection, cancellationToken).ConfigureAwait(false);
+                    break;
+
                 case ListPermissionPresetsCommand presets:
                     await connection.SendAsync(new PermissionPresetListedEvent
                     {
@@ -577,6 +581,198 @@ public sealed class IpcServer : IAsyncDisposable
                 Sequence = NextStatusSequence(),
                 Path = relative,
                 Entries = [],
+                Error = $"{ex.GetType().Name}: {ex.Message}",
+            }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 只读读取工作区内单个文件供右栏文档预览（P8e E7）。
+    /// 与 <see cref="ListDirectoryAsync"/> 共享同一套工作区逃逸边界规则。
+    /// </summary>
+    private async Task ReadFileAsync(
+        ReadFileCommand command, IpcConnection connection, CancellationToken cancellationToken)
+    {
+        const int maxTextBytes = 256 * 1024;
+        const int maxImageBytes = 5 * 1024 * 1024;
+
+        var relative = command.Path ?? string.Empty;
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(relative))
+            {
+                await connection.SendAsync(new FileReadEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    RequestId = command.RequestId,
+                    Path = relative,
+                    Error = "文件路径为空。",
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var baseWorkspace = !string.IsNullOrWhiteSpace(command.Workspace) && Directory.Exists(command.Workspace)
+                ? command.Workspace
+                : _workspace;
+            var root = Path.GetFullPath(baseWorkspace);
+            var target = Path.GetFullPath(Path.Combine(root, relative));
+
+            var rootWithSep = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var inside = target.Equals(root, StringComparison.OrdinalIgnoreCase)
+                         || target.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase);
+
+            if (!inside)
+            {
+                await connection.SendAsync(new FileReadEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    RequestId = command.RequestId,
+                    Path = relative,
+                    Error = $"路径 '{relative}' 在工作区之外，已拒绝。",
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (!File.Exists(target))
+            {
+                await connection.SendAsync(new FileReadEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    RequestId = command.RequestId,
+                    Path = relative,
+                    Error = $"文件不存在：{relative}",
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var info = new FileInfo(target);
+            var ext = Path.GetExtension(target).ToLowerInvariant();
+            var imageMime = ext switch
+            {
+                ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".gif" => "image/gif",
+                ".webp" => "image/webp",
+                ".bmp" => "image/bmp",
+                ".ico" => "image/x-icon",
+                _ => null,
+            };
+
+            if (imageMime is not null)
+            {
+                if (info.Length > maxImageBytes)
+                {
+                    await connection.SendAsync(new FileReadEvent
+                    {
+                        Sequence = NextStatusSequence(),
+                        RequestId = command.RequestId,
+                        Path = relative,
+                        SizeBytes = info.Length,
+                        MimeType = imageMime,
+                        IsBinary = true,
+                        Error = $"图片大小 {info.Length / (1024.0 * 1024.0):0.1} MB，超过 5 MB 预览上限。",
+                    }, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                var raw = await File.ReadAllBytesAsync(target, cancellationToken).ConfigureAwait(false);
+                await connection.SendAsync(new FileReadEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    RequestId = command.RequestId,
+                    Path = relative,
+                    SizeBytes = info.Length,
+                    Base64Content = Convert.ToBase64String(raw),
+                    MimeType = imageMime,
+                    IsBinary = false,
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var knownBinaryMime = ext switch
+            {
+                ".pdf" => "application/pdf",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                ".zip" or ".tar" or ".gz" or ".7z" or ".nupkg" => "application/zip",
+                ".dll" or ".exe" or ".dylib" or ".so" or ".pdb" or ".woff2" or ".ttf" => "application/octet-stream",
+                _ => null,
+            };
+
+            if (knownBinaryMime is not null)
+            {
+                await connection.SendAsync(new FileReadEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    RequestId = command.RequestId,
+                    Path = relative,
+                    SizeBytes = info.Length,
+                    MimeType = knownBinaryMime,
+                    IsBinary = true,
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var toRead = (int)Math.Min(info.Length, maxTextBytes);
+            var buffer = new byte[toRead];
+            await using (var fs = File.OpenRead(target))
+            {
+                var read = 0;
+                while (read < toRead)
+                {
+                    var n = await fs.ReadAsync(buffer.AsMemory(read, toRead - read), cancellationToken)
+                        .ConfigureAwait(false);
+                    if (n <= 0) break;
+                    read += n;
+                }
+
+                if (read < toRead)
+                    Array.Resize(ref buffer, read);
+            }
+
+            // 前 8 KB 含 NUL 字节视作二进制，避免把乱码灌进代码高亮器。
+            var probeLen = Math.Min(buffer.Length, 8192);
+            var hasNul = Array.IndexOf(buffer, (byte)0, 0, probeLen) >= 0;
+            if (hasNul)
+            {
+                await connection.SendAsync(new FileReadEvent
+                {
+                    Sequence = NextStatusSequence(),
+                    RequestId = command.RequestId,
+                    Path = relative,
+                    SizeBytes = info.Length,
+                    MimeType = "application/octet-stream",
+                    IsBinary = true,
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var text = System.Text.Encoding.UTF8.GetString(buffer);
+            var mime = ext is ".md" or ".markdown" ? "text/markdown" : "text/plain";
+
+            await connection.SendAsync(new FileReadEvent
+            {
+                Sequence = NextStatusSequence(),
+                RequestId = command.RequestId,
+                Path = relative,
+                SizeBytes = info.Length,
+                TextContent = text,
+                MimeType = mime,
+                IsBinary = false,
+                Truncated = info.Length > maxTextBytes
+                    ? $"文件总大小 {info.Length / 1024.0:0.#} KB，预览已截断至前 {maxTextBytes / 1024} KB。"
+                    : null,
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await connection.SendAsync(new FileReadEvent
+            {
+                Sequence = NextStatusSequence(),
+                RequestId = command.RequestId,
+                Path = relative,
                 Error = $"{ex.GetType().Name}: {ex.Message}",
             }, cancellationToken).ConfigureAwait(false);
         }

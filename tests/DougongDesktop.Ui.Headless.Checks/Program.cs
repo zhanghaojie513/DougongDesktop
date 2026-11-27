@@ -95,6 +95,8 @@ public static class Program
         failures += Check("trajectory-panel-uses-arc-agent-timeline", TrajectoryPanelUsesArcAgentTimeline);
         failures += Check("workspace-picker-matches-rc3-contract", WorkspacePickerMatchesRc3Contract);
         failures += Check("sidebar-switches-grouped-and-flat-sessions", SidebarSwitchesGroupedAndFlatSessions);
+        failures += Check("fs-read-roundtrips-and-classifies-previews", FsReadRoundtripsAndClassifiesPreviews);
+        failures += Check("right-dock-previews-markdown-code-and-binary", RightDockPreviewsMarkdownCodeAndBinary);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -2207,6 +2209,16 @@ public static class Program
         // 侧栏分组/扁平模式：真实分组模式按工作区拆 section、扁平模式合为「全部会话」，与'固定单组'冲突。
         "sidebar-switches-grouped-and-flat-sessions" => VerifySidebarGroupingCounterProof(),
 
+        // 文档预览协议与分类：真实把 .cs 判为 Code/csharp、.pdf(binary) 判为 UnsupportedBinary，与'全按纯文本'冲突。
+        "fs-read-roundtrips-and-classifies-previews" =>
+            DocumentPreviewClassifier.Classify("Program.cs", false, false, false) == DocumentPreviewKind.Code
+            && DocumentPreviewClassifier.Classify("spec.pdf", true, false, false) == DocumentPreviewKind.UnsupportedBinary
+                ? "DocumentPreviewClassifier 确已区分 Code 与 UnsupportedBinary，与'全部纯文本'冲突——断言能发现差异"
+                : null,
+
+        // 右栏文档预览：真实渲染 Markdown / CodeBlock(csharp) / 图片 / 降级占位并可返回文件列表，与'无预览面板'冲突。
+        "right-dock-previews-markdown-code-and-binary" => VerifyDocumentPreviewCounterProof(),
+
         _ => null,
     };
 
@@ -2892,6 +2904,150 @@ public static class Program
         private string? _content;
         public string? Read(string name) => _content;
         public bool Write(string name, string content) { _content = content; return true; }
+    }
+
+    /// <summary>
+    /// 文档预览协议与分类（P8e E7）：<c>fs/read</c> / <c>fs/file</c> 经生产配置往返，
+    /// 且按扩展名/载荷正确分类 Markdown / Code / Image / UnsupportedBinary / Error。
+    /// </summary>
+    private static string? FsReadRoundtripsAndClassifiesPreviews()
+    {
+        var opts = DesktopProtocol.Json;
+
+        ClientCommand cmd = new ReadFileCommand
+        {
+            RequestId = "r-read",
+            Path = "src/App.cs",
+            Workspace = "/tmp/ws",
+        };
+        var cmdJson = System.Text.Json.JsonSerializer.Serialize(cmd, typeof(ClientCommand), opts);
+        var cmdBack = System.Text.Json.JsonSerializer.Deserialize<ClientCommand>(cmdJson, opts) as ReadFileCommand;
+        if (cmdBack is null || cmdBack.Path != "src/App.cs" || cmdBack.Workspace != "/tmp/ws")
+            return $"ReadFileCommand 往返失败：{cmdJson}";
+
+        ServerEvent evt = new FileReadEvent
+        {
+            Sequence = 9,
+            RequestId = "r-read",
+            Path = "src/App.cs",
+            SizeBytes = 128,
+            TextContent = "class App {}",
+            MimeType = "text/plain",
+        };
+        var evtJson = System.Text.Json.JsonSerializer.Serialize(evt, typeof(ServerEvent), opts);
+        var evtBack = System.Text.Json.JsonSerializer.Deserialize<ServerEvent>(evtJson, opts) as FileReadEvent;
+        if (evtBack is null || evtBack.TextContent != "class App {}" || evtBack.SizeBytes != 128)
+            return $"FileReadEvent 往返失败：{evtJson}";
+
+        if (DocumentPreviewClassifier.Classify("README.md", false, false, false) != DocumentPreviewKind.Markdown)
+            return "README.md 应判为 Markdown";
+        if (DocumentPreviewClassifier.Classify("Program.cs", false, false, false) != DocumentPreviewKind.Code
+            || DocumentPreviewClassifier.LanguageForPath("Program.cs") != "csharp")
+            return "Program.cs 应判为 Code / csharp";
+        if (DocumentPreviewClassifier.LanguageForPath("Dockerfile") != "dockerfile")
+            return "Dockerfile 应识别语言 dockerfile";
+        if (DocumentPreviewClassifier.Classify("logo.png", false, true, false) != DocumentPreviewKind.Image)
+            return "logo.png（含图片载荷）应判为 Image";
+        if (DocumentPreviewClassifier.Classify("report.pdf", true, false, false) != DocumentPreviewKind.UnsupportedBinary)
+            return "report.pdf（二进制）应判为 UnsupportedBinary";
+        if (DocumentPreviewClassifier.Classify("missing.cs", false, false, true) != DocumentPreviewKind.Error)
+            return "带错误消息时应判为 Error";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 右栏文档预览面板（P8e E7）：真实走 ShowFileLoading → ApplyFilePreview，
+    /// 验证 Markdown / CodeBlock(高亮+行号) / PNG 图片 / 二进制诚实降级与返回文件树。
+    /// </summary>
+    private static string? RightDockPreviewsMarkdownCodeAndBinary()
+    {
+        using var dock = BuildRightDockWithDir("src");
+
+        // 1) 加载态 → Markdown 预览（同时验证连续切换不会触发视觉父节点重复挂载异常）
+        dock.ShowFileLoading("README.md");
+        dock.ApplyFilePreview(new FileReadEvent
+        {
+            Sequence = 2,
+            Path = "README.md",
+            SizeBytes = 64,
+            TextContent = "# 标题\n\n正文与 **加粗**。",
+            MimeType = "text/markdown",
+        });
+
+        var preview = dock.Preview;
+        if (preview is null || preview.CurrentKind != DocumentPreviewKind.Markdown)
+            return $"Markdown 预览状态异常（kind={preview?.CurrentKind}）";
+        if (!preview.GetLogicalDescendants().OfType<Markdown>().Any())
+            return "Markdown 预览未使用 Arc Markdown 控件";
+        if (!preview.GetLogicalDescendants().OfType<CopyButton>().Any(c => c.IsVisible))
+            return "文本预览缺少可见的 Arc CopyButton";
+
+        // 2) 代码预览 → Arc CodeBlock + csharp + ShowLineNumbers
+        dock.ApplyFilePreview(new FileReadEvent
+        {
+            Sequence = 3,
+            Path = "src/Program.cs",
+            SizeBytes = 120,
+            TextContent = "public static class Program { }",
+            MimeType = "text/plain",
+        });
+        var codeBlock = preview.GetLogicalDescendants().OfType<CodeBlock>().FirstOrDefault();
+        if (codeBlock is null || codeBlock.Language != "csharp" || !codeBlock.ShowLineNumbers)
+            return $"C# 预览未使用 Arc CodeBlock(csharp, ShowLineNumbers=true)，实际 lang={codeBlock?.Language}";
+
+        // 3) 图片预览（合法 1x1 透明 PNG）
+        const string TinyPngBase64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        dock.ApplyFilePreview(new FileReadEvent
+        {
+            Sequence = 4,
+            Path = "assets/dot.png",
+            SizeBytes = 68,
+            Base64Content = TinyPngBase64,
+            MimeType = "image/png",
+        });
+        var image = preview.GetLogicalDescendants().OfType<Image>().FirstOrDefault();
+        if (preview.CurrentKind != DocumentPreviewKind.Image || image?.Source is null)
+            return "PNG 图片预览未能解码出 Bitmap";
+
+        // 4) 二进制/PDF 诚实降级（不出现 CodeBlock）
+        dock.ApplyFilePreview(new FileReadEvent
+        {
+            Sequence = 5,
+            Path = "docs/spec.pdf",
+            SizeBytes = 4096,
+            IsBinary = true,
+            MimeType = "application/pdf",
+        });
+        if (preview.CurrentKind != DocumentPreviewKind.UnsupportedBinary
+            || preview.GetLogicalDescendants().OfType<CodeBlock>().Any())
+        {
+            return "PDF 二进制文件应走诚实降级卡片，不得用 CodeBlock 强行渲染";
+        }
+
+        // 5) 关闭预览 → 恢复文件列表
+        dock.CloseFilePreview();
+        if (dock.GetLogicalDescendants().OfType<DocumentPreviewPanel>().Any())
+            return "CloseFilePreview 后文件 tab 仍停在预览面板而未恢复目录列表";
+
+        return null;
+    }
+
+    private static string? VerifyDocumentPreviewCounterProof()
+    {
+        using var dock = BuildRightDockWithDir("src");
+        dock.ApplyFilePreview(new FileReadEvent
+        {
+            Sequence = 1,
+            Path = "src/App.cs",
+            SizeBytes = 32,
+            TextContent = "class App {}",
+            MimeType = "text/plain",
+        });
+        return dock.Preview?.GetLogicalDescendants().OfType<CodeBlock>().Any(c => c.Language == "csharp") == true
+            ? "RightDock 确已用 Arc CodeBlock(csharp) 预览文件，与'无预览实现'冲突——断言能发现差异"
+            : null;
     }
 
     /// <summary>建一个最小 AppShell，供反证用。</summary>

@@ -297,6 +297,7 @@ public enum NoticeLevel
 [JsonDerivedType(typeof(CancelSubagentCommand), "subagent/cancel")]
 // 桌面端自有
 [JsonDerivedType(typeof(ListDirectoryCommand), "fs/list")]
+[JsonDerivedType(typeof(ReadFileCommand), "fs/read")]
 [JsonDerivedType(typeof(SubmitFeedbackCommand), "feedback/submit")]
 public abstract record ClientCommand
 {
@@ -432,6 +433,7 @@ public sealed record CancelSubagentCommand : ClientCommand
 [JsonDerivedType(typeof(SubagentUpdatedEvent), "subagent/updated")]
 // 桌面端自有
 [JsonDerivedType(typeof(DirectoryListedEvent), "fs/listed")]
+[JsonDerivedType(typeof(FileReadEvent), "fs/file")]
 [JsonDerivedType(typeof(WorkspaceChangedEvent), "fs/changed")]
 public abstract record ServerEvent
 {

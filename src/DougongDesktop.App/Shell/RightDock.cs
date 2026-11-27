@@ -322,6 +322,15 @@ public sealed class RightDock : UserControl, IDisposable
         _ => BuildNotImplemented(key),
     };
 
+    /// <summary>文档预览面板实例（P8e E7，诊断与自检用）。</summary>
+    public DocumentPreviewPanel? Preview => _preview;
+
+    private DirectoryListedEvent? _latestDirectory;
+    private DocumentPreviewPanel? _preview;
+    private Grid? _filePreviewHost;
+    private ContentControl? _previewBreadcrumbHost;
+    private bool _showingPreview;
+
     /// <summary>把引擎回来的目录内容填进文件 tab。</summary>
     public void ApplyDirectory(DirectoryListedEvent listed)
     {
@@ -330,7 +339,67 @@ public sealed class RightDock : UserControl, IDisposable
         if (listed.Error is not { Length: > 0 })
             CurrentDirectory = listed.Path ?? string.Empty;
 
+        _latestDirectory = listed;
+        _showingPreview = false;
         SetTabContent(Keys.Files, BuildFilesTab(listed));
+    }
+
+    /// <summary>在文件 tab 内切入文档预览加载态（点击文件时调用）。</summary>
+    public void ShowFileLoading(string path)
+    {
+        EnsurePreviewPanel().ShowLoading(path);
+        _showingPreview = true;
+        SetTabContent(Keys.Files, GetOrUpdateFilePreviewHost());
+    }
+
+    /// <summary>用引擎返回的 <see cref="FileReadEvent"/> 渲染文档预览（P8e E7）。</summary>
+    public void ApplyFilePreview(FileReadEvent file)
+    {
+        EnsurePreviewPanel().Apply(file);
+        _showingPreview = true;
+        SetTabContent(Keys.Files, GetOrUpdateFilePreviewHost());
+    }
+
+    /// <summary>关闭文档预览，回到当前目录的文件树。</summary>
+    public void CloseFilePreview()
+    {
+        if (!_showingPreview) return;
+        _showingPreview = false;
+        SetTabContent(Keys.Files, BuildFilesTab(_latestDirectory));
+    }
+
+    private DocumentPreviewPanel EnsurePreviewPanel()
+    {
+        if (_preview is not null) return _preview;
+        _preview = new DocumentPreviewPanel();
+        _preview.CloseRequested += CloseFilePreview;
+        return _preview;
+    }
+
+    private Control GetOrUpdateFilePreviewHost()
+    {
+        if (_filePreviewHost is null)
+        {
+            _previewBreadcrumbHost = new ContentControl();
+            _filePreviewHost = new Grid
+            {
+                RowDefinitions = new RowDefinitions("Auto,*"),
+                Children =
+                {
+                    _previewBreadcrumbHost,
+                    PlaceRow(EnsurePreviewPanel(), 1),
+                },
+            };
+        }
+
+        _previewBreadcrumbHost!.Content = BuildBreadcrumb();
+        return _filePreviewHost;
+    }
+
+    private static Control PlaceRow(Control c, int row)
+    {
+        Grid.SetRow(c, row);
+        return c;
     }
 
     /// <summary>把最新的计划填进计划 tab。</summary>
@@ -345,6 +414,7 @@ public sealed class RightDock : UserControl, IDisposable
 
     private Control BuildFilesTab(DirectoryListedEvent? listed = null)
     {
+        listed ??= _latestDirectory;
         if (listed is null)
         {
             return Hint("正在读取工作区目录…");
