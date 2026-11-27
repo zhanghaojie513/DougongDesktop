@@ -91,6 +91,8 @@ public static class Program
         failures += Check("sidebar-uses-new-arc-apis", SidebarUsesNewArcApis);
         failures += Check("terminal-panel-runs-real-pty-shell", TerminalPanelRunsRealPtyShell);
         failures += Check("terminal-panel-encodes-key-input", TerminalPanelEncodesKeyInput);
+        failures += Check("trajectory-projection-maps-turns-and-subagents", TrajectoryProjectionMapsTurnsAndSubagents);
+        failures += Check("trajectory-panel-uses-arc-agent-timeline", TrajectoryPanelUsesArcAgentTimeline);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -918,10 +920,10 @@ public static class Program
             if (dock.DockPanes is null)
                 return "DOUGONG_UI_DOCK=1 时没有走 Dock 模式（Content 仍是 Tabs）";
 
-            if (dock.DockPanes.Count != 5)
-                return $"Dock pane 只有 {dock.DockPanes.Count} 个（期望 5）";
+            if (dock.DockPanes.Count != 6)
+                return $"Dock pane 只有 {dock.DockPanes.Count} 个（期望 6）";
 
-            foreach (var key in new[] { "files", "changes", "plan", "context", "terminal" })
+            foreach (var key in new[] { "files", "changes", "plan", "trajectory", "context", "terminal" })
                 if (!dock.DockPanes.ContainsKey(key))
                     return $"缺少 pane「{key}」";
 
@@ -2185,6 +2187,12 @@ public static class Program
         // 终端按键编码与工具栏：真实面板把 ArrowUp 编成 ESC[A 并含两颗 Arc Ghost Button，与'空壳'冲突。
         "terminal-panel-encodes-key-input" => VerifyTerminalEncoderCounterProof(),
 
+        // 轨迹投影：真实把审批耗时拆成 Waiting 段、把子智能体排成第二行并建交接连线，与'扁平无子行'冲突。
+        "trajectory-projection-maps-turns-and-subagents" => VerifyTrajectoryProjectionCounterProof(),
+
+        // 轨迹面板：真实 RightDock 轨迹 tab 由 Arc AgentTimeline 驱动并中文化标签，与'未接入 AgentTimeline'冲突。
+        "trajectory-panel-uses-arc-agent-timeline" => VerifyTrajectoryPanelCounterProof(),
+
         _ => null,
     };
 
@@ -2540,6 +2548,198 @@ public static class Program
             Disposed = true;
             Exited?.Invoke(0);
         }
+    }
+
+    /// <summary>
+    /// Trajectory 投影层（P8d D4）：验证推理、审批等待（Waiting）、工具执行（Tool）、失败诊断、
+    /// 子智能体分行与双向 Handoff 以及运行中开放段（End=null）的精确映射。
+    /// </summary>
+    private static string? TrajectoryProjectionMapsTurnsAndSubagents()
+    {
+        var store = new TrajectorySessionStore();
+        store.SetModelName("deepseek-reasoner");
+
+        var t0 = new DateTimeOffset(2026, 11, 27, 13, 0, 0, TimeSpan.FromHours(8));
+        store.OnTurnStarted("t1", t0);
+        store.OnItemAdded("t1", new UserMessageItem { Id = "u1", At = t0, Text = "排查构建失败原因" });
+        store.OnItemAdded("t1", new ReasoningItem { Id = "r1", At = t0.AddSeconds(0.2), Text = "先读项目文件\n再跑一次构建", IsStreaming = false });
+        store.OnItemAdded("t1", new DougongDesktop.Ipc.ToolCallItem
+        {
+            Id = "tc1",
+            At = t0.AddSeconds(2.0),
+            InvocationId = "inv-1",
+            ToolName = "bash",
+            Status = DougongDesktop.Ipc.ToolCallStatus.Succeeded,
+            ApprovalElapsed = TimeSpan.FromSeconds(1.5),
+            ExecutionElapsed = TimeSpan.FromSeconds(0.8),
+        });
+        store.OnItemAdded("t1", new DougongDesktop.Ipc.ToolCallItem
+        {
+            Id = "tc2",
+            At = t0.AddSeconds(4.5),
+            InvocationId = "inv-2",
+            ToolName = "write",
+            Status = DougongDesktop.Ipc.ToolCallStatus.Failed,
+            Diagnostic = "权限不足",
+            ExecutionElapsed = TimeSpan.FromSeconds(0.3),
+        });
+        store.OnSubagentUpdated(
+            new SubagentInfo("sub-1", "扫描 csproj", SubagentRunState.Running, t0.AddSeconds(1.0), "t1", null),
+            t0.AddSeconds(1.0));
+        store.OnSubagentUpdated(
+            new SubagentInfo("sub-1", "扫描 csproj", SubagentRunState.Completed, t0.AddSeconds(1.0), "t1", 3),
+            t0.AddSeconds(3.5));
+        store.OnItemAdded("t1", new AssistantMessageItem { Id = "a1", At = t0.AddSeconds(5.0), Text = "已定位问题。", IsStreaming = false });
+        store.OnTurnCompleted("t1", TurnStatus.Completed, t0.AddSeconds(5.8));
+
+        // 第 2 轮运行中：带开放的流式思考段
+        var t2 = t0.AddSeconds(10);
+        store.OnTurnStarted("t2", t2);
+        store.OnItemAdded("t2", new ReasoningItem { Id = "r2", At = t2.AddSeconds(0.1), Text = "继续检查中", IsStreaming = true });
+
+        var views = store.BuildViews();
+        if (views.Count != 2)
+            return $"应投影出 2 轮，实际 {views.Count} 轮";
+
+        var first = views[0];
+        if (first.Agents.Count != 2)
+            return $"第 1 轮应有 2 个智能体行（主+子），实际 {first.Agents.Count}";
+        if (first.Agents[0].ModelName != "deepseek-reasoner")
+            return $"主智能体模型名期望 deepseek-reasoner，实际 {first.Agents[0].ModelName ?? "(null)"}";
+
+        var waiting = first.Spans.FirstOrDefault(s => s.Kind == TrajectorySpanKind.Waiting);
+        if (waiting is null || Math.Abs((waiting.EndSeconds ?? 0) - 3.5) > 0.01)
+            return $"审批等待应映射为 Waiting 段 [2.0, 3.5]，实际 {waiting?.StartSeconds}..{waiting?.EndSeconds}";
+
+        var bashTool = first.Spans.FirstOrDefault(s => s.Id == "tc1");
+        if (bashTool is null || bashTool.Kind != TrajectorySpanKind.Tool
+            || Math.Abs(bashTool.StartSeconds - 3.5) > 0.01
+            || Math.Abs((bashTool.EndSeconds ?? 0) - 4.3) > 0.01)
+        {
+            return $"bash 执行段应在审批之后 [3.5, 4.3]，实际 {bashTool?.StartSeconds}..{bashTool?.EndSeconds}";
+        }
+
+        var failedTool = first.Spans.FirstOrDefault(s => s.Id == "tc2");
+        if (failedTool is null || failedTool.Status != TrajectorySpanStatus.Failed || failedTool.Detail != "权限不足")
+            return "失败工具未保留 Failed 状态或 Diagnostic 诊断详情";
+
+        if (first.Handoffs.Count != 2
+            || first.Handoffs[0].FromAgentId != TrajectoryProjection.OrchestratorId
+            || first.Handoffs[0].ToAgentId != "sub-1"
+            || first.Handoffs[1].FromAgentId != "sub-1"
+            || first.Handoffs[1].ToAgentId != TrajectoryProjection.OrchestratorId)
+        {
+            return $"子智能体应产生派发+返回 2 条 Handoff，实际 {first.Handoffs.Count} 条";
+        }
+
+        var second = views[1];
+        if (second.Status != TurnStatus.Running || second.Spans.All(s => s.EndSeconds is not null))
+            return "运行中轮次的流式片段 EndSeconds 应为 null（供 live 模式实时增长）";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 右栏「轨迹」tab（P8d D4）：必须由 Arc <see cref="AgentTimeline"/> 承载，带中文化标签、
+    /// 三类耗时段、多轮切换 <see cref="SegmentedControl"/> 与 live 状态切换。
+    /// </summary>
+    private static string? TrajectoryPanelUsesArcAgentTimeline()
+    {
+        using var dock = new RightDock();
+        var store = BuildSampleTrajectoryStore();
+        dock.ApplyTrajectory(store.BuildViews());
+        dock.SelectTab(RightDock.Keys.Trajectory);
+
+        var panel = dock.Trajectory;
+        if (panel is null)
+            return "切到 RightDock 轨迹 tab 后 TrajectoryPanel 仍为 null";
+
+        var timeline = panel.GetLogicalDescendants().OfType<AgentTimeline>().FirstOrDefault();
+        if (timeline is null)
+            return "TrajectoryPanel 里没有找到 Arc AgentTimeline 控件";
+
+        if (timeline.Labels.Thinking != "思考" || timeline.Labels.ToolCall != "工具调用" || timeline.Labels.Waiting != "等待")
+            return $"AgentTimeline.Labels 未中文化（Thinking={timeline.Labels.Thinking}）";
+
+        if (panel.TurnCount != 2)
+            return $"期望 2 轮轨迹，实际 {panel.TurnCount}";
+
+        // 默认跟随最新一轮（第 2 轮为运行中 → IsLive=true）
+        if (!timeline.IsLive)
+            return "最新轮次处于 Running 时，AgentTimeline.IsLive 应为 true";
+
+        // 切回第 1 轮（已完成 + 含子智能体）→ IsLive=false，2 个智能体，含 Thinking/Waiting/Tool 与 2 条 Handoff
+        panel.SelectTurn(0);
+        if (timeline.IsLive)
+            return "切到已完成轮次后，AgentTimeline.IsLive 应切回 false";
+
+        var run = timeline.Run;
+        if (run is null)
+            return "AgentTimeline.Run 为 null";
+        if (run.Agents.Count != 2)
+            return $"第 1 轮 Run.Agents 期望 2，实际 {run.Agents.Count}";
+        if (!run.Spans.Any(s => s.Kind == AgentTimelineSpanKind.Thinking)
+            || !run.Spans.Any(s => s.Kind == AgentTimelineSpanKind.Waiting)
+            || !run.Spans.Any(s => s.Kind == AgentTimelineSpanKind.Tool))
+        {
+            return "第 1 轮 Run.Spans 未同时包含 Thinking / Waiting / Tool 三种段";
+        }
+        if (run.Handoffs.Count != 2)
+            return $"第 1 轮 Run.Handoffs 期望 2，实际 {run.Handoffs.Count}";
+
+        var options = panel.TurnPicker.Items.OfType<SegmentedOption>().ToArray();
+        if (options.Length != 2)
+            return $"多轮切换器应有 2 个 SegmentedOption，实际 {options.Length}";
+
+        return null;
+    }
+
+    private static TrajectorySessionStore BuildSampleTrajectoryStore()
+    {
+        var store = new TrajectorySessionStore();
+        store.SetModelName("deepseek-chat");
+        var t0 = new DateTimeOffset(2026, 11, 27, 13, 30, 0, TimeSpan.FromHours(8));
+
+        store.OnTurnStarted("t1", t0);
+        store.OnItemAdded("t1", new UserMessageItem { Id = "u1", At = t0, Text = "分析依赖" });
+        store.OnItemAdded("t1", new ReasoningItem { Id = "r1", At = t0.AddSeconds(0.2), Text = "检查包列表", IsStreaming = false });
+        store.OnItemAdded("t1", new DougongDesktop.Ipc.ToolCallItem
+        {
+            Id = "tc1",
+            At = t0.AddSeconds(1.2),
+            InvocationId = "inv-1",
+            ToolName = "read",
+            Status = DougongDesktop.Ipc.ToolCallStatus.Succeeded,
+            ApprovalElapsed = TimeSpan.FromSeconds(0.8),
+            ExecutionElapsed = TimeSpan.FromSeconds(0.5),
+        });
+        store.OnSubagentUpdated(
+            new SubagentInfo("sub-a", "检查 csproj", SubagentRunState.Completed, t0.AddSeconds(1.0), "t1", 2),
+            t0.AddSeconds(2.8));
+        store.OnTurnCompleted("t1", TurnStatus.Completed, t0.AddSeconds(3.2));
+
+        var t2 = t0.AddSeconds(6.0);
+        store.OnTurnStarted("t2", t2);
+        store.OnItemAdded("t2", new ReasoningItem { Id = "r2", At = t2.AddSeconds(0.1), Text = "整理报告中", IsStreaming = true });
+        return store;
+    }
+
+    private static string? VerifyTrajectoryProjectionCounterProof()
+    {
+        var views = BuildSampleTrajectoryStore().BuildViews();
+        return views.Count == 2 && views[0].Agents.Count == 2 && views[0].Spans.Any(s => s.Kind == TrajectorySpanKind.Waiting)
+            ? "TrajectoryProjection 确已输出多轮、子智能体行与 Waiting 段，与'扁平无等待段'的错期望冲突——断言能发现差异"
+            : null;
+    }
+
+    private static string? VerifyTrajectoryPanelCounterProof()
+    {
+        using var dock = new RightDock();
+        dock.ApplyTrajectory(BuildSampleTrajectoryStore().BuildViews());
+        dock.SelectTab(RightDock.Keys.Trajectory);
+        return dock.Trajectory?.Timeline.Labels.Thinking == "思考"
+            ? "RightDock 轨迹 tab 确由中文化的 Arc AgentTimeline 驱动，与'未接入 AgentTimeline'的错期望冲突——断言能发现差异"
+            : null;
     }
 
     /// <summary>建一个最小 AppShell，供反证用。</summary>

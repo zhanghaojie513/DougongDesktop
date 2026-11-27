@@ -13,10 +13,10 @@ using ArcButton = TKCode.Arc.Button;
 namespace DougongDesktop.App.Shell;
 
 /// <summary>
-/// 右栏 dock：文件 / 改动 / 计划 / 上下文 / 终端。
+/// 右栏 dock：文件 / 改动 / 计划 / 轨迹 / 上下文 / 终端。
 /// </summary>
 /// <remarks>
-/// <b>五个 tab 里四个已有真实能力</b>，剩下的「上下文」必须如实标注"未实现"，
+/// <b>六个 tab 里五个已有真实能力</b>，剩下的「上下文」必须如实标注"未实现"，
 /// 不放假内容。方案文档的原话是"不做假功能"——假功能比没有更糟：用户会以为它坏了。
 /// <para>
 /// 各 tab 的数据来源与限制：
@@ -24,6 +24,7 @@ namespace DougongDesktop.App.Shell;
 /// <item><term>文件</term><description>真实：走 <c>fs/list</c> IPC 命令 + Arc <c>Breadcrumb</c></description></item>
 /// <item><term>改动</term><description>真实：回合前后由 SDK 版本哈希比对得出差异</description></item>
 /// <item><term>计划</term><description>真实：复用 P5 的 <c>PlanItem</c></description></item>
+/// <item><term>轨迹</term><description>真实：基于 Arc <c>AgentTimeline</c> 投影每轮思考/工具/等待与子智能体协作（P8d D4）</description></item>
 /// <item><term>上下文</term><description><b>未实现</b>：SDK 只给累计消耗（<c>UsageLedger</c>），
 /// 不给"当前上下文占用多少"</description></item>
 /// <item><term>终端</term><description>真实：libghostty-vt + <c>TerminalView</c> + 跨平台 PTY（F1–F4）</description></item>
@@ -41,6 +42,7 @@ public sealed class RightDock : UserControl, IDisposable
         public const string Files = "files";
         public const string Changes = "changes";
         public const string Plan = "plan";
+        public const string Trajectory = "trajectory";
         public const string Context = "context";
         public const string Terminal = "terminal";
     }
@@ -139,6 +141,7 @@ public sealed class RightDock : UserControl, IDisposable
             (Keys.Files, "文件", true, false),
             (Keys.Changes, "改动", true, false),
             (Keys.Plan, "计划", true, false),
+            (Keys.Trajectory, "轨迹", true, false),
             (Keys.Context, "上下文（未实现）", false, false),
             (Keys.Terminal, "终端", true, true),
         })
@@ -174,6 +177,7 @@ public sealed class RightDock : UserControl, IDisposable
             (Keys.Files, "文件", true),
             (Keys.Changes, "改动", true),
             (Keys.Plan, "计划", true),
+            (Keys.Trajectory, "轨迹", true),
             (Keys.Context, "上下文（未实现）", false),
             (Keys.Terminal, "终端", true),
         })
@@ -238,7 +242,10 @@ public sealed class RightDock : UserControl, IDisposable
         }
 
         if (!_tabItems.TryGetValue(key, out var item)) return;
+        _tabs.SelectedItem = item;
         item.IsSelected = true;
+        if (ActiveTab != key)
+            ShowTab(key);
     }
 
     private Control BuildTerminalTab()
@@ -281,11 +288,36 @@ public sealed class RightDock : UserControl, IDisposable
         else if (_tabItems.TryGetValue(key, out var item)) item.Content = content;
     }
 
+    /// <summary>轨迹面板实例（P8d D4，诊断与自检用）。</summary>
+    public TrajectoryPanel? Trajectory => _trajectory;
+
+    private TrajectoryPanel? _trajectory;
+    private IReadOnlyList<TrajectoryTurnView> _latestTrajectory = [];
+
+    private Control BuildTrajectoryTab()
+    {
+        if (_trajectory is null)
+        {
+            _trajectory = new TrajectoryPanel();
+            _trajectory.ApplyTurns(_latestTrajectory);
+        }
+
+        return _trajectory;
+    }
+
+    /// <summary>用最新的轮次投影刷新轨迹 tab。</summary>
+    public void ApplyTrajectory(IReadOnlyList<TrajectoryTurnView> turns)
+    {
+        _latestTrajectory = turns;
+        _trajectory?.ApplyTurns(turns);
+    }
+
     private Control BuildBody(string key) => key switch
     {
         Keys.Files => BuildFilesTab(),
         Keys.Changes => BuildChangesTab(),
         Keys.Plan => BuildPlanTab(),
+        Keys.Trajectory => BuildTrajectoryTab(),
         Keys.Terminal => BuildTerminalTab(),
         _ => BuildNotImplemented(key),
     };

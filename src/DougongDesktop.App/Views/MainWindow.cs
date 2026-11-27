@@ -64,6 +64,9 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
     /// <summary>右栏 dock（P7）。</summary>
     private readonly RightDock _rightDock = new();
 
+    /// <summary>会话轨迹聚合仓库（P8d D4），按轮次把实时事件投影给右栏 Trajectory tab。</summary>
+    private readonly TrajectorySessionStore _trajectory = new();
+
     /// <summary>设置面板（P8c），惰性构建——不进设置页就不该付构造成本。</summary>
     private SettingsView? _settingsView;
 
@@ -213,11 +216,12 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         if (Environment.GetEnvironmentVariable("DOUGONG_UI_SETTINGS") is "1")
             _vm.ActivePanel = "settings";
 
-        // 自检模式：没 provider 时也能验证消息流渲染
+        // 自检模式：没 provider 时也能验证消息流与轨迹渲染
         if (Environment.GetEnvironmentVariable("DOUGONG_UI_SELFTEST") is "1")
         {
             _conversation.LoadSelfTestData();
             _conversation.LoadAttachmentSelfTest();
+            SeedSelfTestTrajectory();
 
             // 自检也验证"运行中"这条路径：没有 provider 时跑不到
             // TurnStarted → TurnCompleted 的真实往返，但状态行的
@@ -348,6 +352,13 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 _rightDock.SelectTab("terminal");
                 Console.Error.WriteLine(
                     $"[shell] 终端面板 核心就绪={_rightDock.Terminal?.IsCoreReady} PTY运行={_rightDock.Terminal?.IsPtyRunning}");
+            }
+
+            if (Environment.GetEnvironmentVariable("DOUGONG_UI_TRAJECTORY") is "1")
+            {
+                _rightDock.SelectTab(RightDock.Keys.Trajectory);
+                Console.Error.WriteLine(
+                    $"[shell] 轨迹面板 轮次={_rightDock.Trajectory?.TurnCount ?? 0}");
             }
 
             if (Environment.GetEnvironmentVariable("DOUGONG_UI_NAV") is "1")
@@ -742,6 +753,19 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 // 设置页复用同一份目录——不为了设置页再发一次 models/list。
                 _settingsView?.SetModelCatalog(
                     listed.Models, listed.Providers, listed.CurrentModelId);
+
+                _trajectory.SetModelName(listed.CurrentModelId);
+                RefreshTrajectory();
+                break;
+
+            case SubagentsListedEvent subs:
+                _trajectory.OnSubagentsListed(subs.Agents, DateTimeOffset.Now);
+                RefreshTrajectory();
+                break;
+
+            case SubagentUpdatedEvent subUpdated:
+                _trajectory.OnSubagentUpdated(subUpdated.Agent, DateTimeOffset.Now);
+                RefreshTrajectory();
                 break;
 
             case WorkspaceChangedEvent changed:
@@ -770,7 +794,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 _conversation.Composer.SetMentionGroups(ContextItemProjection.Groups);
                 break;
 
-            case TurnStartedEvent:
+            case TurnStartedEvent started:
                 _capsule.OnTurnStarted();
                 // 生成中：发送键变停止键（Arc 的 AiComposer 自带这个切换）
                 _conversation.Composer.SetGenerating(true);
@@ -778,12 +802,16 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 // "在跑吗、跑多久了"，而用户上滚时顶部胶囊已经看不见了
                 _conversation.OnTurnStarted();
 
+                _trajectory.OnTurnStarted(started.TurnId, DateTimeOffset.Now);
+                RefreshTrajectory();
                 break;
 
             case ItemAddedEvent added:
                 // 把 TurnId 一起传下去：M15 的轮次分组需要它，
                 // 此前在这里被丢掉了（事件有、视图没有）。
                 _conversation.Add(added.Item, added.TurnId);
+                _trajectory.OnItemAdded(added.TurnId, added.Item);
+                RefreshTrajectory();
 
                 // 右栏的计划 tab 跟着消息流更新（全量替换）。
                 // "改动" tab 不靠这里——它用宿主推来的 FileVersionSet 比对结果
@@ -800,6 +828,8 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
 
             case ItemUpdatedEvent updated:
                 _conversation.Update(updated.Item);
+                _trajectory.OnItemUpdated(updated.Item);
+                RefreshTrajectory();
 
                 // 工具终态 → 回切到"思考中"。不回切的话胶囊会永远停在
                 // "执行 xxx"，看起来像卡住（P5 判据：Working/NeedsInput/Done 随事件变化）
@@ -814,7 +844,9 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 _conversation.Clear();
                 foreach (var turn in opened.Snapshot.Turns)
                     foreach (var item in turn.Items)
-                        _conversation.Add(item);
+                        _conversation.Add(item, turn.Id);
+                _trajectory.LoadSnapshot(opened.Snapshot);
+                RefreshTrajectory();
 
                 // 新会话建立：把挂起的第一条消息补发出去
                 if (_pendingFirstMessage is { Length: > 0 } first)
@@ -852,6 +884,8 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 if (done.Status == TurnStatus.Cancelled)
                     _conversation.MarkLastAssistantStopped();
 
+                _trajectory.OnTurnCompleted(done.TurnId, done.Status, DateTimeOffset.Now);
+                RefreshTrajectory();
                 break;
         }
     }
@@ -902,6 +936,8 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         {
             case CommandPaletteModule.NewSession:
                 _conversation.Clear();
+                _trajectory.Clear();
+                RefreshTrajectory();
                 _vm.ActivePanel = ReservedSlots.Conversation;
                 _selectedSessionId = null;
                 RefreshSidebar();
@@ -1097,6 +1133,8 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         {
             case "clear":
                 _conversation.Clear();
+                _trajectory.Clear();
+                RefreshTrajectory();
                 break;
 
             case "settings":
@@ -1240,6 +1278,32 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         {
             Console.Error.WriteLine($"[ui] 打开会话失败：{ex.Message}");
         }
+    }
+
+    private void RefreshTrajectory() => _rightDock.ApplyTrajectory(_trajectory.BuildViews());
+
+    /// <summary>在自检模式下把示例会话条目同步喂入轨迹仓库，便于无 provider 时直观验收 Trajectory 视图。</summary>
+    private void SeedSelfTestTrajectory()
+    {
+        _trajectory.Clear();
+        _trajectory.SetModelName("selftest-model");
+
+        var t0 = DateTimeOffset.Now.AddSeconds(-12);
+        const string TurnId = "turn-selftest-trajectory";
+        _trajectory.OnTurnStarted(TurnId, t0);
+
+        var offset = 0.0;
+        foreach (var item in _conversation.Items)
+        {
+            var stamped = item with { At = t0.AddSeconds(offset) };
+            _trajectory.OnItemAdded(TurnId, stamped);
+            offset += item is IpcToolCallItem { ApprovalElapsed: { } w, ExecutionElapsed: { } e }
+                ? Math.Max(0.4, (w + e).TotalSeconds)
+                : 0.6;
+        }
+
+        _trajectory.OnTurnCompleted(TurnId, TurnStatus.Completed, t0.AddSeconds(offset + 0.5));
+        RefreshTrajectory();
     }
 
     private static Control Placeholder(string title, string subtitle) => new Border
@@ -1576,7 +1640,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         {
             var tabs = _rightDock.GetVisualDescendants().OfType<TKCode.Arc.TabItem>().ToArray();
             Console.Error.WriteLine(
-                $"[shell] RightDock tab {tabs.Length} 个（期望 5），" +
+                $"[shell] RightDock tab {tabs.Length} 个（期望 6），" +
                 $"可用 {tabs.Count(t => t.IsEnabled)}，当前={_rightDock.ActiveTab}，" +
                 $"内容={(tabs.FirstOrDefault(t => t.IsSelected)?.Content is null ? "**空**" : "有")}");
         }
