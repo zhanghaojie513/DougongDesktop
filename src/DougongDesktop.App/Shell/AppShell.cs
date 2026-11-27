@@ -355,6 +355,7 @@ public sealed class AppShell : UserControl
         // 三条边栏与覆盖层：都是 single/list
         slots.Declare(ReservedSlots.Sidebar, SlotKind.Single);
         slots.Declare(ReservedSlots.RightBar, SlotKind.Single);
+        slots.Declare(ReservedSlots.RightDockTabs, SlotKind.List);
         slots.Declare(ReservedSlots.Bottom, SlotKind.List);
         slots.Declare(ReservedSlots.Overlay, SlotKind.List);
     }

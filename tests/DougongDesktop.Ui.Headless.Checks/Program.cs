@@ -97,6 +97,8 @@ public static class Program
         failures += Check("sidebar-switches-grouped-and-flat-sessions", SidebarSwitchesGroupedAndFlatSessions);
         failures += Check("fs-read-roundtrips-and-classifies-previews", FsReadRoundtripsAndClassifiesPreviews);
         failures += Check("right-dock-previews-markdown-code-and-binary", RightDockPreviewsMarkdownCodeAndBinary);
+        failures += Check("right-dock-tab-registry-supports-plugins-and-overrides", RightDockTabRegistrySupportsPluginsAndOverrides);
+        failures += Check("right-dock-surface-remembers-tab-per-session", RightDockSurfaceRemembersTabPerSession);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -2219,6 +2221,12 @@ public static class Program
         // 右栏文档预览：真实渲染 Markdown / CodeBlock(csharp) / 图片 / 降级占位并可返回文件列表，与'无预览面板'冲突。
         "right-dock-previews-markdown-code-and-binary" => VerifyDocumentPreviewCounterProof(),
 
+        // 右栏 tab 注册表：真实支持插件通过 rightdock.tabs 注入、优先级覆写与卸载回退，与'写死 6 个 tab'冲突。
+        "right-dock-tab-registry-supports-plugins-and-overrides" => VerifyRightDockTabRegistryCounterProof(),
+
+        // 每会话停靠面：真实切回 sess-a 恢复 trajectory、切回 sess-b 恢复 plan，与'全局共用单状态'冲突。
+        "right-dock-surface-remembers-tab-per-session" => VerifyRightDockSurfaceCounterProof(),
+
         _ => null,
     };
 
@@ -3047,6 +3055,113 @@ public static class Program
         });
         return dock.Preview?.GetLogicalDescendants().OfType<CodeBlock>().Any(c => c.Language == "csharp") == true
             ? "RightDock 确已用 Arc CodeBlock(csharp) 预览文件，与'无预览实现'冲突——断言能发现差异"
+            : null;
+    }
+
+    /// <summary>
+    /// 右栏 tab 注册表（P8e E5）：验证内置 6 tab 均走注册表、插件经 <c>rightdock.tabs</c> 槽位动态增删
+    /// （卸载后零残留且自动回退）、同 key 低 Priority 覆写与还原。
+    /// </summary>
+    private static string? RightDockTabRegistrySupportsPluginsAndOverrides()
+    {
+        using var dock = new RightDock();
+        var slots = new SlotRegistry();
+        AppShell.DeclareSlots(slots);
+        dock.BindPluginSlot(slots);
+
+        if (dock.TabRegistry.ResolveAll().Count != 6)
+            return $"内置 tab 注册数期望 6，实际 {dock.TabRegistry.ResolveAll().Count}";
+
+        // 1) 插件经 rightdock.tabs 槽位动态注入第 7 个 tab
+        var pluginTemplate = new Avalonia.Controls.Templates.FuncDataTemplate(
+            _ => true,
+            (_, _) => new TextBlock { Text = "插件指标面板内容" });
+
+        var pluginHandle = slots.Register(
+            ReservedSlots.RightDockTabs,
+            new SlotOccupant("ext.metrics", Priority: 500, pluginTemplate, Key: "metrics"));
+
+        if (dock.TabRegistry.ResolveAll().Count != 7)
+            return $"注入插件 tab 后注册数期望 7，实际 {dock.TabRegistry.ResolveAll().Count}";
+
+        dock.SelectTab("metrics");
+        if (dock.ActiveTab != "metrics")
+            return $"无法选中插件贡献的 tab（实际 ActiveTab={dock.ActiveTab}）";
+        if (!CollectTexts(dock).Any(t => t.Contains("插件指标面板内容", StringComparison.Ordinal)))
+            return "选中插件 tab 后未构建插件控件";
+
+        // 2) 卸载插件 → 零残留，且当前选中 tab 自动回退到可用 tab
+        pluginHandle.Dispose();
+        if (dock.TabRegistry.Contains("metrics"))
+            return "插件卸载后 metrics 仍残留在 TabRegistry 中";
+        if (dock.ActiveTab == "metrics")
+            return "当前选中的插件 tab 卸载后未自动回退到可用 tab";
+
+        // 3) 同 key 优先级覆写（Priority 50 < 内置 100），卸载后恢复内置「计划」
+        var overrideHandle = dock.RegisterTab(new RightDockTabDescriptor(
+            Key: RightDock.Keys.Plan,
+            Title: "自定义计划",
+            BuildContent: () => new TextBlock { Text = "覆写计划内容" },
+            Order: 30,
+            Priority: 50,
+            IsEnabled: true));
+
+        if (dock.TabRegistry.Resolve(RightDock.Keys.Plan)?.Title != "自定义计划")
+            return "低 Priority 覆写未生效";
+
+        overrideHandle.Dispose();
+        if (dock.TabRegistry.Resolve(RightDock.Keys.Plan)?.Title != "计划")
+            return "覆写卸载后未恢复内置「计划」tab";
+
+        return null;
+    }
+
+    /// <summary>
+    /// 每会话停靠面（P8e E5）：切换会话时各自记住并恢复上次选中的右栏 tab。
+    /// </summary>
+    private static string? RightDockSurfaceRemembersTabPerSession()
+    {
+        using var dock = new RightDock();
+
+        dock.SwitchSessionSurface("sess-a");
+        dock.SelectTab(RightDock.Keys.Trajectory);
+
+        dock.SwitchSessionSurface("sess-b");
+        if (dock.ActiveTab != RightDock.Keys.Files)
+            return $"新会话 sess-b 首次打开应默认停在 files，实际 {dock.ActiveTab}";
+        dock.SelectTab(RightDock.Keys.Plan);
+
+        dock.SwitchSessionSurface("sess-a");
+        if (dock.ActiveTab != RightDock.Keys.Trajectory)
+            return $"切回 sess-a 应恢复 trajectory，实际 {dock.ActiveTab}";
+
+        dock.SwitchSessionSurface("sess-b");
+        if (dock.ActiveTab != RightDock.Keys.Plan)
+            return $"切回 sess-b 应恢复 plan，实际 {dock.ActiveTab}";
+
+        return null;
+    }
+
+    private static string? VerifyRightDockTabRegistryCounterProof()
+    {
+        using var dock = new RightDock();
+        using var h = dock.RegisterTab(new RightDockTabDescriptor(
+            "custom", "自定义", () => new TextBlock { Text = "ok" }));
+        return dock.TabRegistry.ResolveAll().Count == 7
+            ? "RightDock 确已由 TabRegistry 动态扩展至 7 个 tab，与'写死固定 tab 数组'冲突——断言能发现差异"
+            : null;
+    }
+
+    private static string? VerifyRightDockSurfaceCounterProof()
+    {
+        using var dock = new RightDock();
+        dock.SwitchSessionSurface("s1");
+        dock.SelectTab(RightDock.Keys.Trajectory);
+        dock.SwitchSessionSurface("s2");
+        dock.SelectTab(RightDock.Keys.Plan);
+        dock.SwitchSessionSurface("s1");
+        return dock.ActiveTab == RightDock.Keys.Trajectory
+            ? "RightDock 确已按会话独立恢复停靠 tab，与'全局单一状态'冲突——断言能发现差异"
             : null;
     }
 

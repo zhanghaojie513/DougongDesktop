@@ -70,7 +70,8 @@ for check in tool-categories-match-dsh-name-table group-title-matches-dsh-compos
              terminal-panel-runs-real-pty-shell terminal-panel-encodes-key-input \
              trajectory-projection-maps-turns-and-subagents trajectory-panel-uses-arc-agent-timeline \
              workspace-picker-matches-rc3-contract sidebar-switches-grouped-and-flat-sessions \
-             fs-read-roundtrips-and-classifies-previews right-dock-previews-markdown-code-and-binary; do
+             fs-read-roundtrips-and-classifies-previews right-dock-previews-markdown-code-and-binary \
+             right-dock-tab-registry-supports-plugins-and-overrides right-dock-surface-remembers-tab-per-session; do
   printf '%-42s ' "$check"
   if "$DOTNET" run --project tests/DougongDesktop.Ui.Headless.Checks \
         -c Release --no-build -- --break="$check" > /dev/null 2>&1; then

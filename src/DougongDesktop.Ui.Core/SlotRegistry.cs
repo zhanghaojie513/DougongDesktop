@@ -100,6 +100,7 @@ public static class ReservedSlots
 
     public const string Sidebar = "shell.leading";
     public const string RightBar = "shell.trailing";
+    public const string RightDockTabs = "rightdock.tabs";
     public const string Bottom = "shell.bottom";
     public const string Overlay = "shell.overlay";
 }

@@ -166,6 +166,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         AppShell.DeclareSlots(_slots);
+        _rightDock.BindPluginSlot(_slots);
         // 带诊断日志：uiPlugin 的 register/build/render 三段耗时写 diagnostics.jsonl。
         // P3b 台账 #5 要求的埋点——第三方插件涌入前才拿得到这份数据。
         _uiPlugins = new UiExtensionLoader(
@@ -874,6 +875,8 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 if (!string.IsNullOrWhiteSpace(opened.Snapshot.Workspace))
                     _workspaceOwner.AddWorkspace(opened.Snapshot.Workspace, select: true);
 
+                _rightDock.SwitchSessionSurface(opened.Snapshot.Id);
+
                 // 新会话建立：把挂起的第一条消息补发出去
                 if (_pendingFirstMessage is { Length: > 0 } first)
                 {
@@ -966,6 +969,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 RefreshTrajectory();
                 _vm.ActivePanel = ReservedSlots.Conversation;
                 _selectedSessionId = null;
+                _rightDock.SwitchSessionSurface(null);
                 RefreshSidebar();
                 break;
 
@@ -1303,6 +1307,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 RefreshTrajectory();
                 _vm.ActivePanel = ReservedSlots.Conversation;
                 _selectedSessionId = null;
+                _rightDock.SwitchSessionSurface(null);
                 RefreshSidebar();
                 break;
 

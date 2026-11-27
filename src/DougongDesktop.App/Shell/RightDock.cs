@@ -35,6 +35,18 @@ public sealed class RightDock : UserControl, IDisposable
 {
     private readonly TKCode.Arc.Tabs _tabs = new();
     private readonly Dictionary<string, TKCode.Arc.TabItem> _tabItems = new(StringComparer.Ordinal);
+    private readonly RightDockTabRegistry _tabRegistry = new();
+    private readonly RightDockSurfaceStore _surfaces = new();
+    private readonly Dictionary<string, IDisposable> _pluginTabHandles = new(StringComparer.Ordinal);
+    private System.Collections.ObjectModel.ObservableCollection<SlotOccupant>? _boundPluginSlot;
+    private string? _currentSessionKey;
+    private bool _syncingTabs;
+
+    /// <summary>右栏 tab 类型注册表（P8e E5）：内置与插件共用。</summary>
+    public RightDockTabRegistry TabRegistry => _tabRegistry;
+
+    /// <summary>每会话独立的停靠面状态（P8e E5）。</summary>
+    public RightDockSurfaceStore Surfaces => _surfaces;
 
     /// <summary>各 tab 的 key。</summary>
     public static class Keys
@@ -86,14 +98,12 @@ public sealed class RightDock : UserControl, IDisposable
 
     public RightDock()
     {
+        RegisterBuiltInTabs();
+        _tabRegistry.Changed += SyncTabsFromRegistry;
+
         // 两种承载方式：
-        //  - 默认 `Tabs`：五个平铺 tab，与之前完全一致。
-        //  - `DOUGONG_UI_DOCK=1` 时换 Arc 的 `DockLayout`：支持把 tab 拖出来
-        //    分裂成第二组、浮动成独立窗口、自动隐藏到边缘。
-        //
-        // **为什么默认不开**：Dock 改变了整条交互路径（多出拖拽区、关闭按钮、
-        // 浮动窗口），得先有真实的视觉验收再切默认。这一轮先把能力接上并验证，
-        // 切换与否是下一步的事——与当初 `ArcWindow` 先探针后改产品同一套做法。
+        //  - 默认 `Tabs`：由 TabRegistry 驱动的平铺 tab。
+        //  - `DOUGONG_UI_DOCK=1` 时换 Arc 的 `DockLayout`：支持拖拽分裂、浮动窗口、自动隐藏。
         if (Environment.GetEnvironmentVariable("DOUGONG_UI_DOCK") is "1")
         {
             BuildDock();
@@ -108,6 +118,52 @@ public sealed class RightDock : UserControl, IDisposable
         ShowTab(Keys.Files);
     }
 
+    /// <summary>向右栏 tab 注册表注册一个自定义或覆写面板；释放返回句柄即可卸载。</summary>
+    public IDisposable RegisterTab(RightDockTabDescriptor descriptor) => _tabRegistry.Register(descriptor);
+
+    /// <summary>
+    /// 将 <see cref="ReservedSlots.RightDockTabs"/> 插件槽位桥接到 <see cref="TabRegistry"/>，
+    /// 使第三方 UI 插件无需修改 RightDock 源码即可贡献右栏 tab。
+    /// </summary>
+    public void BindPluginSlot(SlotRegistry slots)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+        UnbindPluginSlot();
+
+        var list = slots.GetList(ReservedSlots.RightDockTabs);
+        _boundPluginSlot = list;
+        list.CollectionChanged += OnPluginSlotChanged;
+        SyncPluginOccupants(list);
+    }
+
+    /// <summary>
+    /// 切换会话停靠面（P8e E5）：记住旧会话停靠的 tab，并恢复新会话上次打开的 tab。
+    /// </summary>
+    public void SwitchSessionSurface(string? sessionId)
+    {
+        _surfaces.SaveActiveTab(_currentSessionKey, ActiveTab);
+        _currentSessionKey = sessionId;
+
+        var target = _surfaces.GetActiveTab(sessionId, fallback: Keys.Files);
+        var resolved = _tabRegistry.Resolve(target);
+        if (resolved is not { IsEnabled: true })
+            target = Keys.Files;
+
+        SelectTab(target);
+    }
+
+    private void RegisterBuiltInTabs()
+    {
+        // 内置 6 个 tab 全部走 TabRegistry（Priority=100、Origin=BuiltIn），
+        // 第三方插件可用更小 Priority 覆写或用新 key 扩展，不再写死两份重复数组。
+        _tabRegistry.Register(new RightDockTabDescriptor(Keys.Files, "文件", () => BuildFilesTab(), Order: 10, Priority: 100, IsEnabled: true, Placement: RightDockTabPlacement.Tool, Origin: SlotOccupantOrigin.BuiltIn));
+        _tabRegistry.Register(new RightDockTabDescriptor(Keys.Changes, "改动", () => BuildChangesTab(), Order: 20, Priority: 100, IsEnabled: true, Placement: RightDockTabPlacement.Tool, Origin: SlotOccupantOrigin.BuiltIn));
+        _tabRegistry.Register(new RightDockTabDescriptor(Keys.Plan, "计划", () => BuildPlanTab(), Order: 30, Priority: 100, IsEnabled: true, Placement: RightDockTabPlacement.Tool, Origin: SlotOccupantOrigin.BuiltIn));
+        _tabRegistry.Register(new RightDockTabDescriptor(Keys.Trajectory, "轨迹", () => BuildTrajectoryTab(), Order: 40, Priority: 100, IsEnabled: true, Placement: RightDockTabPlacement.Tool, Origin: SlotOccupantOrigin.BuiltIn));
+        _tabRegistry.Register(new RightDockTabDescriptor(Keys.Context, "上下文（未实现）", () => BuildNotImplemented(Keys.Context), Order: 50, Priority: 100, IsEnabled: false, Placement: RightDockTabPlacement.Tool, Origin: SlotOccupantOrigin.BuiltIn));
+        _tabRegistry.Register(new RightDockTabDescriptor(Keys.Terminal, "终端", () => BuildTerminalTab(), Order: 60, Priority: 100, IsEnabled: true, Placement: RightDockTabPlacement.Document, Origin: SlotOccupantOrigin.BuiltIn));
+    }
+
     /// <summary>Dock 模式下的布局（仅 <c>DOUGONG_UI_DOCK=1</c> 时非空）。</summary>
     private DockLayout? _dock;
 
@@ -117,85 +173,63 @@ public sealed class RightDock : UserControl, IDisposable
     private readonly Dictionary<string, DockPane> _dockPanes = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// 用 Arc 的 <see cref="DockLayout"/> 承载同一批 tab（P8e E4）。
+    /// 用 Arc 的 <see cref="DockLayout"/> 承载由 <see cref="TabRegistry"/> 解析出的全部 tab（P8e E4/E5）。
     /// </summary>
-    /// <remarks>
-    /// <b>它比 <c>Tabs</c> 多什么</b>：标签可以拖出来分裂成第二组、浮动成独立
-    /// 窗口、自动隐藏到边缘，布局还能序列化保存。这正是 dsh 的 ui-dockkit 形态，
-    /// 也是进度表 E4 写的"分裂标签树"。
-    /// <para>
-    /// <b>工具 pane 与文档 pane 分开</b>：`ToolsSource` 是左右两侧的工具面板
-    /// （文件/改动/计划/上下文），`DocumentsSource` 是中间的主文档区（终端）。
-    /// 这个区分是 Dock 的固有语义，不是我们的选择。
-    /// </para>
-    /// </remarks>
     private void BuildDock()
     {
         _dock = new DockLayout();
+        PopulateDockFromRegistry();
+    }
+
+    private void PopulateDockFromRegistry()
+    {
+        if (_dock is null) return;
 
         var tools = new List<object>();
         var docs = new List<object>();
+        var nextKeys = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var (key, label, implemented, isDocument) in new[]
+        foreach (var tab in _tabRegistry.ResolveAll())
         {
-            (Keys.Files, "文件", true, false),
-            (Keys.Changes, "改动", true, false),
-            (Keys.Plan, "计划", true, false),
-            (Keys.Trajectory, "轨迹", true, false),
-            (Keys.Context, "上下文（未实现）", false, false),
-            (Keys.Terminal, "终端", true, true),
-        })
-        {
-            var pane = new DockPane
+            nextKeys.Add(tab.Key);
+            if (!_dockPanes.TryGetValue(tab.Key, out var pane))
             {
-                Id = key,
-                Title = label,
-                CanClose = false,   // 这些是我们的常驻面板，关掉就没入口了
-                CanFloat = true,
-            };
+                pane = new DockPane
+                {
+                    Id = tab.Key,
+                    Title = tab.Title,
+                    CanClose = false,
+                    CanFloat = true,
+                };
+                _dockPanes[tab.Key] = pane;
+            }
+            else
+            {
+                pane.Title = tab.Title;
+            }
 
-            _dockPanes[key] = pane;
-            (isDocument ? docs : tools).Add(pane);
+            (tab.Placement == RightDockTabPlacement.Document ? docs : tools).Add(pane);
         }
+
+        foreach (var stale in _dockPanes.Keys.Where(k => !nextKeys.Contains(k)).ToArray())
+            _dockPanes.Remove(stale);
 
         _dock.ToolsSource = tools;
         _dock.DocumentsSource = docs;
     }
 
     /// <summary>
-    /// 建五个 tab。
+    /// 按 <see cref="TabRegistry"/> 建平铺 tab。
     /// </summary>
-    /// <remarks>
-    /// <b>未实现的两个用 <c>IsEnabled=false</c></b>：Arc 的 <c>TabItem</c>
-    /// 会把禁用的 tab 从方向键序列里跳过、也点不中。标题上再写一遍
-    /// "（未实现）"，让人不必点进去才发现。
-    /// </remarks>
     private void BuildTabs()
     {
-        foreach (var (key, label, implemented) in new[]
-        {
-            (Keys.Files, "文件", true),
-            (Keys.Changes, "改动", true),
-            (Keys.Plan, "计划", true),
-            (Keys.Trajectory, "轨迹", true),
-            (Keys.Context, "上下文（未实现）", false),
-            (Keys.Terminal, "终端", true),
-        })
-        {
-            var item = new TKCode.Arc.TabItem
-            {
-                Header = label,
-                IsEnabled = implemented,
-            };
-
-            _tabItems[key] = item;
-            _tabs.Items.Add(item);
-        }
+        PopulateTabsFromRegistry();
 
         // 切换时按 key 懒加载内容：文件 tab 要等引擎回话，
-        // 一次全建出来会白白构造五棵控件树
+        // 一次全建出来会白白构造多棵控件树
         _tabs.SelectionChanged += (_, _) =>
         {
+            if (_syncingTabs) return;
             foreach (var (key, item) in _tabItems)
             {
                 if (!item.IsSelected) continue;
@@ -204,6 +238,119 @@ public sealed class RightDock : UserControl, IDisposable
                 return;
             }
         };
+    }
+
+    private void PopulateTabsFromRegistry()
+    {
+        _syncingTabs = true;
+        try
+        {
+            var descriptors = _tabRegistry.ResolveAll();
+            var nextKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            _tabs.Items.Clear();
+
+            foreach (var tab in descriptors)
+            {
+                nextKeys.Add(tab.Key);
+                if (!_tabItems.TryGetValue(tab.Key, out var item))
+                {
+                    item = new TKCode.Arc.TabItem
+                    {
+                        Header = tab.Title,
+                        IsEnabled = tab.IsEnabled,
+                    };
+                    _tabItems[tab.Key] = item;
+                }
+                else
+                {
+                    item.Header = tab.Title;
+                    item.IsEnabled = tab.IsEnabled;
+                }
+
+                _tabs.Items.Add(item);
+            }
+
+            foreach (var stale in _tabItems.Keys.Where(k => !nextKeys.Contains(k)).ToArray())
+                _tabItems.Remove(stale);
+        }
+        finally
+        {
+            _syncingTabs = false;
+        }
+    }
+
+    private void SyncTabsFromRegistry()
+    {
+        if (_dock is not null)
+            PopulateDockFromRegistry();
+        else
+            PopulateTabsFromRegistry();
+
+        // 若当前选中的 tab 已被卸载或禁用，自动回退到第一个可用 tab
+        var current = _tabRegistry.Resolve(ActiveTab);
+        if (current is not { IsEnabled: true })
+        {
+            var fallback = _tabRegistry.ResolveAll().FirstOrDefault(t => t.IsEnabled)?.Key ?? Keys.Files;
+            SelectTab(fallback);
+        }
+        else if (_tabItems.TryGetValue(ActiveTab, out var item))
+        {
+            item.Content = BuildBody(ActiveTab);
+        }
+        else if (_dockPanes.TryGetValue(ActiveTab, out var pane))
+        {
+            pane.Content = BuildBody(ActiveTab);
+        }
+    }
+
+    private void OnPluginSlotChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (_boundPluginSlot is not null)
+            SyncPluginOccupants(_boundPluginSlot);
+    }
+
+    private void SyncPluginOccupants(IReadOnlyList<SlotOccupant> occupants)
+    {
+        var liveIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var occ in occupants)
+        {
+            liveIds.Add(occ.Id);
+            if (_pluginTabHandles.ContainsKey(occ.Id)) continue;
+
+            var key = string.IsNullOrWhiteSpace(occ.Key) ? occ.Id : occ.Key;
+            var title = string.IsNullOrWhiteSpace(occ.Key) ? occ.Id : occ.Key;
+            var handle = _tabRegistry.Register(new RightDockTabDescriptor(
+                Key: key,
+                Title: title,
+                BuildContent: () => occ.Template.Build(key) ?? Hint($"插件面板 {occ.Id} 返回了空控件"),
+                Order: 100,
+                Priority: occ.Priority,
+                IsEnabled: true,
+                Placement: RightDockTabPlacement.Tool,
+                Origin: occ.Origin));
+
+            _pluginTabHandles[occ.Id] = handle;
+        }
+
+        foreach (var staleId in _pluginTabHandles.Keys.Where(id => !liveIds.Contains(id)).ToArray())
+        {
+            _pluginTabHandles[staleId].Dispose();
+            _pluginTabHandles.Remove(staleId);
+        }
+    }
+
+    private void UnbindPluginSlot()
+    {
+        if (_boundPluginSlot is not null)
+        {
+            _boundPluginSlot.CollectionChanged -= OnPluginSlotChanged;
+            _boundPluginSlot = null;
+        }
+
+        foreach (var handle in _pluginTabHandles.Values)
+            handle.Dispose();
+        _pluginTabHandles.Clear();
     }
 
     /// <summary>终端启动时的工作目录（默认当前工作区目录）。</summary>
@@ -218,9 +365,11 @@ public sealed class RightDock : UserControl, IDisposable
     /// <summary>终端面板实例（诊断与自检用）。</summary>
     public TerminalPanel? Terminal => _terminal;
 
-    /// <summary>回收右栏持有的外部资源（例如运行中的终端 PTY 子进程）。</summary>
+    /// <summary>回收右栏持有的外部资源（终端 PTY 子进程与插件槽位监听）。</summary>
     public void Dispose()
     {
+        _tabRegistry.Changed -= SyncTabsFromRegistry;
+        UnbindPluginSlot();
         _terminal?.Dispose();
         _terminal = null;
     }
@@ -272,6 +421,7 @@ public sealed class RightDock : UserControl, IDisposable
     public void ShowTab(string key)
     {
         ActiveTab = key;
+        _surfaces.SaveActiveTab(_currentSessionKey, key);
 
         if (_dockPanes.TryGetValue(key, out var pane))
             pane.Content = BuildBody(key);
@@ -312,15 +462,8 @@ public sealed class RightDock : UserControl, IDisposable
         _trajectory?.ApplyTurns(turns);
     }
 
-    private Control BuildBody(string key) => key switch
-    {
-        Keys.Files => BuildFilesTab(),
-        Keys.Changes => BuildChangesTab(),
-        Keys.Plan => BuildPlanTab(),
-        Keys.Trajectory => BuildTrajectoryTab(),
-        Keys.Terminal => BuildTerminalTab(),
-        _ => BuildNotImplemented(key),
-    };
+    private Control BuildBody(string key) =>
+        _tabRegistry.Resolve(key)?.BuildContent() ?? BuildNotImplemented(key);
 
     /// <summary>文档预览面板实例（P8e E7，诊断与自检用）。</summary>
     public DocumentPreviewPanel? Preview => _preview;
