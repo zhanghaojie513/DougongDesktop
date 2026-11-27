@@ -114,13 +114,14 @@ public sealed class SettingsView : UserControl
         var timing = _timingPicker;
         var replies = _repliesPicker;
 
-        // SegmentedControl 吃子项
-        foreach (var (_, label, _) in ModeOptions)
-            mode.Items.Add(new TKCode.Arc.Button { Content = label, Variant = TKCode.Arc.ButtonVariant.Secondary });
-        foreach (var (_, label) in TimingOptions)
-            timing.Items.Add(new TKCode.Arc.Button { Content = label, Variant = TKCode.Arc.ButtonVariant.Secondary });
-        foreach (var (_, label) in ReplyOptions)
-            replies.Items.Add(new TKCode.Arc.Button { Content = label, Variant = TKCode.Arc.ButtonVariant.Secondary });
+        // SegmentedControl 子项使用官方 SegmentedOption（不套 Button），
+        // 滑动胶囊指示器与禁用项方向键跳过依赖它。
+        foreach (var (key, label, _) in ModeOptions)
+            mode.Items.Add(new TKCode.Arc.SegmentedOption { Value = key, Label = label });
+        foreach (var (key, label) in TimingOptions)
+            timing.Items.Add(new TKCode.Arc.SegmentedOption { Value = key, Label = label });
+        foreach (var (key, label) in ReplyOptions)
+            replies.Items.Add(new TKCode.Arc.SegmentedOption { Value = key, Label = label });
 
         mode.SelectedIndex = 2;      // detailed
         timing.SelectedIndex = 0;    // completion
@@ -662,12 +663,12 @@ public sealed class SettingsView : UserControl
             foreach (var option in state.Options)
             {
                 _presetKeys.Add(option.Key);
-                _presetPicker.Items.Add(new TKCode.Arc.Button
+                _presetPicker.Items.Add(new TKCode.Arc.SegmentedOption
                 {
-                    Content = option.Name,
+                    Value = option.Key,
+                    Label = option.Name,
                     // 派生出来的 custom 之类不可选：选了也没语义
                     IsEnabled = option.Selectable,
-                    Variant = TKCode.Arc.ButtonVariant.Secondary,
                 });
             }
 

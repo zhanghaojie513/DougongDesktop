@@ -19,9 +19,9 @@
 >
 > **判定要严**：有类名但没接进装配，算 `⬜`；接进装配但没有验证，算 `🟡`。
 
-最后更新：2026-11-26
+最后更新：2026-11-27
 
-**基线**：dsh `0.2.2-rc.2`（commit `e8f7b93`）· TKCode.Arc `1.3.0` · SDK `0.2.0-alpha.1`
+**基线**：dsh `0.2.2-rc.3`（commit `39163dd3`）· TKCode.Arc `1.3.2-preview.4` · SDK `0.2.0-alpha.1`
 
 ---
 
@@ -46,25 +46,25 @@
 
 | 阶段 | ✅ | 🟡 | ⬜ | ⏳ | ➖ | 小计 | 完成度 |
 |---|---|---|---|---|---|---|---|
-| P8a 布局骨架 | 10 | 0 | 1 | 1 | 1 | 13 | **91%** |
+| P8a 布局骨架 | 11 | 0 | 0 | 1 | 1 | 13 | **100%** |
 | P8b 会话与输入 | 5 | 0 | 0 | 0 | 1 | 6 | **100%** |
 | P8c 设置域 | 6 | 0 | 0 | 1 | 1 | 8 | **100%** |
 | P8d 会话增强 | 0 | 0 | 7 | 0 | 0 | 7 | 0% |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **19%** |
 | P8f 终端与浏览器 | 2 | 0 | 3 | 0 | 0 | 5 | **40%** |
 | **P8g 中区会话域** | **15** | **1** | **1** | **0** | **6** | **23** | **91%** |
-| **合计** | **39** | **2** | **18** | **2** | **9** | **70** | **68%** |
+| **合计** | **40** | **2** | **17** | **2** | **9** | **70** | **69%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
 > 规格见 `docs/dsh-parity-spec.md` §7.5。
 
-**P8a 已完成**：10 项做到、1 项明确不做（A9 保留 Arc 实现）、
+**P8a 已完成**：11 项做到、1 项明确不做（A9 保留 Arc 实现）、
 1 项等上游（A10 Arc 侧栏 64px）。它的待办为零。
 
 完成度算法：`(✅ + 🟡×0.5) / (✅+🟡+⬜)`，不含 `⏳` 与 `➖`。
 
-当前：`(39 + 2×0.5) / (39+2+18) = 40 / 59 = 68%`
+当前：`(40 + 2×0.5) / (40+2+17) = 41 / 59 = 69%`
 
 > **不做的那些（➖ 共 9 项）不算进分母**——它们是 dsh 也没有的东西，
 > 拿它们充数就成了"用没做的功能凑完成度"。
@@ -133,7 +133,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | A10 | ⏳ | 侧边栏收起 56px 轨道 | `[—]` | **Arc 写死 64px**，属性表无收起态宽度 | 接受 8px 差异 |
 | A11 | ✅ | 119 个 `--dsw-*` token 映射 | `[数据]` | `scripts/sync-dsh-tokens.py` 生成 `Theme/DshTokens.g.cs` | `dsh-tokens-complete`、`dsh-tokens-themes-differ`；dump 底色 = White |
 | A12 | ✅ | `color-mix` 求值 | `[自有]` | `Ui.Core/ColorMath.cs`：`MixSrgb` / `MixHsl`（色相走最短弧） | `color-mix-matches-css` |
-| A13 | ⬜ | 滚动条外观 | `[Arc]` | 现状用 Avalonia 默认滚动条；macOS 是浮层式（滚动时出现），dsh 是**常驻 5px 细条**。解法：`Arc.ScrollArea` 自带细悬浮滚动条 + 边缘渐隐 | 2026-11-06 记入。尚未实现 |
+| A13 | ✅ | 滚动条外观 | `[Arc]` | 中区与右栏滚动容器全部改用 `Arc.ScrollArea`（`OverlayScrollbarMode = Always` 贴合 dsh 常驻 5px 细条；中区 `FadeLength = 0` 避免与底部 36px 渐变遮罩叠加） | 无头检查 `conversation-uses-arc-scroll-area`（含反证） |
 
 ### P8b 会话与输入
 
@@ -184,7 +184,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | E3 | ⬜ | NuGet 安装器 | `[自有]` | **SDK 明确不做**：flat container 拉 `.nupkg` → 解包 → `LoadFromDirectoryAsync` | 待做 |
 | E4 | 🟡 | dockkit 分裂标签树 | `[Arc]` | **用 `TKCode.Arc.Dock`**（1.0.0 才有）：`DockLayout` + 5 个 `DockPane`（4 tool + 1 document），支持拖拽分裂、浮动窗口、自动隐藏、布局序列化 | `DOUGONG_UI_DOCK=1` 启用；无头检查 `dock-mode-builds-split-tree` 断言根=`DockSplit`、5 pane 齐全。**默认未开**——Dock 改变了整条交互路径，要先做视觉验收再切默认 |
 | E5 | ⬜ | 右栏停靠面 + tab 注册表 | `[Arc]` | `AiSidePanel` / `AiPanelColumn` | 待做 |
-| E6 | ✅ | 右侧文件树 | `[自有]` | `fs/list` + `RightDock` 文件 tab；**可进入子目录，面包屑可回退** | 运行时「目录 ''：18 项」→ 进 `src/` 「5 项」；`fs-list-*` 3 条检查 + `dock-directory-nav-is-two-way` |
+| E6 | ✅ | 右侧文件树 | `[自有]` | `fs/list` + `RightDock` 文件 tab；**可进入子目录，面包屑用 `Arc.Breadcrumb`（`MaxVisibleItems = 4` 自动折叠）** | 运行时「目录 ''：18 项」→ 进 `src/` 「5 项」；`fs-list-*` 3 条检查 + `dock-directory-nav-is-two-way` + `right-dock-breadcrumb-uses-arc-control` |
 | E7 | ⬜ | 文档预览 | `[自有]` | Markdown/代码/图片/PDF/Office | 待做 |
 | E8 | ⬜ | 右键菜单扩展点 | `[自有]` | — | 待做 |
 
@@ -211,7 +211,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 
 | # | 状态 | 项 | 实现方式 | dsh 行为（出处） | 我们 |
 |---|---|---|---|---|---|
-| M1 | ✅ | 用户消息复制 | `[自有]` | 时间 + 复制图标，点后变对勾 **1000ms** 复原（`MessageIconActions.tsx:45-90`） | 自建 `MessageActions`：HH:mm + 复制；对勾 1000ms 复原；剪贴板不可用**不假装成功**。dump「气泡 1 / 动作行 1」 |
+| M1 | ✅ | 用户消息复制 | `[Arc]` | 时间 + 复制图标，点后变对勾 **1000ms** 复原（`MessageIconActions.tsx:45-90`） | `MessageActions` 内置 `Arc.CopyButton`（`IsIconOnly=true`、`Variant=Plain`、`ResetAfter=1000ms`、剪贴板失败转 `CopyState.Error`）。无头检查 `message-actions-uses-copy-button`（含反证） |
 | M2 | ✅ | 用户气泡宽度 | `[自有]` | `min(列宽×0.702, 82%)`（`MessageItem.module.css:10-21`） | `ConversationMetrics.UserBubbleWidth`，两条约束取小；`chat-bubble-width-is-two-sided` 钉住宽/窄两端 |
 | M3 | 🟡 | 助手动作行 | `[自有]` | 复制 → 赞踩 → 分支 → 用量 → 时间（`TurnTailNodeView.tsx:57-78`） | 只有赞踩（复制/分支/用量需契约字段，见 §7.5.2） |
 | M4 | ✅ | 消息间距分层 | `[自有]` | 默认 4 / assistant 相邻 12 / turn-process 后 16（`ChatView.module.css:77-93`） | 三档照搬，`chat-gaps-are-three-tiered` 断言严格递增 |
@@ -376,6 +376,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
 | 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
 | 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-27 | **对照 Arc `1.3.2-preview.4` 手册修正 3 处用法并完成 3 处减债（A13 ⬜→✅，P8a 达 100%）**。①补齐 `TKCode.Arc.Highlighting` + `UseArcHighlighting()`（此前 `TKCode.Arc.Markdown` 未传递引入该包，代码块高亮有静默失效风险），同步纳入 `PackageVersionChecks` 的版本与注册守卫；②`SettingsView` 的 4 个 `SegmentedControl` 子项从误用的 `Arc.Button` 改为官方 `SegmentedOption`（补无头断言）；③`ApprovalCard` 删掉无效的 Fluent `Classes.Add("accent")`，改用 `ButtonVariant`（Primary / Secondary / Danger）；④中区与右栏滚动区迁至 `Arc.ScrollArea`（`OverlayScrollbarMode = Always`，完成 A13）；⑤`MessageActions` 改用 `Arc.CopyButton`（`ResetAfter=1000ms`）；⑥`RightDock` 路径面包屑改用 `Arc.Breadcrumb`（`MaxVisibleItems=4`）。新增 4 条无头 UI 检查及反证（无头 35 → 39，总计 131 条） |
 | 2026-11-26 | **F1 修好，而且我之前四个版本的判断全错**（🟡→✅）。一直以为 `TerminalCore.Create` 抛 NRE 是上游缺陷，从 0.4.0 到 1.3.2 每次升级都"复验一遍仍然失败"。用户问"是什么问题"时我去查了真实原因：**`TerminalCoreOptions` 只有一个带参构造函数**，`Replies` / `TerminfoName` / `ScrollbackMaxLines` / `ScrollbackMaxBytes` / `ContinuationMaxBytes` / `DefaultCursorStyle` 的默认值**只在构造函数里赋值**。写 `new TerminalCoreOptions { Size = ... }` 时 C# 合成的是 `(TerminalSize)default` 调用，于是这些字段全是 null/0，原生回调解引用 `Replies` 就崩。并排跑两种写法（五分钟的事）立刻分明：初始化器 NRE、构造函数成功。**教训**：复现"只加包就能复现"只能证明问题不在集成代码里，**不能证明库有缺陷**——复现代码本身可能就是错的用法。我连错四个版本的原因正是"只验仍然失败"，从不把两种写法并排跑。检查 `terminal-panel-reports-unavailable` 改成 `terminal-panel-parses-escape-sequences`（断言 VT 真的解析出文字，而不是断言它坏）；`dock-unimplemented-tabs-are-labeled` 里那条"必须写暂不可用"也一并改掉，并加了一条反向断言"不许再说暂不可用" |
 | 2026-11-26 | **Arc 升 `1.3.0` → `1.3.2-preview.4`，Avalonia `12.1.6` → `12.2.0`**（依赖上限再提一档：`[12.1.6,)` → `[12.2.0, 13.0.0)`）。元数据 diff 九包 **9/9 导出成功**：新增 17 / 删除 0 / 16 处成员变更全为纯增。**三件踩到的事**：①diff 工具的假阴性更深了——nupkg 解压被截断（`unzip -t` 报签名缺失），重下后仍失败，因为 `PathAssemblyResolver` 对同名程序集只认第一个匹配，而我把新旧两版 `TKCode.Arc.dll` 都塞进了 probe 列表；改成"同侧 dll 复制进唯一临时目录"才拿到真表。**这是第三次被"导出失败当成无变化"骗到**，脚本已把两种情形分开输出。②**漏了 `UseArcMarkdown()`**：手册写明要注册，我们从 1.3.0 起引用了 Markdown 包却从未注册——不注册照样编译，只是控件拿不到 ControlTheme（与 Sidebar 漏 UseArcBlocks 同类）。已补。③新增检查 `arc-packages-register-their-builder` 第一次跑就抓到**`TKCode.Arc.Workflow` 是死引用**（代码从未用过 WorkflowCanvas），已删除该包。那条检查本身也修过一次：最初用 Contains 查 Program.cs，而注释里正好写着这串字，删掉真实调用它照样绿；改成先剥注释再查才真正变红。视觉：差异 0.087%，是审批卡片标题字重变实（深色像素 +16.8%）——Avalonia 12.2.0 的字体整形改进（Glyph Outline 系列），不是回退；无法用"只升 Avalonia"隔离，因为 Arc 1.3.0 与 Avalonia 12.2.0 会 NU1605 |
 | 2026-11-20 | **Arc 升 `1.1.1-preview.2` → `1.3.0`，Avalonia `12.1.5` → `12.1.6`**（1.3.0 的依赖从 `[12.1.5, 13.0.0)` 提到 `[12.1.6, 13.0.0)`，必须成对升）。元数据 diff：新增 64 / **删除 28**。删除全部集中在主包，是 `Markdown` 与 `Chat*` 系列。**`Markdown` 拆成了独立包 `TKCode.Arc.Markdown` 1.3.0**——作为依赖被自动引入，所以 `new Markdown()` 照常编译。已改成显式引用（我们直接用它的类型，靠传递依赖意味着上游再拆一次就编译失败）。`MarkdownServices` 真没了，我们没用。**这里踩到一次"两个信号矛盾"**：diff 说删了 28 个，编译器却说零错误。处理顺序是先信编译器、再查清为什么（导出器只看单程序集，看不到类型搬去哪个包；`typeof(Markdown).Assembly` 一问就清楚）。若当时按 diff 停手，会白改一轮。视觉回归：无头逐像素差异 0.046%，仍是状态栏那一块，其余一致。终端复测：`TerminalCore.Create` 在 1.3.0 **仍未修**（握手正常、Create 抛 NRE），F1 继续卡。版本约束检查改成"下限表"（1.0→12.1.4 / 1.1→12.1.5 / 1.3→12.1.6），实测把 Avalonia 降回 12.1.5 会准确报错 |

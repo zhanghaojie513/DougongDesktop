@@ -22,6 +22,8 @@
     <!-- 1.3.0 起 Markdown 从主包拆成独立包。我们直接 new Markdown()，
          所以显式引用——不靠传递依赖：上游再拆一次就会编译失败。 -->
     <PackageVersion Include="TKCode.Arc.Markdown" Version="1.3.2-preview.4" />
+    <!-- 语法高亮：CodeBlock 与 Markdown 的代码着色拆在独立包里，需配合 UseArcHighlighting() 注册。 -->
+    <PackageVersion Include="TKCode.Arc.Highlighting" Version="1.3.2-preview.4" />
     <!-- Dock：IDE 式停靠布局（分裂标签树）。P8e E4 用它，不再自建。 -->
     <PackageVersion Include="TKCode.Arc.Dock" Version="1.3.2-preview.4" />
 

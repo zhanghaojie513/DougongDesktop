@@ -361,9 +361,12 @@ public sealed class RightDock : UserControl
         if (listed.Truncated is { Length: > 0 })
             list.Children.Add(Hint(listed.Truncated));
 
-        return new ScrollViewer
+        return new ScrollArea
         {
             Content = new StackPanel { Children = { BuildBreadcrumb(), list } },
+            Orientation = ScrollAreaOrientation.Vertical,
+            OverlayScrollbarMode = ScrollAreaScrollbarMode.Always,
+            FadeLength = 0,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };
     }
@@ -373,74 +376,49 @@ public sealed class RightDock : UserControl
     /// </summary>
     /// <remarks>
     /// <b>这是"能进不能出"的修法</b>。上一版把目录改成可点之后，
-    /// 点进 <c>src/</c> 就没有任何返回入口了——界面上没有向上按钮，
+    /// 点进 <c>src/</c> 就没有任何返回入口了——界面上没有任何返回入口，
     /// 也没有路径显示，用户只能重启应用才能回到根目录。
     /// 加这一条同时解决两件事：显示当前位置、提供回退。
     /// <para>
-    /// <b>为什么用面包屑而不是"← 返回"单按钮</b>：在
-    /// <c>src/App/Shell/</c> 这种三层深的位置，返回一次只退一层，
-    /// 想回根要点三次；面包屑一次到位，而且明确告诉用户"你在哪"。
+    /// <b>用 Arc 的 <see cref="Breadcrumb"/> 替代手写路径行</b>：
+    /// 自动处理末级当前态（不可点击且高亮）、chevron 分隔符、键盘导航，
+    /// 以及 <c>MaxVisibleItems</c> 在深层路径下自动折叠到溢出菜单。
     /// </para>
     /// </remarks>
     private Control BuildBreadcrumb()
     {
-        var row = new StackPanel
+        var breadcrumb = new Breadcrumb
         {
-            Orientation = Orientation.Horizontal,
+            Label = "工作区路径",
+            OverflowLabel = "显示隐藏路径",
+            MaxVisibleItems = 4,
             Margin = new Thickness(9, 6, 9, 2),
-            Spacing = 1,
         };
 
-        row.Children.Add(BreadcrumbSegment("工作区", string.Empty));
+        breadcrumb.Items.Add(new BreadcrumbItem
+        {
+            Content = "工作区",
+            Tag = string.Empty,
+        });
 
         var accumulated = string.Empty;
         foreach (var part in CurrentDirectory.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
             accumulated = accumulated.Length == 0 ? part : $"{accumulated}/{part}";
-
-            row.Children.Add(new TextBlock
+            breadcrumb.Items.Add(new BreadcrumbItem
             {
-                Text = "/",
-                FontSize = 11,
-                Opacity = 0.35,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(2, 0),
+                Content = part,
+                Tag = accumulated,
             });
-
-            row.Children.Add(BreadcrumbSegment(part, accumulated));
         }
 
-        return row;
-    }
-
-    private Control BreadcrumbSegment(string text, string path)
-    {
-        var isCurrent = path == CurrentDirectory;
-
-        var button = new Avalonia.Controls.Button
+        breadcrumb.ItemClick += (_, e) =>
         {
-            Content = new TextBlock
-            {
-                Text = text,
-                FontSize = 11,
-                // 当前所在层加重，其他层淡一些——用户扫一眼就知道自己在哪
-                Opacity = isCurrent ? 0.95 : 0.6,
-            },
-            Padding = new Thickness(4, 1),
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(Columns.RadiusSm),
+            if (e.Item is BreadcrumbItem { Tag: string target } && target != CurrentDirectory)
+                DirectoryUpRequested?.Invoke(target);
         };
 
-        // 当前层不可点：点了也不会发生任何事，做成可点是在骗用户
-        if (isCurrent)
-        {
-            button.IsEnabled = false;
-            return button;
-        }
-
-        button.Click += (_, _) => DirectoryUpRequested?.Invoke(path);
-        return button;
+        return breadcrumb;
     }
 
     /// <summary>
@@ -501,9 +479,12 @@ public sealed class RightDock : UserControl
             Margin = new Thickness(0, 8, 0, 0),
         });
 
-        return new ScrollViewer
+        return new ScrollArea
         {
             Content = list,
+            Orientation = ScrollAreaOrientation.Vertical,
+            OverlayScrollbarMode = ScrollAreaScrollbarMode.Always,
+            FadeLength = 0,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };
     }
@@ -566,13 +547,16 @@ public sealed class RightDock : UserControl
             });
         }
 
-        return new ScrollViewer
+        return new ScrollArea
         {
             Content = new Border
             {
                 Margin = new Thickness(6),
                 Child = new TKCode.Arc.AgentPlan { Steps = steps },
             },
+            Orientation = ScrollAreaOrientation.Vertical,
+            OverlayScrollbarMode = ScrollAreaScrollbarMode.Always,
+            FadeLength = 0,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };
     }

@@ -79,6 +79,7 @@ internal static class PackageVersionChecks
             ("TKCode.Arc.Blocks", "UseArcBlocks"),
             ("TKCode.Arc.Dock", "UseArcDock"),
             ("TKCode.Arc.Markdown", "UseArcMarkdown"),
+            ("TKCode.Arc.Highlighting", "UseArcHighlighting"),
             ("TKCode.Arc.Workflow", "UseArcWorkflow"),
         };
 
@@ -160,11 +161,12 @@ internal static class PackageVersionChecks
         if (arcVersion < new Version(1, 1, 0) && avaloniaVersion != new Version(12, 1, 4))
             return $"Arc {arc} 精确锁定 Avalonia 12.1.4，当前是 {avalonia}（会 NU1605）";
 
-        // 八个 Arc 包必须同版本：混版会在运行时出现类型不匹配
+        // 九个 Arc 包必须同版本：混版会在运行时出现类型不匹配
         string[] packages =
         [
             "TKCode.Arc", "TKCode.Arc.Fonts", "TKCode.Arc.Special", "TKCode.Arc.Blocks",
-            "TKCode.Arc.Terminal", "TKCode.Arc.Icons.Lucide", "TKCode.Arc.Dock", "TKCode.Arc.Markdown",
+            "TKCode.Arc.Terminal", "TKCode.Arc.Icons.Lucide", "TKCode.Arc.Dock",
+            "TKCode.Arc.Markdown", "TKCode.Arc.Highlighting",
         ];
 
         foreach (var p in packages)

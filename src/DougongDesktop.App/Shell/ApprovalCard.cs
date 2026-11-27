@@ -228,33 +228,30 @@ public sealed class ApprovalCard : UserControl
     /// </remarks>
     private void BuildButtons()
     {
-        _buttons.Children.Add(MakeButton("允许一次", isPrimary: true,
+        _buttons.Children.Add(MakeButton("允许一次", ButtonVariant.Primary,
             () => Resolve(ApprovalDecision.AllowOnce, null)));
 
-        _buttons.Children.Add(MakeButton("本会话允许", isPrimary: false,
+        _buttons.Children.Add(MakeButton("本会话允许", ButtonVariant.Secondary,
             () => Resolve(ApprovalDecision.AllowForSession, null)));
 
-        _buttons.Children.Add(MakeButton("拒绝", isPrimary: false,
+        _buttons.Children.Add(MakeButton("拒绝", ButtonVariant.Secondary,
             () => Resolve(ApprovalDecision.Deny, "用户拒绝")));
 
-        _buttons.Children.Add(MakeButton("拒绝并停止", isPrimary: false,
+        _buttons.Children.Add(MakeButton("拒绝并停止", ButtonVariant.Danger,
             () => Resolve(ApprovalDecision.DenyAndStop, "用户拒绝并要求停止")));
     }
 
-    private TKCode.Arc.Button MakeButton(string text, bool isPrimary, Action onClick)
+    private TKCode.Arc.Button MakeButton(string text, ButtonVariant variant, Action onClick)
     {
+        // Arc Button 靠 Variant 表达主次（默认是 Primary，不能漏设）；
+        // 此前用 FluentTheme 的 Classes.Add("accent") 对 Arc 不生效。
         var button = new TKCode.Arc.Button
         {
             Content = text,
+            Variant = variant,
             FontSize = 12,
             Padding = new Thickness(12, 5),
         };
-
-        if (isPrimary)
-        {
-            // 主按钮用实心，其余保持默认——四个同等醒目的按钮等于没有主次
-            button.Classes.Add("accent");
-        }
 
         button.Click += (_, _) =>
         {

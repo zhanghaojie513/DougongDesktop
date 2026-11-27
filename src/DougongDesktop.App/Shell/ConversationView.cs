@@ -92,7 +92,7 @@ public sealed class ConversationView : UserControl
         IsVisible = false,
     };
 
-    private readonly ScrollViewer _scroll;
+    private readonly ScrollArea _scroll;
     private readonly Control _emptyHint;
 
     /// <summary>当前显示的条目（按 Id 索引，便于流式更新时就地替换）。</summary>
@@ -210,14 +210,20 @@ public sealed class ConversationView : UserControl
 
         _emptyHint = BuildEmptyHero();
 
-        _scroll = new ScrollViewer
+        _scroll = new ScrollArea
         {
             // 列表 + 状态行放进同一个滚动内容。
             //
             // 状态行必须**在滚动区里**：它是"即将出现新内容"的指示，
             // 放在滚动区外（比如审批区那一行）的话，用户上滚看历史时
             // 它就跟着消失了——而那正是最需要知道"还在跑吗"的时刻。
+            //
+            // 用 Arc 的 ScrollArea（P8a A13）：常驻细悬浮滚动条贴合 dsh 的 5px 细条；
+            // FadeLength 设 0，因为底部已有 36px 专属渐变遮罩，避免双重渐隐。
             Content = new StackPanel { Children = { _list, _runStatus } },
+            Orientation = ScrollAreaOrientation.Vertical,
+            OverlayScrollbarMode = ScrollAreaScrollbarMode.Always,
+            FadeLength = 0,
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };

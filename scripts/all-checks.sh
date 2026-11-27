@@ -63,7 +63,9 @@ for check in tool-categories-match-dsh-name-table group-title-matches-dsh-compos
              two-layer-folding-matches-dsh-modes desktop-default-mode-is-standard \
              titlebar-uses-arc-slots reasoning-preview-matches-dsh-rules \
              reasoning-row-collapses-by-default turn-rail-geometry-matches-dsh \
-             turn-rail-renders-one-mark-per-turn turn-rail-mark-jumps-to-its-turn; do
+             turn-rail-renders-one-mark-per-turn turn-rail-mark-jumps-to-its-turn \
+             conversation-uses-arc-scroll-area approval-card-uses-button-variants \
+             message-actions-uses-copy-button right-dock-breadcrumb-uses-arc-control; do
   printf '%-42s ' "$check"
   if "$DOTNET" run --project tests/DougongDesktop.Ui.Headless.Checks \
         -c Release --no-build -- --break="$check" > /dev/null 2>&1; then

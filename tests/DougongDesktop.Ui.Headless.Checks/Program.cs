@@ -83,6 +83,10 @@ public static class Program
         failures += Check("turn-rail-geometry-matches-dsh", TurnRailGeometryMatchesDsh);
         failures += Check("turn-rail-renders-one-mark-per-turn", TurnRailRendersOneMarkPerTurn);
         failures += Check("turn-rail-mark-jumps-to-its-turn", TurnRailMarkJumpsToItsTurn);
+        failures += Check("conversation-uses-arc-scroll-area", ConversationUsesArcScrollArea);
+        failures += Check("approval-card-uses-button-variants", ApprovalCardUsesButtonVariants);
+        failures += Check("message-actions-uses-copy-button", MessageActionsUsesCopyButton);
+        failures += Check("right-dock-breadcrumb-uses-arc-control", RightDockBreadcrumbUsesArcControl);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -1071,6 +1075,13 @@ public static class Program
         if (withItems < 3)
             return $"只有 {withItems} 个 SegmentedControl 有选项（期望 3 个带固定选项的）——"
                    + "控件在树里但没有内容，渲染出来是空的";
+
+        // 子项必须是官方 SegmentedOption，不得套娃塞 Button
+        foreach (var picker in pickers.Where(p => p.ItemCount > 0))
+        {
+            if (picker.Items.OfType<TKCode.Arc.SegmentedOption>().Count() != picker.ItemCount)
+                return "SegmentedControl 子项包含非 SegmentedOption：应使用官方 SegmentedOption 才能驱动滑动胶囊与禁用跳过";
+        }
 
 
         // 2c. **落盘往返**：存进去、重新读回来必须一致
@@ -2125,8 +2136,128 @@ public static class Program
                 ? "未完成的单行确实不给预览，与'应该给'的错期望冲突——断言能发现差异"
                 : null,
 
+        // 滚动区：把 Auto 错期望成 Always 之外的形态（真实为 ScrollArea + Always）。
+        "conversation-uses-arc-scroll-area" =>
+            new ConversationView().ScrollForProbe is ScrollArea { OverlayScrollbarMode: ScrollAreaScrollbarMode.Always }
+                ? "中区确为 ScrollArea(Always)，与'退回裸 ScrollViewer'的错期望冲突——断言能发现差异"
+                : null,
+
+        // 审批按钮变体：真实四颗按钮区分 Primary/Secondary/Danger，与'全默认 Primary'冲突。
+        "approval-card-uses-button-variants" =>
+            new ApprovalCard(MakeApprovalRequest())
+                .GetLogicalDescendants().OfType<TKCode.Arc.Button>()
+                .Any(b => b.Variant == ButtonVariant.Danger)
+                ? "拒绝并停止按钮确为 Danger 变体，与'未区分 Variant'的错期望冲突——断言能发现差异"
+                : null,
+
+        // 消息复制按钮：真实使用 CopyButton 且 ResetAfter=1000ms，与'仍手写 Button'冲突。
+        "message-actions-uses-copy-button" =>
+            new MessageActions("probe", DateTimeOffset.Now)
+                .GetLogicalDescendants().OfType<CopyButton>().Any()
+                ? "MessageActions 确含 Arc CopyButton，与'无 CopyButton'的错期望冲突——断言能发现差异"
+                : null,
+
+        // 右栏面包屑：真实使用 Arc Breadcrumb，与'手写 StackPanel'冲突。
+        "right-dock-breadcrumb-uses-arc-control" =>
+            BuildRightDockWithDir("src/App").GetLogicalDescendants().OfType<Breadcrumb>().Any()
+                ? "RightDock 文件页确含 Arc Breadcrumb，与'无 Breadcrumb'的错期望冲突——断言能发现差异"
+                : null,
+
         _ => null,
     };
+
+    /// <summary>中区滚动容器必须使用 Arc ScrollArea（常驻细滚动条，P8a A13）。</summary>
+    private static string? ConversationUsesArcScrollArea()
+    {
+        var view = new ConversationView();
+        if (view.ScrollForProbe is not ScrollArea area)
+            return $"中区滚动容器是 {view.ScrollForProbe.GetType().Name}，应为 TKCode.Arc.ScrollArea（P8a A13）";
+        if (area.OverlayScrollbarMode != ScrollAreaScrollbarMode.Always)
+            return $"ScrollArea.OverlayScrollbarMode 是 {area.OverlayScrollbarMode}，期望 Always（贴合 dsh 常驻细条）";
+        return null;
+    }
+
+    /// <summary>审批卡片四颗按钮必须通过 Arc ButtonVariant 区分主次与危险操作。</summary>
+    private static string? ApprovalCardUsesButtonVariants()
+    {
+        var card = new ApprovalCard(MakeApprovalRequest());
+
+        var buttons = card.GetLogicalDescendants().OfType<TKCode.Arc.Button>().ToArray();
+        if (buttons.Length != 4)
+            return $"审批卡片只有 {buttons.Length} 个 Arc Button（期望 4）";
+
+        if (buttons.Any(b => b.Classes.Contains("accent")))
+            return "审批按钮仍在用 FluentTheme 的 accent 类——对 Arc Button 无效，应改用 Variant";
+
+        var variants = buttons.Select(b => b.Variant).ToArray();
+        if (variants[0] != ButtonVariant.Primary
+            || variants[1] != ButtonVariant.Secondary
+            || variants[2] != ButtonVariant.Secondary
+            || variants[3] != ButtonVariant.Danger)
+        {
+            return $"按钮变体期望 [Primary, Secondary, Secondary, Danger]，实际 [{string.Join(", ", variants)}]";
+        }
+
+        return null;
+    }
+
+    private static ApprovalRequest MakeApprovalRequest() => new(
+        RequestId: "req-1",
+        SessionId: "sess-1",
+        TurnId: "turn-1",
+        InvocationId: "inv-1",
+        ToolName: "shell",
+        Summary: "列出目录",
+        ArgumentsJson: "{\"command\":\"ls\"}",
+        PermissionScope: "Execute",
+        ExpiresAt: DateTimeOffset.Now.AddMinutes(5),
+        MayHaveIrreversibleEffects: false);
+
+    /// <summary>用户消息动作行必须使用 Arc CopyButton 并按 dsh 1000ms 复原。</summary>
+    private static string? MessageActionsUsesCopyButton()
+    {
+        var actions = new MessageActions("hello", DateTimeOffset.Now);
+        var copy = actions.GetLogicalDescendants().OfType<CopyButton>().FirstOrDefault();
+        if (copy is null)
+            return "MessageActions 里没有 Arc CopyButton";
+        if (copy.Value != "hello")
+            return $"CopyButton.Value 期望 \"hello\"，实际 \"{copy.Value}\"";
+        if (!copy.IsIconOnly)
+            return "CopyButton 应设 IsIconOnly=true";
+        if (Math.Abs(copy.ResetAfter.TotalMilliseconds - ConversationMetrics.CopyFeedbackMs) > 0.5)
+            return $"CopyButton.ResetAfter 期望 {ConversationMetrics.CopyFeedbackMs}ms，实际 {copy.ResetAfter.TotalMilliseconds}ms";
+        return null;
+    }
+
+    /// <summary>右栏文件 tab 面包屑必须使用 Arc Breadcrumb 并随目录层级生成节点。</summary>
+    private static string? RightDockBreadcrumbUsesArcControl()
+    {
+        var dock = BuildRightDockWithDir("src/App");
+        var breadcrumb = dock.GetLogicalDescendants().OfType<Breadcrumb>().FirstOrDefault();
+        if (breadcrumb is null)
+            return "RightDock 文件 tab 没有使用 Arc Breadcrumb";
+
+        var labels = breadcrumb.Items.OfType<BreadcrumbItem>().Select(i => i.Content?.ToString()).ToArray();
+        if (labels.Length != 3 || labels[0] != "工作区" || labels[1] != "src" || labels[2] != "App")
+            return $"面包屑节点期望 [工作区, src, App]，实际 [{string.Join(", ", labels)}]";
+
+        if (breadcrumb.MaxVisibleItems <= 0)
+            return "Breadcrumb 应设 MaxVisibleItems 以在深层路径下自动折叠";
+
+        return null;
+    }
+
+    private static RightDock BuildRightDockWithDir(string path)
+    {
+        var dock = new RightDock();
+        dock.ApplyDirectory(new DirectoryListedEvent
+        {
+            Sequence = 1,
+            Path = path,
+            Entries = [new DirectoryEntry("Program.cs", false, 42)],
+        });
+        return dock;
+    }
 
     /// <summary>建一个最小 AppShell，供反证用。</summary>
     private static DougongDesktop.App.Shell.AppShell BuildShellProbe()
