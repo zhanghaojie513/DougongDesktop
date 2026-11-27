@@ -1,175 +1,138 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
-using Avalonia.Media;
-using DougongDesktop.Ipc;
 using DougongDesktop.Ui.Core;
-using TKCode.Arc.Icons.Lucide;
+using TKCode.Arc;
+using IpcFeedbackRating = DougongDesktop.Ipc.FeedbackRating;
+using ArcFeedbackRating = TKCode.Arc.FeedbackRating;
 
 namespace DougongDesktop.App.Shell;
 
 /// <summary>
-/// 消息反馈条：赞 / 踩两个按钮。
+/// 助手消息尾部的动作与反馈行：复制 + 赞/踩（含原因 chips 与可选备注）+ 时间戳。
 /// </summary>
 /// <remarks>
-/// <b>为什么自建而不是用 Arc 的 <c>AiAnswerActions</c></b>：那个类实测是
-/// <c>internal</c>（反射确认 <c>IsPublic=False</c>），外部引用不到。
-/// 它所在的 <c>AiAnswer</c> 是**整页控件**（含 reasoning、sources、追问），
-/// 而我们要的只是消息流里一条消息下面的一行按钮——用量级不匹配。
-/// <para>
-/// <b>所以只做两件事，不做成"AI 答案页"</b>：
-/// <list type="number">
-/// <item>两个按钮（赞 / 踩），踩之后才问理由</item>
-/// <item>点过之后显示"已记录"，不再让重复点</item>
+/// <b>采用 Arc 的 <see cref="FeedbackActions"/>（Special 包，public）</b>：
+/// 此前自建是因为 <c>AiAnswerActions</c> 为 <c>internal</c>；重扫组件库后确认
+/// <see cref="FeedbackActions"/> 为 public，专为宿主自定义消息行设计：
+/// <list type="bullet">
+/// <item><c>Leading</c> 插槽承接 <see cref="CopyButton"/>（1000ms 复原）</item>
+/// <item><c>Trailing</c> 插槽承接时间戳</item>
+/// <item>踩后内联展开原因 chips + 可选备注，提交后显示致谢并自动折叠，不遮挡正文</item>
+/// <item>通过 <c>FeedbackHandler</c> 接入宿主 IPC，失败时自带内联错误与重试</item>
 /// </list>
-/// 不做版本导航、不做重新生成、不做分享——那些要么没有数据支撑，
-/// 要么属于 P8d 的会话增强。
-/// </para>
-/// <para>
-/// <b>踩的理由在本地弹一个小面板</b>，不用 Dialog：Dialog 会遮住正文，
-/// 而用户在评价时往往正看着那段正文。
-/// </para>
 /// </remarks>
 public sealed class FeedbackBar : UserControl
 {
     private readonly string _itemId;
-    private readonly StackPanel _buttons;
-    private readonly TextBlock _status;
-    private readonly StackPanel _reasons;
+    private readonly FeedbackActions _actions;
 
-    private FeedbackRating _rating = FeedbackRating.None;
+    /// <summary>用户提交了评分或反馈细节。</summary>
+    public event Action<string, IpcFeedbackRating, string?>? Submitted;
 
-    /// <summary>用户提交了评分。</summary>
-    public event Action<string, FeedbackRating, string?>? Submitted;
-
-    /// <summary>踩的理由。用短词，方便后续统计。</summary>
+    /// <summary>踩的理由。用短词，方便后续统计，也保证窄屏最多折两行。</summary>
     private static readonly string[] DownReasons = ["不准确", "没帮上忙", "太啰嗦", "跑题了"];
 
-    public FeedbackBar(string itemId)
+    private static readonly ResponseFeedbackLabels ChineseLabels = new()
+    {
+        GoodResponse = "有帮助",
+        BadResponse = "没帮助",
+        NegativeTitle = "这条回复有什么问题？",
+        PositiveTitle = "哪些方面有帮助？",
+        Other = "其他",
+        OtherPlaceholder = "告诉我们具体哪里不对…",
+        Submit = "提交",
+        Send = "发送",
+        Skip = "跳过",
+        Cancel = "取消",
+        Close = "关闭",
+        TryAgain = "重试",
+        Note = "补充说明",
+        Thanks = "感谢反馈",
+        ThanksMessage = "已记录你的反馈。",
+        SendFailed = "反馈提交失败",
+        RatingFailed = "评分保存失败",
+        Sending = "正在提交…",
+        RatedUp = "已标记为有帮助",
+        RatedDown = "已标记为没帮助",
+        RatingCleared = "已取消评分",
+        CopyReply = "复制回复",
+    };
+
+    public FeedbackBar(string itemId, string? copyText = null, DateTimeOffset? timestamp = null)
     {
         _itemId = itemId;
 
-        _status = new TextBlock
+        _actions = new FeedbackActions
         {
-            FontSize = 11,
-            Opacity = 0.55,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(6, 0, 0, 0),
-            IsVisible = false,
-        };
-
-        _reasons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 4,
+            MessageId = itemId,
+            NegativeReasons = DownReasons,
+            PositiveReasons = [],
+            AllowComment = true,
+            CommentPlaceholder = "补充细节（可选）",
+            PrivacyNote = null,
+            ThanksMessage = "已记录你的反馈。",
+            Labels = ChineseLabels,
             Margin = new Thickness(0, 4, 0, 0),
-            IsVisible = false,
         };
 
-        _buttons = new StackPanel
+        if (!string.IsNullOrEmpty(copyText))
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 2,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
+            _actions.Leading = new CopyButton
+            {
+                Value = copyText,
+                IsIconOnly = true,
+                Variant = CopyButtonVariant.Plain,
+                Label = "复制回复",
+                CopiedLabel = "复制成功",
+                FailedLabel = "复制失败",
+                ResetAfter = TimeSpan.FromMilliseconds(ConversationMetrics.CopyFeedbackMs),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
 
-        _buttons.Children.Add(MakeButton(LucideIconKind.ThumbsUp, "有帮助", () => Rate(FeedbackRating.Up)));
-        _buttons.Children.Add(MakeButton(LucideIconKind.ThumbsDown, "没帮助", OnDownClicked));
-
-        var row = new StackPanel
+        if (timestamp is { } at)
         {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children = { _buttons, _status },
+            _actions.Trailing = new TextBlock
+            {
+                Text = at.ToLocalTime().ToString("HH:mm"),
+                FontSize = 11,
+                Opacity = 0.4,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+
+        _actions.FeedbackHandler = (submission, _) =>
+        {
+            var rating = MapRating(submission.Rating);
+            var reason = FormatReason(submission.Reasons, submission.Comment);
+            Submitted?.Invoke(_itemId, rating, reason);
+            return Task.CompletedTask;
         };
 
-        Content = new StackPanel { Children = { row, _reasons } };
+        Content = _actions;
     }
 
     /// <summary>当前评分，供诊断。</summary>
-    public FeedbackRating Rating => _rating;
+    public IpcFeedbackRating Rating => MapRating(_actions.Rating);
 
-    private void OnDownClicked()
+    /// <summary>底层 Arc 控件，供诊断与无头检查。</summary>
+    public FeedbackActions Inner => _actions;
+
+    private static IpcFeedbackRating MapRating(ArcFeedbackRating rating) => rating switch
     {
-        // 已经点过就不再弹理由
-        if (_rating != FeedbackRating.None) return;
+        ArcFeedbackRating.Up => IpcFeedbackRating.Up,
+        ArcFeedbackRating.Down => IpcFeedbackRating.Down,
+        _ => IpcFeedbackRating.None,
+    };
 
-        if (_reasons.IsVisible)
-        {
-            _reasons.IsVisible = false;
-            return;
-        }
-
-        BuildReasonButtons();
-        _reasons.IsVisible = true;
-    }
-
-    private void BuildReasonButtons()
+    private static string? FormatReason(IReadOnlyList<string>? reasons, string? comment)
     {
-        if (_reasons.Children.Count > 0) return;
-
-        foreach (var reason in DownReasons)
-        {
-            var tag = reason;
-            var button = new Avalonia.Controls.Button
-            {
-                Content = new TextBlock { Text = tag, FontSize = 11 },
-                Padding = new Thickness(8, 3),
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(DshTheme.BorderL3),
-                CornerRadius = new CornerRadius(Columns.RadiusSm),
-                Tag = tag,
-            };
-
-            button.Click += (_, _) => Rate(FeedbackRating.Down, tag);
-            _reasons.Children.Add(button);
-        }
-    }
-
-    private void Rate(FeedbackRating rating, string? reason = null)
-    {
-        // 重复点击不产生第二次提交——与审批的"重复答复只授权一次"同一条原则
-        if (_rating != FeedbackRating.None) return;
-
-        _rating = rating;
-        _reasons.IsVisible = false;
-        _buttons.IsVisible = false;
-
-        _status.Text = rating switch
-        {
-            FeedbackRating.Up => "已记录：有帮助",
-            FeedbackRating.Down => reason is { Length: > 0 } ? $"已记录：{reason}" : "已记录：没帮助",
-            _ => "已记录",
-        };
-        _status.IsVisible = true;
-
-        Submitted?.Invoke(_itemId, rating, reason);
-    }
-
-    private Avalonia.Controls.Button MakeButton(LucideIconKind kind, string tip, Action onClick)
-    {
-        var button = new Avalonia.Controls.Button
-        {
-            Content = new LucideIcon { Kind = kind, Size = 14 },
-            Width = 26,
-            Height = 26,
-            Padding = new Thickness(0),
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(Columns.RadiusSm),
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center,
-            Opacity = 0.55,
-        };
-
-        ToolTip.SetTip(button, tip);
-
-        button.PointerEntered += (_, _) => button.Opacity = 0.9;
-        button.PointerExited += (_, _) => button.Opacity = 0.55;
-
-        button.Click += (_, _) => onClick();
-
-        return button;
+        var parts = new List<string>();
+        if (reasons is { Count: > 0 })
+            parts.Add(string.Join("、", reasons.Where(r => !string.IsNullOrWhiteSpace(r))));
+        if (!string.IsNullOrWhiteSpace(comment))
+            parts.Add(comment.Trim());
+        return parts.Count > 0 ? string.Join("：", parts) : null;
     }
 }

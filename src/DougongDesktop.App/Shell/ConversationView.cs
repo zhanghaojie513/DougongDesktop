@@ -1589,7 +1589,7 @@ public sealed class ConversationView : UserControl
             };
         }
 
-        var feedback = new FeedbackBar(item.Id);
+        var feedback = new FeedbackBar(item.Id, item.Text, item.At);
         feedback.Submitted += (id, rating, reason) =>
             FeedbackRequested?.Invoke(id, rating, reason);
 

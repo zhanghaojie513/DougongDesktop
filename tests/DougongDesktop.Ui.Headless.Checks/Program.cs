@@ -87,6 +87,8 @@ public static class Program
         failures += Check("approval-card-uses-button-variants", ApprovalCardUsesButtonVariants);
         failures += Check("message-actions-uses-copy-button", MessageActionsUsesCopyButton);
         failures += Check("right-dock-breadcrumb-uses-arc-control", RightDockBreadcrumbUsesArcControl);
+        failures += Check("feedback-bar-uses-arc-feedback-actions", FeedbackBarUsesArcFeedbackActions);
+        failures += Check("sidebar-uses-new-arc-apis", SidebarUsesNewArcApis);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -2163,6 +2165,18 @@ public static class Program
                 ? "RightDock 文件页确含 Arc Breadcrumb，与'无 Breadcrumb'的错期望冲突——断言能发现差异"
                 : null,
 
+        // 反馈条：真实使用 Arc FeedbackActions 且带 Leading CopyButton，与'自建按钮行'冲突。
+        "feedback-bar-uses-arc-feedback-actions" =>
+            new FeedbackBar("m1", "reply", DateTimeOffset.Now).Inner.Leading is CopyButton
+                ? "FeedbackBar 确由 Arc FeedbackActions + CopyButton 组成，与'无 CopyButton'冲突——断言能发现差异"
+                : null,
+
+        // 侧边栏新 API：真实设了 ExpandedWidth 且 More 标 IsAction，与'旧写法'冲突。
+        "sidebar-uses-new-arc-apis" =>
+            SidebarView.Build([], null, null, _ => { }).ExpandedWidth == Columns.SidebarDefault
+                ? "Sidebar 确已设 ExpandedWidth=280，与'未设置'的错期望冲突——断言能发现差异"
+                : null,
+
         _ => null,
     };
 
@@ -2257,6 +2271,69 @@ public static class Program
             Entries = [new DirectoryEntry("Program.cs", false, 42)],
         });
         return dock;
+    }
+
+    /// <summary>助手反馈行必须由 Arc FeedbackActions 驱动，带复制按钮、时间戳与真实提交回调。</summary>
+    private static string? FeedbackBarUsesArcFeedbackActions()
+    {
+        var bar = new FeedbackBar("msg-42", "助手回复正文", DateTimeOffset.Now);
+        var actions = bar.Inner;
+
+        if (actions.MessageId != "msg-42")
+            return $"MessageId 期望 msg-42，实际 {actions.MessageId ?? "(null)"}";
+        if (actions.PrivacyNote is not null)
+            return $"本地桌面端不应显示云端审核提示 PrivacyNote，实际为 \"{actions.PrivacyNote}\"";
+        if (actions.FeedbackHandler is null)
+            return "FeedbackHandler 为 null：控件会退回模拟发送模式";
+
+        if (actions.Leading is not CopyButton copy || copy.Value != "助手回复正文")
+            return "FeedbackActions.Leading 缺少绑定正文的 Arc CopyButton";
+        if (Math.Abs(copy.ResetAfter.TotalMilliseconds - ConversationMetrics.CopyFeedbackMs) > 0.5)
+            return $"助手复制按钮 ResetAfter 期望 {ConversationMetrics.CopyFeedbackMs}ms，实际 {copy.ResetAfter.TotalMilliseconds}ms";
+        if (actions.Trailing is not TextBlock { Text.Length: > 0 })
+            return "FeedbackActions.Trailing 缺少时间戳";
+
+        string? gotId = null;
+        DougongDesktop.Ipc.FeedbackRating gotRating = DougongDesktop.Ipc.FeedbackRating.None;
+        string? gotReason = null;
+        bar.Submitted += (id, rating, reason) => (gotId, gotRating, gotReason) = (id, rating, reason);
+
+        var sub = new FeedbackSubmission(
+            "msg-42", FeedbackStage.Details, TKCode.Arc.FeedbackRating.Down, ["不准确"], "细节");
+        actions.FeedbackHandler(sub, CancellationToken.None).GetAwaiter().GetResult();
+
+        if (gotId != "msg-42" || gotRating != DougongDesktop.Ipc.FeedbackRating.Down || gotReason != "不准确：细节")
+            return $"回调映射异常：id={gotId}, rating={gotRating}, reason={gotReason}";
+
+        return null;
+    }
+
+    /// <summary>SidebarView 必须采用 Arc 1.3.2 新 API（ExpandedWidth / ItemInvoked / IsAction / Arc.Button）。</summary>
+    private static string? SidebarUsesNewArcApis()
+    {
+        var sidebar = SidebarView.Build([], null, null, _ => { });
+
+        if (Math.Abs(sidebar.ExpandedWidth - Columns.SidebarDefault) > 0.5)
+            return $"Sidebar.ExpandedWidth 期望 {Columns.SidebarDefault}，实际 {sidebar.ExpandedWidth}";
+        if (sidebar.SelectCommand is not null)
+            return "Sidebar 仍在用 SelectCommand + RelayCommand，应改用 ItemInvoked 事件";
+
+        var more = sidebar.Sections
+            .SelectMany(s => s.Items)
+            .FirstOrDefault(i => i.Key == SidebarView.MoreKey);
+        if (more is null || !more.IsAction)
+            return "「更多」侧栏项未设 IsAction=true：点击会抢走当前会话选中态";
+
+        var header = sidebar.Header as Control;
+        var newSessionBtn = header?.GetLogicalDescendants()
+            .OfType<TKCode.Arc.Button>()
+            .FirstOrDefault();
+        if (newSessionBtn is null)
+            return "新会话卡片未使用 Arc Button";
+        if (newSessionBtn.Variant != ButtonVariant.Secondary)
+            return $"新会话卡片 Variant 期望 Secondary，实际 {newSessionBtn.Variant}";
+
+        return null;
     }
 
     /// <summary>建一个最小 AppShell，供反证用。</summary>

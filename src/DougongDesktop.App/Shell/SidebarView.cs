@@ -52,13 +52,13 @@ public static class SidebarView
         {
             IsFilterVisible = true,
             FilterPlaceholder = "筛选会话",
-            // 折叠入口只在标题栏那一个：dsh 的侧栏里没有折叠按钮，
-            // 它在 Windows caption row 的左侧。两处都有会让用户以为是两个功能。
+            NoMatchesText = "没有匹配的会话",
+            // 折叠入口只在标题栏/topStrip 那一个：dsh 的侧栏里没有自带折叠按钮，
+            // 两处都有会让用户以为是两个功能。
             IsCollapseButtonVisible = false,
             SelectedKey = selectedKey,
-
-            // 宽度不在这里设：OpenWidth 是主题层属性（Arc 注释写 "from the theme"），
-            // 不对外开放赋值。展开宽度由外层 Grid 的列宽决定（280，见 Columns）。
+            // Arc 1.3.2 开放了 ExpandedWidth（不直接设 Width，避免锁死折叠动画）。
+            ExpandedWidth = Columns.SidebarDefault,
 
             // 侧栏填充色与标题栏同源（dsh 的 --dsw-specific-sidebar-fill）
             Background = DshTheme.Brush(DshTheme.SidebarFill),
@@ -140,8 +140,9 @@ public static class SidebarView
             TKCode.Arc.Icons.Lucide.LucideIconKind.Blocks));
         nav.Items.Add(MakeItem(TasksKey, "自动化任务",
             TKCode.Arc.Icons.Lucide.LucideIconKind.Clock));
+        // 「更多」是动作项而非页面，设 IsAction=true：触发 ItemInvoked 但不抢走当前选中态。
         nav.Items.Add(MakeItem(MoreKey, "更多",
-            TKCode.Arc.Icons.Lucide.LucideIconKind.LayoutGrid));
+            TKCode.Arc.Icons.Lucide.LucideIconKind.LayoutGrid, isAction: true));
 
         sidebar.Sections.Add(nav);
 
@@ -191,12 +192,12 @@ public static class SidebarView
 
         sidebar.Sections.Add(section);
 
-        // 用 SelectCommand 而不是监听 SelectedKey：dsh 的文档明确推荐这个，
-        // 因为重复选中同一项时 SelectedKey 不变化，命令仍会触发。
-        sidebar.SelectCommand = new RelayCommand(p =>
+        // 用 Arc 1.3.2 的 ItemInvoked 事件：点击已选中项也会触发，
+        // 不再需要手写 RelayCommand 包装 SelectCommand。
+        sidebar.ItemInvoked += (_, e) =>
         {
-            if (p is string key) onSelect(key);
-        });
+            if (e.Item?.Key is { Length: > 0 } key) onSelect(key);
+        };
 
         return sidebar;
     }
@@ -209,8 +210,8 @@ public static class SidebarView
     /// 38px 高 + 描边 + 12px 圆角 + 抬升填充把它做成按钮形态，
     /// 与下面的导航项、会话行明显区分。
     /// <para>
-    /// <b>用 Arc 的 Button 而不是自建 Border</b>：键盘可达性、悬停态、
-    /// 焦点环都是现成的；自建要重写一遍且容易漏焦点可见性。
+    /// <b>直接用 Arc 的 <see cref="TKCode.Arc.Button"/></b>：键盘可达性、悬停态、
+    /// 按压回弹与焦点环由组件自带，不再手写 PointerEntered/PointerExited 切底色。
     /// </para>
     /// </remarks>
     private static Control BuildNewSessionCard(Action<string> onSelect)
@@ -238,50 +239,34 @@ public static class SidebarView
             },
         };
 
-        // 用 Avalonia 原生 Button，不用 TKCode.Arc.Button：
-        // 后者为"标签文字 crossfade"设计，Content 期望是字符串；
-        // 传复合内容（图标 + 文字）时它不渲染。
-        var button = new Avalonia.Controls.Button
+        var button = new TKCode.Arc.Button
         {
             Content = content,
+            Variant = ButtonVariant.Secondary,
             Height = 38,
             Padding = new Thickness(12, 8),
             Margin = new Thickness(Columns.SidebarPaintInset + 1, 0,
                 Columns.SidebarPaintInset + 1, 10),
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
             HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-            Background = DshTheme.Brush(DshTheme.ButtonElevatedFill),
-            BorderBrush = DshTheme.Brush(DshTheme.BorderL3),
-            BorderThickness = new Thickness(0.5),
             CornerRadius = new CornerRadius(Columns.RadiusMd),
         };
-
-        // 悬停反馈：抬升填充稍微加深，与 dsh 的 hover 一致
-        button.PointerEntered += (_, _) =>
-            button.Background = DshTheme.Brush(DshTheme.Layer3);
-        button.PointerExited += (_, _) =>
-            button.Background = DshTheme.Brush(DshTheme.ButtonElevatedFill);
 
         button.Click += (_, _) => onSelect(NewSessionKey);
         return button;
     }
 
-    /// <summary>
-    /// 造一个侧边栏项。
-    /// </summary>
-    /// <remarks>
-    /// <b>暂时不配图标</b>：<c>Icon</c> 是 object 类型（可放 Geometry 或 Control），
-    /// 但 Arc 的内置字形在 <c>ArcIcons</c> 里，需要逐个确认键名。
-    /// 先用纯文字——图标缺失不影响导航功能，而猜错的字形会显示成方块，
-    /// 那比没有更糟。
-    /// </remarks>
+    /// <summary>造一个侧边栏项。</summary>
     private static SidebarItem MakeItem(
-        string key, string label, TKCode.Arc.Icons.Lucide.LucideIconKind? icon = null)
+        string key,
+        string label,
+        TKCode.Arc.Icons.Lucide.LucideIconKind? icon = null,
+        bool isAction = false)
     {
-        var item = new SidebarItem { Key = key, Label = label };
+        var item = new SidebarItem { Key = key, Label = label, IsAction = isAction };
 
         // Icon 是 object 类型，可以直接放控件。LucideIcon 是 ArcGlyph 派生，
-        // 会跟随前景色与字号——比自己拼 Path 省事且缩放假正确。
+        // 会跟随前景色与字号——比自己拼 Path 省事且缩放正确。
         if (icon is { } kind)
         {
             item.Icon = new TKCode.Arc.Icons.Lucide.LucideIcon
@@ -314,14 +299,4 @@ public static class SidebarView
 
         return at.ToLocalTime().ToString("MM-dd");
     }
-}
-
-/// <summary>极简命令实现，避免为侧边栏引入 MVVM 框架。</summary>
-internal sealed class RelayCommand(Action<object?> execute) : System.Windows.Input.ICommand
-{
-    public event EventHandler? CanExecuteChanged { add { } remove { } }
-
-    public bool CanExecute(object? parameter) => true;
-
-    public void Execute(object? parameter) => execute(parameter);
 }

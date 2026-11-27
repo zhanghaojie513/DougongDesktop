@@ -21,7 +21,7 @@
 
 最后更新：2026-11-27
 
-**基线**：dsh `0.2.2-rc.3`（commit `39163dd3`）· TKCode.Arc `1.3.2-preview.4` · SDK `0.2.0-alpha.1`
+**基线**：dsh `0.2.2-rc.3`（commit `39163dd3`）· TKCode.Arc `1.3.2-preview.6` · SDK `0.2.0-alpha.1`
 
 ---
 
@@ -143,7 +143,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | B2 | ✅ | `@` 文件引用 | `[Arc]` | `ContextItemProjection` 把 `fs/list` 结果转成 `AiContextItem`；Id 用完整相对路径（同名文件不互串）；分组标题显式设中文（Arc 默认英文）；**右栏目录可点进入，列表累加不替换** | dump「@ 引用项 18 个」；进入 `src/` 后 **23 个**（累加 5）；`context-items-have-unique-ids` |
 | B3 | ✅ | 附件栏 | `[Arc]` | **Arc 自带完整链路**：`IsAttachmentEnabled=true` → 加号菜单 → "Upload file" → `BrowseAsync()` 自己开系统选择器。`UploadHandler=null`（本地无上传服务，附件直接 Ready） | 自检注入 1 个附件后 Composer 高 101→161；dump「自检附件已加入：1 个」 |
 | B4 | ✅ | 模型选择 | `[Arc]` | `AiModel`/`AiModelProvider`；IPC `models/list` → `ModelProjection` → composer | 运行时日志「模型目录：662 个 / 22 家」 |
-| B5 | ✅ | 消息反馈 Like/Dislike | `[自有]` | 自建 `FeedbackBar`：赞/踩两按钮，踩后追问理由，重复点击只提交一次。**`AiAnswerActions` 实测是 `internal`**，引用不到；`AiAnswer` 是整页控件，量级不匹配 | dump「反馈条 1 个 / 可见 assistant 容器 1 个」；`feedback-rating-roundtrips` |
+| B5 | ✅ | 消息反馈 Like/Dislike | `[Arc]` | `FeedbackBar` 包装 Arc `FeedbackActions`（Special，public）：赞/踩 + 原因 chips + 可选备注 + 致谢折叠 + `Leading` 放 `CopyButton` + `Trailing` 放时间戳，通过 `FeedbackHandler` 转发宿主 IPC | 无头检查 `feedback-bar-uses-arc-feedback-actions`（含反证）；`feedback-rating-roundtrips` |
 | B6 | ➖ | 引用来源 | `[—]` | **SDK 不提供 sources/citations 数据**——`Protocol.cs` 里没有任何来源字段 | 没有数据就没有可显示的来源。硬做只能造假引用，比不做更糟 |
 
 ### P8c 设置域
@@ -213,7 +213,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 |---|---|---|---|---|---|
 | M1 | ✅ | 用户消息复制 | `[Arc]` | 时间 + 复制图标，点后变对勾 **1000ms** 复原（`MessageIconActions.tsx:45-90`） | `MessageActions` 内置 `Arc.CopyButton`（`IsIconOnly=true`、`Variant=Plain`、`ResetAfter=1000ms`、剪贴板失败转 `CopyState.Error`）。无头检查 `message-actions-uses-copy-button`（含反证） |
 | M2 | ✅ | 用户气泡宽度 | `[自有]` | `min(列宽×0.702, 82%)`（`MessageItem.module.css:10-21`） | `ConversationMetrics.UserBubbleWidth`，两条约束取小；`chat-bubble-width-is-two-sided` 钉住宽/窄两端 |
-| M3 | 🟡 | 助手动作行 | `[自有]` | 复制 → 赞踩 → 分支 → 用量 → 时间（`TurnTailNodeView.tsx:57-78`） | 只有赞踩（复制/分支/用量需契约字段，见 §7.5.2） |
+| M3 | 🟡 | 助手动作行 | `[Arc]` | 复制 → 赞踩 → 分支 → 用量 → 时间（`TurnTailNodeView.tsx:57-78`） | `FeedbackActions` 已齐「复制（`Leading` `CopyButton`）→ 赞踩 → 时间（`Trailing`）」；剩分支与用量待契约字段（见 §7.5.2） |
 | M4 | ✅ | 消息间距分层 | `[自有]` | 默认 4 / assistant 相邻 12 / turn-process 后 16（`ChatView.module.css:77-93`） | 三档照搬，`chat-gaps-are-three-tiered` 断言严格递增 |
 | M5 | ✅ | 贴底阈值 | `[自有]` | **25px**（`use-chat-reading.ts:7,277`） | 25。`chat-follow-threshold-is-25` 硬编码 dsh 的**生效值**（不是常量名上的 24） |
 | M6 | ✅ | "回到底部"按钮 | `[自有]` | 34×34 圆形，距底 16px，滚离底部才出现（`ChatView.tsx:272-283`） | 同尺寸同位置；点击恢复跟随。dump「34×34 OK」 |
@@ -376,6 +376,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
 | 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
 | 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-27 | **Arc 升 `1.3.2-preview.4` → `1.3.2-preview.6` + 接入 `FeedbackActions` + 清理 `SidebarView` 新 API**。①元数据比对 `1.3.2-preview.6`：`TKCode.Arc` 净增 9 类型（`SelectMenuSizing`、富文本/右键本地化资源），其余 6 包零删零增；②`FeedbackBar` 改用 Arc `FeedbackActions`（`Leading` 放 `CopyButton`、`Trailing` 放时间、中文化 `ResponseFeedbackLabels`、`PrivacyNote=null`，顺带补齐 M3 复制与时间）；③`SidebarView` 启用 `ExpandedWidth=280`、`ItemInvoked`（删掉手写 `RelayCommand`）、`MoreKey` 标 `IsAction=true`、新会话卡片改用 `Arc.Button(Secondary)`。新增 2 条无头检查与反证（无头 39 → 41，总计 133 条） |
 | 2026-11-27 | **对照 Arc `1.3.2-preview.4` 手册修正 3 处用法并完成 3 处减债（A13 ⬜→✅，P8a 达 100%）**。①补齐 `TKCode.Arc.Highlighting` + `UseArcHighlighting()`（此前 `TKCode.Arc.Markdown` 未传递引入该包，代码块高亮有静默失效风险），同步纳入 `PackageVersionChecks` 的版本与注册守卫；②`SettingsView` 的 4 个 `SegmentedControl` 子项从误用的 `Arc.Button` 改为官方 `SegmentedOption`（补无头断言）；③`ApprovalCard` 删掉无效的 Fluent `Classes.Add("accent")`，改用 `ButtonVariant`（Primary / Secondary / Danger）；④中区与右栏滚动区迁至 `Arc.ScrollArea`（`OverlayScrollbarMode = Always`，完成 A13）；⑤`MessageActions` 改用 `Arc.CopyButton`（`ResetAfter=1000ms`）；⑥`RightDock` 路径面包屑改用 `Arc.Breadcrumb`（`MaxVisibleItems=4`）。新增 4 条无头 UI 检查及反证（无头 35 → 39，总计 131 条） |
 | 2026-11-26 | **F1 修好，而且我之前四个版本的判断全错**（🟡→✅）。一直以为 `TerminalCore.Create` 抛 NRE 是上游缺陷，从 0.4.0 到 1.3.2 每次升级都"复验一遍仍然失败"。用户问"是什么问题"时我去查了真实原因：**`TerminalCoreOptions` 只有一个带参构造函数**，`Replies` / `TerminfoName` / `ScrollbackMaxLines` / `ScrollbackMaxBytes` / `ContinuationMaxBytes` / `DefaultCursorStyle` 的默认值**只在构造函数里赋值**。写 `new TerminalCoreOptions { Size = ... }` 时 C# 合成的是 `(TerminalSize)default` 调用，于是这些字段全是 null/0，原生回调解引用 `Replies` 就崩。并排跑两种写法（五分钟的事）立刻分明：初始化器 NRE、构造函数成功。**教训**：复现"只加包就能复现"只能证明问题不在集成代码里，**不能证明库有缺陷**——复现代码本身可能就是错的用法。我连错四个版本的原因正是"只验仍然失败"，从不把两种写法并排跑。检查 `terminal-panel-reports-unavailable` 改成 `terminal-panel-parses-escape-sequences`（断言 VT 真的解析出文字，而不是断言它坏）；`dock-unimplemented-tabs-are-labeled` 里那条"必须写暂不可用"也一并改掉，并加了一条反向断言"不许再说暂不可用" |
 | 2026-11-26 | **Arc 升 `1.3.0` → `1.3.2-preview.4`，Avalonia `12.1.6` → `12.2.0`**（依赖上限再提一档：`[12.1.6,)` → `[12.2.0, 13.0.0)`）。元数据 diff 九包 **9/9 导出成功**：新增 17 / 删除 0 / 16 处成员变更全为纯增。**三件踩到的事**：①diff 工具的假阴性更深了——nupkg 解压被截断（`unzip -t` 报签名缺失），重下后仍失败，因为 `PathAssemblyResolver` 对同名程序集只认第一个匹配，而我把新旧两版 `TKCode.Arc.dll` 都塞进了 probe 列表；改成"同侧 dll 复制进唯一临时目录"才拿到真表。**这是第三次被"导出失败当成无变化"骗到**，脚本已把两种情形分开输出。②**漏了 `UseArcMarkdown()`**：手册写明要注册，我们从 1.3.0 起引用了 Markdown 包却从未注册——不注册照样编译，只是控件拿不到 ControlTheme（与 Sidebar 漏 UseArcBlocks 同类）。已补。③新增检查 `arc-packages-register-their-builder` 第一次跑就抓到**`TKCode.Arc.Workflow` 是死引用**（代码从未用过 WorkflowCanvas），已删除该包。那条检查本身也修过一次：最初用 Contains 查 Program.cs，而注释里正好写着这串字，删掉真实调用它照样绿；改成先剥注释再查才真正变红。视觉：差异 0.087%，是审批卡片标题字重变实（深色像素 +16.8%）——Avalonia 12.2.0 的字体整形改进（Glyph Outline 系列），不是回退；无法用"只升 Avalonia"隔离，因为 Arc 1.3.0 与 Avalonia 12.2.0 会 NU1605 |

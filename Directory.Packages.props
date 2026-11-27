@@ -11,21 +11,21 @@
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.2.0" />
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.2.0" />
 
-    <PackageVersion Include="TKCode.Arc" Version="1.3.2-preview.4" />
-    <PackageVersion Include="TKCode.Arc.Fonts" Version="1.3.2-preview.4" />
+    <PackageVersion Include="TKCode.Arc" Version="1.3.2-preview.6" />
+    <PackageVersion Include="TKCode.Arc.Fonts" Version="1.3.2-preview.6" />
     <!-- agent 组件不在主包：ToolCall/AgentStatus/AgentPlan/ContextWindow 在 Special，
          Sidebar/CommandPalette/ModelPicker 在 Blocks。见 docs/arc-integration.md -->
-    <PackageVersion Include="TKCode.Arc.Special" Version="1.3.2-preview.4" />
-    <PackageVersion Include="TKCode.Arc.Blocks" Version="1.3.2-preview.4" />
-    <PackageVersion Include="TKCode.Arc.Terminal" Version="1.3.2-preview.4" />
-    <PackageVersion Include="TKCode.Arc.Icons.Lucide" Version="1.3.2-preview.4" />
+    <PackageVersion Include="TKCode.Arc.Special" Version="1.3.2-preview.6" />
+    <PackageVersion Include="TKCode.Arc.Blocks" Version="1.3.2-preview.6" />
+    <PackageVersion Include="TKCode.Arc.Terminal" Version="1.3.2-preview.6" />
+    <PackageVersion Include="TKCode.Arc.Icons.Lucide" Version="1.3.2-preview.6" />
     <!-- 1.3.0 起 Markdown 从主包拆成独立包。我们直接 new Markdown()，
          所以显式引用——不靠传递依赖：上游再拆一次就会编译失败。 -->
-    <PackageVersion Include="TKCode.Arc.Markdown" Version="1.3.2-preview.4" />
+    <PackageVersion Include="TKCode.Arc.Markdown" Version="1.3.2-preview.6" />
     <!-- 语法高亮：CodeBlock 与 Markdown 的代码着色拆在独立包里，需配合 UseArcHighlighting() 注册。 -->
-    <PackageVersion Include="TKCode.Arc.Highlighting" Version="1.3.2-preview.4" />
+    <PackageVersion Include="TKCode.Arc.Highlighting" Version="1.3.2-preview.6" />
     <!-- Dock：IDE 式停靠布局（分裂标签树）。P8e E4 用它，不再自建。 -->
-    <PackageVersion Include="TKCode.Arc.Dock" Version="1.3.2-preview.4" />
+    <PackageVersion Include="TKCode.Arc.Dock" Version="1.3.2-preview.6" />
 
     <!-- Spyglass：Avalonia 的 out-of-process 调试器（视觉树/样式/绑定/性能）。
          只给 Debug 构建用：生产包里不该带调试探针。

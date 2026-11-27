@@ -4,7 +4,7 @@
 > 目标：读完之后能立刻构建、跑检查、知道现在停在哪、下一步做什么。
 >
 > 写于 2026-11-05，2026-11-06 修订（Mac 实测结论 + Arc 0.4.0 + 组件重扫）。
-> **当前状态：131 条检查全绿（架构守卫 92 + 无头 UI 39），构建 0 警告 0 错误。**
+> **当前状态：133 条检查全绿（架构守卫 92 + 无头 UI 41），构建 0 警告 0 错误。**
 
 ---
 
@@ -52,7 +52,7 @@ scripts/rebuild.sh DougongDesktop.slnx Release
 scripts/all-checks.sh
 ```
 
-**期望**：`ALL CHECKS PASS`，架构守卫 92 条 + 无头 UI 39 条（两者正向/反证都对齐）。
+**期望**：`ALL CHECKS PASS`，架构守卫 92 条 + 无头 UI 41 条（两者正向/反证都对齐）。
 
 `all-checks.sh` 做两件事——正向跑一遍，再用 `--break=<slug>` 逐条破坏，
 确认**每条检查真的会红**。反证不生效会被判 FAIL（"检查抓不到真违规"）。
@@ -221,7 +221,7 @@ Mac 上直接 `./scripts/rebuild.sh` 就是 `permission denied`。
 
 ## 五、当前进度
 
-### 总览（131 条检查全绿）
+### 总览（133 条检查全绿）
 
 | 阶段 | 状态 |
 |---|---|
@@ -280,7 +280,7 @@ Mac 上直接 `./scripts/rebuild.sh` 就是 `permission denied`。
 
 | 自建的东西 | 可换成的 Arc 组件 | 差异 |
 |---|---|---|
-| `FeedbackBar`（赞/踩） | **`FeedbackActions`**（Special，public） | 我们只有两个拇指；它有原因 chips + 可选备注 + 提交后致谢 + 失败内联报错（`FeedbackHandler` 抛异常会显示）。当初自建是因为 `AiAnswerActions` 是 internal——但 `FeedbackActions` 是 public，那条理由已不成立 |
+| `FeedbackBar`（赞/踩） | **`FeedbackActions`**（Special，public） | **2026-11-27 已替换**：`FeedbackBar` 改由 `FeedbackActions` 驱动，`Leading` 嵌 `CopyButton`、`Trailing` 放时间戳，带原因 chips / 备注 / 致谢 / 失败重试 |
 | `RunClock`（计时） | 无。`AgentStatusRunClock` 是 **internal**，外部写不出来 | 自建是对的，保持现状 |
 
 > 换 `FeedbackActions` 前先确认它的 `Leading`/`Trailing` 插槽够不够嵌我们现有的
@@ -394,7 +394,7 @@ git clone https://github.com/AIDotNet/TKCode.Arc arc-src
 | `src/DougongDesktop.App/Shell/ConversationView.cs` | **中区主体**（1526 行），条目分派、滚动跟随、空状态 |
 | `src/DougongDesktop.App/Shell/MessageActions.cs` | 用户消息时间 + 复制 |
 | `src/DougongDesktop.App/Shell/RunStatusLine.cs` | "深度求索中" 状态行 |
-| `src/DougongDesktop.App/Shell/FeedbackBar.cs` | 赞/踩。**可换成 Arc `FeedbackActions`（public，0.4.0 才有）**，见 §六 |
+| `src/DougongDesktop.App/Shell/FeedbackBar.cs` | 赞/踩 + 复制 + 时间（包装 Arc `FeedbackActions`） |
 | `src/DougongDesktop.App/Shell/ApprovalCard.cs` | 审批四档 + 倒计时 |
 | `src/DougongDesktop.App/Shell/Composer.cs` | 输入区（包装 Arc `AiComposer`） |
 | `src/DougongDesktop.App/Shell/RightDock.cs` | 右栏 5 tab（含目录面包屑导航） |
@@ -427,5 +427,5 @@ b142d43 feat(p8g): 中区会话域纳入 1:1 复刻范围（9 项）+ 跨平台�
 f96dab2 feat(p8b): 附件栏——Arc 自带完整链路，删掉多余的抽象
 ```
 
-**当前状态**：131 条检查全绿，构建 0 警告 0 错误，
-Arc `1.3.2-preview.4`，Avalonia `12.2.0`，SDK `0.2.0-alpha.1`。
+**当前状态**：133 条检查全绿，构建 0 警告 0 错误，
+Arc `1.3.2-preview.6`，Avalonia `12.2.0`，SDK `0.2.0-alpha.1`。
