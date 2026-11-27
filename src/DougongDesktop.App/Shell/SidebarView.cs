@@ -46,7 +46,18 @@ public static class SidebarView
         IReadOnlyList<SessionSummary>? sessions,
         string? connectionDetail,
         string? selectedKey,
-        Action<string> onSelect)
+        Action<string> onSelect) =>
+        Build(sessions, connectionDetail, selectedKey, onSelect, workspaceOwner: null);
+
+    /// <summary>
+    /// 构建侧边栏（支持 P8d D1 工作区选择器与分组/扁平会话行切换）。
+    /// </summary>
+    public static Sidebar Build(
+        IReadOnlyList<SessionSummary>? sessions,
+        string? connectionDetail,
+        string? selectedKey,
+        Action<string> onSelect,
+        WorkspacePickerOwner? workspaceOwner)
     {
         var sidebar = new Sidebar
         {
@@ -115,11 +126,15 @@ public static class SidebarView
             },
         };
 
-        // Header = 品牌行 + 新会话卡片（竖排）
-        sidebar.Header = new StackPanel
+        // Header = 品牌行 + 新会话卡片（+ 工作区选择器与分组/扁平切换条）
+        var headerStack = new StackPanel
         {
             Children = { brandRow, BuildNewSessionCard(onSelect) },
         };
+        if (workspaceOwner is not null)
+            headerStack.Children.Add(BuildWorkspaceToolbar(workspaceOwner));
+
+        sidebar.Header = headerStack;
 
         // 底部：设置入口（dsh 也是把 Settings 固定在底部）
         // Footer 是 object 类型，可以直接放 SidebarItem
@@ -133,9 +148,6 @@ public static class SidebarView
             IsCollapsible = false,
         };
 
-        // 新会话卡片：dsh 是 38px 高、0.5px 描边、12px 圆角、
-        // button-elevated-fill 填充、内容居中的独立按钮——不是列表行。
-        // 它是这一栏唯一的主操作，做成卡片才看得出优先级。
         nav.Items.Add(MakeItem(PluginsKey, "插件",
             TKCode.Arc.Icons.Lucide.LucideIconKind.Blocks));
         nav.Items.Add(MakeItem(TasksKey, "自动化任务",
@@ -146,51 +158,7 @@ public static class SidebarView
 
         sidebar.Sections.Add(nav);
 
-        var section = new SidebarSection
-        {
-            Header = "工作区",
-            IsCollapsible = true,
-            IsExpanded = true,
-        };
-
-        // 新建会话永远是第一项
-
-        if (sessions is null)
-        {
-            // 引擎未连接：如实说明原因，不放一个空列表让用户猜
-            section.Items.Add(new SidebarItem
-            {
-                Key = "__offline",
-                Label = connectionDetail ?? "引擎未连接",
-                IsEnabled = false,
-            });
-        }
-        else if (sessions.Count == 0)
-        {
-            section.Items.Add(new SidebarItem
-            {
-                Key = "__empty",
-                Label = "还没有会话",
-                IsEnabled = false,
-            });
-        }
-        else
-        {
-            foreach (var s in sessions)
-            {
-                section.Items.Add(new SidebarItem
-                {
-                    Key = s.Id,
-                    Label = string.IsNullOrWhiteSpace(s.Title) ? s.Id : s.Title,
-                    // dsh 的行尾显示"多久前"，不是条目数——条目数对用户没用，
-                    // 时间才帮他找回"我刚才在聊哪个"
-                    Badge = FormatRelative(s.UpdatedAt),
-                    IsUnread = s.HasPendingApproval,
-                });
-            }
-        }
-
-        sidebar.Sections.Add(section);
+        AppendSessionSections(sidebar, sessions, connectionDetail, workspaceOwner);
 
         // 用 Arc 1.3.2 的 ItemInvoked 事件：点击已选中项也会触发，
         // 不再需要手写 RelayCommand 包装 SelectCommand。
@@ -200,6 +168,132 @@ public static class SidebarView
         };
 
         return sidebar;
+    }
+
+    private static Control BuildWorkspaceToolbar(WorkspacePickerOwner owner)
+    {
+        var picker = WorkspacePickerFactory.Create(owner, WorkspacePickerSurface.NewSession);
+
+        var modeBtn = new TKCode.Arc.Button
+        {
+            Variant = ButtonVariant.Ghost,
+            Size = ControlSize.Small,
+            Content = owner.ListMode == SessionListMode.Grouped ? "分组" : "扁平",
+            Padding = new Thickness(6, 2),
+        };
+        ToolTip.SetTip(modeBtn, owner.ListMode == SessionListMode.Grouped
+            ? "当前按工作区分组，点击切换为扁平列表"
+            : "当前扁平展示全部会话，点击切换为按工作区分组");
+
+        modeBtn.Click += (_, _) =>
+        {
+            var next = owner.ListMode == SessionListMode.Grouped
+                ? SessionListMode.Flat
+                : SessionListMode.Grouped;
+            owner.SetListMode(next);
+        };
+
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            ColumnSpacing = 4,
+            Margin = new Thickness(Columns.SidebarPaintInset + 1, 0,
+                Columns.SidebarPaintInset + 1, 6),
+        };
+        Grid.SetColumn(picker, 0);
+        Grid.SetColumn(modeBtn, 1);
+        grid.Children.Add(picker);
+        grid.Children.Add(modeBtn);
+        return grid;
+    }
+
+    private static void AppendSessionSections(
+        Sidebar sidebar,
+        IReadOnlyList<SessionSummary>? sessions,
+        string? connectionDetail,
+        WorkspacePickerOwner? workspaceOwner)
+    {
+        if (sessions is null)
+        {
+            var offline = new SidebarSection { Header = "工作区", IsCollapsible = true, IsExpanded = true };
+            offline.Items.Add(new SidebarItem
+            {
+                Key = "__offline",
+                Label = connectionDetail ?? "引擎未连接",
+                IsEnabled = false,
+            });
+            sidebar.Sections.Add(offline);
+            return;
+        }
+
+        if (sessions.Count == 0)
+        {
+            var empty = new SidebarSection { Header = "工作区", IsCollapsible = true, IsExpanded = true };
+            empty.Items.Add(new SidebarItem
+            {
+                Key = "__empty",
+                Label = "还没有会话",
+                IsEnabled = false,
+            });
+            sidebar.Sections.Add(empty);
+            return;
+        }
+
+        var mode = workspaceOwner?.ListMode ?? SessionListMode.Grouped;
+        if (mode == SessionListMode.Flat)
+        {
+            var flat = new SidebarSection { Header = "全部会话", IsCollapsible = true, IsExpanded = true };
+            var multiWorkspace = sessions
+                .Select(s => WorkspaceCatalog.NormalizePath(s.Workspace))
+                .Where(p => p.Length > 0)
+                .Distinct(WorkspaceCatalog.PathComparer)
+                .Skip(1)
+                .Any();
+
+            foreach (var s in WorkspaceCatalog.FlattenSessions(sessions))
+            {
+                var title = string.IsNullOrWhiteSpace(s.Title) ? s.Id : s.Title;
+                var wsTag = multiWorkspace && !string.IsNullOrWhiteSpace(s.Workspace)
+                    ? $"[{WorkspaceCatalog.DisplayNameOf(s.Workspace)}] "
+                    : string.Empty;
+
+                flat.Items.Add(new SidebarItem
+                {
+                    Key = s.Id,
+                    Label = $"{wsTag}{title}",
+                    Badge = FormatRelative(s.UpdatedAt),
+                    IsUnread = s.HasPendingApproval,
+                });
+            }
+
+            sidebar.Sections.Add(flat);
+            return;
+        }
+
+        // 分组模式：每个工作区一个可折叠 SidebarSection
+        var groups = WorkspaceCatalog.GroupSessions(sessions, workspaceOwner?.ActiveWorkspace);
+        foreach (var group in groups)
+        {
+            var section = new SidebarSection
+            {
+                Header = group.DisplayName,
+                IsCollapsible = true,
+                IsExpanded = true,
+            };
+
+            foreach (var s in group.Sessions)
+            {
+                section.Items.Add(new SidebarItem
+                {
+                    Key = s.Id,
+                    Label = string.IsNullOrWhiteSpace(s.Title) ? s.Id : s.Title,
+                    Badge = FormatRelative(s.UpdatedAt),
+                    IsUnread = s.HasPendingApproval,
+                });
+            }
+
+            sidebar.Sections.Add(section);
+        }
     }
 
     /// <summary>

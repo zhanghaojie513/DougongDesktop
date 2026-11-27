@@ -508,7 +508,10 @@ public sealed class IpcServer : IAsyncDisposable
 
         try
         {
-            var root = Path.GetFullPath(_workspace);
+            var baseWorkspace = !string.IsNullOrWhiteSpace(command.Workspace) && Directory.Exists(command.Workspace)
+                ? command.Workspace
+                : _workspace;
+            var root = Path.GetFullPath(baseWorkspace);
             var target = string.IsNullOrWhiteSpace(relative)
                 ? root
                 : Path.GetFullPath(Path.Combine(root, relative));

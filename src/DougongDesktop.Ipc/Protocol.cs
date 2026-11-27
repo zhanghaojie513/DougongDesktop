@@ -105,6 +105,9 @@ public sealed record ListDirectoryCommand : ClientCommand
 {
     /// <summary>相对工作区根的路径。空或 null 表示根目录。</summary>
     public string? Path { get; init; }
+
+    /// <summary>可选工作区根路径（P8d D1 多工作区切换）；null 时沿用引擎默认工作区。</summary>
+    public string? Workspace { get; init; }
 }
 
 /// <summary>目录内容（响应 <see cref="ListDirectoryCommand"/>）。</summary>

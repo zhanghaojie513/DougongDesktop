@@ -93,6 +93,8 @@ public static class Program
         failures += Check("terminal-panel-encodes-key-input", TerminalPanelEncodesKeyInput);
         failures += Check("trajectory-projection-maps-turns-and-subagents", TrajectoryProjectionMapsTurnsAndSubagents);
         failures += Check("trajectory-panel-uses-arc-agent-timeline", TrajectoryPanelUsesArcAgentTimeline);
+        failures += Check("workspace-picker-matches-rc3-contract", WorkspacePickerMatchesRc3Contract);
+        failures += Check("sidebar-switches-grouped-and-flat-sessions", SidebarSwitchesGroupedAndFlatSessions);
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -2193,6 +2195,18 @@ public static class Program
         // 轨迹面板：真实 RightDock 轨迹 tab 由 Arc AgentTimeline 驱动并中文化标签，与'未接入 AgentTimeline'冲突。
         "trajectory-panel-uses-arc-agent-timeline" => VerifyTrajectoryPanelCounterProof(),
 
+        // 工作区选择器 rc.3 契约：真实无锚点返回 None、空工作区直开目录流，与'永远弹菜单'冲突。
+        "workspace-picker-matches-rc3-contract" =>
+            WorkspacePickerPolicy.DecideOnTrigger(listReady: true, workspaceCount: 0, hasAnchor: false)
+                == WorkspacePickerOpenAction.OpenDirectoryFlow
+            && WorkspacePickerPolicy.DecideOnTrigger(listReady: true, workspaceCount: 2, hasAnchor: false)
+                == WorkspacePickerOpenAction.None
+                ? "WorkspacePickerPolicy 确已遵守无锚点不显示与空列表直开目录流，与'无条件开菜单'冲突——断言能发现差异"
+                : null,
+
+        // 侧栏分组/扁平模式：真实分组模式按工作区拆 section、扁平模式合为「全部会话」，与'固定单组'冲突。
+        "sidebar-switches-grouped-and-flat-sessions" => VerifySidebarGroupingCounterProof(),
+
         _ => null,
     };
 
@@ -2740,6 +2754,144 @@ public static class Program
         return dock.Trajectory?.Timeline.Labels.Thinking == "思考"
             ? "RightDock 轨迹 tab 确由中文化的 Arc AgentTimeline 驱动，与'未接入 AgentTimeline'的错期望冲突——断言能发现差异"
             : null;
+    }
+
+    /// <summary>
+    /// 工作区选择器（P8d D1，对照 dsh 0.2.2-rc.3 契约）：
+    /// 空白 Hero 与侧栏两个表面共用同一 owner；无锚点不显示菜单；
+    /// 列表就绪且无工作区时直接触发 directoryFlow 洞；偏好独立落盘往返。
+    /// </summary>
+    private static string? WorkspacePickerMatchesRc3Contract()
+    {
+        var owner = new WorkspacePickerOwner();
+        owner.Initialize(activeWorkspace: null, recentWorkspaces: null, listMode: SessionListMode.Grouped, isReady: true);
+
+        WorkspacePickerSurface? flowSurface = null;
+        owner.DirectoryFlowRequested += s => flowSurface = s;
+
+        var conv = new ConversationView();
+        conv.AttachWorkspacePicker(owner);
+        var heroPicker = conv.HeroWorkspacePicker;
+        if (heroPicker is null)
+            return "ConversationView.AttachWorkspacePicker 后 HeroWorkspacePicker 仍为 null";
+        if (heroPicker.Surface != WorkspacePickerSurface.EmptyHero)
+            return $"Hero 选择器表面应为 EmptyHero，实际 {heroPicker.Surface}";
+
+        var sidebar = SidebarView.Build([], null, null, _ => { }, owner);
+        var sidebarPicker = (sidebar.Header as Control)?
+            .GetLogicalDescendants()
+            .OfType<WorkspacePickerControl>()
+            .FirstOrDefault();
+        if (sidebarPicker is null)
+            return "SidebarView Header 中未建出 NewSession 表面 WorkspacePickerControl";
+        if (sidebarPicker.Surface != WorkspacePickerSurface.NewSession)
+            return $"侧栏选择器表面应为 NewSession，实际 {sidebarPicker.Surface}";
+
+        // 规则 1：列表就绪且 0 工作区 → 即使无锚点也直接触发 directoryFlow
+        var emptyAction = heroPicker.Activate(forceAnchor: false);
+        if (emptyAction != WorkspacePickerOpenAction.OpenDirectoryFlow || flowSurface != WorkspacePickerSurface.EmptyHero)
+            return $"0 工作区且已就绪时应直接进入 OpenDirectoryFlow（实际 {emptyAction}, surface={flowSurface}）";
+
+        // 加入工作区后，两表面必须同步更新为同一显示名
+        owner.AddWorkspace("/tmp/demo-repo", select: true);
+        if (heroPicker.LabelText != "demo-repo" || sidebarPicker.LabelText != "demo-repo")
+            return $"两表面未共享同一 owner 状态（Hero={heroPicker.LabelText}, Sidebar={sidebarPicker.LabelText}）";
+
+        // 规则 2：有工作区但无锚点 → 不显示菜单（None）
+        var unanchored = sidebarPicker.Activate(forceAnchor: false);
+        if (unanchored != WorkspacePickerOpenAction.None)
+            return $"无锚点时必须返回 None 不显示菜单（实际 {unanchored}）";
+
+        // 规则 3：有工作区且有锚点 → OpenMenu
+        var anchored = sidebarPicker.Activate(forceAnchor: true);
+        if (anchored != WorkspacePickerOpenAction.OpenMenu)
+            return $"有锚点且有工作区时应返回 OpenMenu（实际 {anchored}）";
+
+        // 持久化独立往返：只存工作区字段，不存布局字段
+        var mem = new RoundTripMemoryStore();
+        new AppSettings
+        {
+            ActiveWorkspace = "/tmp/demo-repo",
+            RecentWorkspaces = ["/tmp/demo-repo", "/tmp/other-repo"],
+            SessionListMode = "flat",
+        }.Save(mem);
+        var reloaded = AppSettings.Load(mem);
+        if (reloaded.ActiveWorkspace != "/tmp/demo-repo"
+            || reloaded.RecentWorkspaces is not { Length: 2 }
+            || WorkspaceCatalog.ParseMode(reloaded.SessionListMode) != SessionListMode.Flat)
+        {
+            return $"工作区偏好落盘往返异常（active={reloaded.ActiveWorkspace}, mode={reloaded.SessionListMode}）";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 侧栏会话行（P8d D1）：支持按工作区分组与扁平列表两种形态实时切换。
+    /// </summary>
+    private static string? SidebarSwitchesGroupedAndFlatSessions()
+    {
+        var now = DateTimeOffset.Now;
+        var sessions = new SessionSummary[]
+        {
+            new("s1", "旧任务", "/work/alpha", now.AddHours(-3), 4, false),
+            new("s2", "新任务", "/work/alpha", now.AddMinutes(-10), 6, false),
+            new("s3", "另一仓库", "/work/beta", now.AddHours(-1), 2, false),
+        };
+
+        var owner = new WorkspacePickerOwner();
+        owner.Initialize("/work/beta", ["/work/beta", "/work/alpha"], SessionListMode.Grouped, isReady: true);
+        owner.SyncSessions(sessions);
+
+        // 分组模式：nav(无标题) + beta(活动工作区置顶，1 条) + alpha(2 条)
+        var grouped = SidebarView.Build(sessions, null, null, _ => { }, owner);
+        var wsSections = grouped.Sections.Where(s => s.Header is not null).ToArray();
+        if (wsSections.Length != 2)
+            return $"分组模式期望 2 个工作区分区（beta/alpha），实际 {wsSections.Length}";
+        if (wsSections[0].Header?.ToString() != "beta" || wsSections[0].Items.Count != 1)
+            return $"活动工作区 beta 应排第一且含 1 条会话（实际 {wsSections[0].Header} / {wsSections[0].Items.Count}）";
+        if (wsSections[1].Header?.ToString() != "alpha" || wsSections[1].Items.Count != 2)
+            return $"工作区 alpha 应排第二且含 2 条会话（实际 {wsSections[1].Header} / {wsSections[1].Items.Count}）";
+
+        // 切扁平模式：单个「全部会话」分区，按 UpdatedAt 倒序（s2 → s3 → s1），带工作区前缀
+        owner.SetListMode(SessionListMode.Flat);
+        var flat = SidebarView.Build(sessions, null, null, _ => { }, owner);
+        var flatSections = flat.Sections.Where(s => s.Header is not null).ToArray();
+        if (flatSections.Length != 1 || flatSections[0].Header?.ToString() != "全部会话")
+            return $"扁平模式期望单个「全部会话」分区，实际 {flatSections.Length} 个（{flatSections.FirstOrDefault()?.Header}）";
+
+        var keys = flatSections[0].Items.Select(i => i.Key).ToArray();
+        if (!keys.SequenceEqual(["s2", "s3", "s1"]))
+            return $"扁平模式应按最近更新倒序 [s2, s3, s1]，实际 [{string.Join(", ", keys)}]";
+
+        if (flatSections[0].Items[0].Label?.Contains("[alpha]", StringComparison.Ordinal) != true)
+            return $"多工作区扁平模式应带工作区标签前缀（实际 {flatSections[0].Items[0].Label}）";
+
+        return null;
+    }
+
+    private static string? VerifySidebarGroupingCounterProof()
+    {
+        var now = DateTimeOffset.Now;
+        var sessions = new SessionSummary[]
+        {
+            new("s1", "A", "/work/alpha", now.AddHours(-2), 1, false),
+            new("s2", "B", "/work/beta", now.AddHours(-1), 1, false),
+        };
+        var owner = new WorkspacePickerOwner();
+        owner.Initialize("/work/alpha", null, SessionListMode.Grouped, isReady: true);
+        var grouped = SidebarView.Build(sessions, null, null, _ => { }, owner);
+        var sectionCount = grouped.Sections.Count(s => s.Header is not null);
+        return sectionCount == 2
+            ? "侧栏分组模式确已拆出 2 个工作区分区，与'固定单分区'的错期望冲突——断言能发现差异"
+            : null;
+    }
+
+    private sealed class RoundTripMemoryStore : DougongDesktop.Ui.Core.ISettingsStore
+    {
+        private string? _content;
+        public string? Read(string name) => _content;
+        public bool Write(string name, string content) { _content = content; return true; }
     }
 
     /// <summary>建一个最小 AppShell，供反证用。</summary>

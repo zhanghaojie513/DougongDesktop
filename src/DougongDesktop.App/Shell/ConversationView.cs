@@ -94,6 +94,22 @@ public sealed class ConversationView : UserControl
 
     private readonly ScrollArea _scroll;
     private readonly Control _emptyHint;
+    private readonly Border _heroWorkspaceHost = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Center,
+        Margin = new Thickness(0, 14, 0, 0),
+        IsVisible = false,
+    };
+
+    /// <summary>空状态 Hero 内的工作区选择器（P8d D1，与侧栏共用同一 owner）。</summary>
+    public WorkspacePickerControl? HeroWorkspacePicker => _heroWorkspaceHost.Child as WorkspacePickerControl;
+
+    /// <summary>挂载空状态 Hero 的工作区 chip（dsh rc.3 EmptyHero 表面）。</summary>
+    public void AttachWorkspacePicker(WorkspacePickerOwner owner)
+    {
+        _heroWorkspaceHost.Child = WorkspacePickerFactory.Create(owner, WorkspacePickerSurface.EmptyHero);
+        _heroWorkspaceHost.IsVisible = true;
+    }
 
     /// <summary>当前显示的条目（按 Id 索引，便于流式更新时就地替换）。</summary>
     private readonly List<ConversationItem> _items = [];
@@ -1668,7 +1684,7 @@ public sealed class ConversationView : UserControl
     /// 没有 dsh 那种多工作区切换。做出来会是个点了没反应的 chip。
     /// </para>
     /// </remarks>
-    private static Control BuildEmptyHero()
+    private Control BuildEmptyHero()
     {
         var logo = new TKCode.Arc.Icons.Lucide.LucideIcon
         {
@@ -1721,7 +1737,7 @@ public sealed class ConversationView : UserControl
         {
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { logo, titleRow, hint },
+            Children = { logo, titleRow, hint, _heroWorkspaceHost },
         };
     }
 

@@ -49,11 +49,11 @@
 | P8a 布局骨架 | 11 | 0 | 0 | 1 | 1 | 13 | **100%** |
 | P8b 会话与输入 | 5 | 0 | 0 | 0 | 1 | 6 | **100%** |
 | P8c 设置域 | 6 | 0 | 0 | 1 | 1 | 8 | **100%** |
-| P8d 会话增强 | 1 | 0 | 6 | 0 | 0 | 7 | **14%** |
+| P8d 会话增强 | 2 | 0 | 5 | 0 | 0 | 7 | **29%** |
 | P8e 插件体系 | 1 | 1 | 6 | 0 | 0 | 8 | **19%** |
 | P8f 终端与浏览器 | 4 | 0 | 1 | 0 | 0 | 5 | **80%** |
 | **P8g 中区会话域** | **15** | **1** | **1** | **0** | **6** | **23** | **91%** |
-| **合计** | **43** | **2** | **14** | **2** | **9** | **70** | **75%** |
+| **合计** | **44** | **2** | **13** | **2** | **9** | **70** | **76%** |
 
 > **P8g 是 2026-11-05 新纳入的**。此前只对齐了中栏**宽度几何**，
 > 内容侧的会话行为从未比对过——这是范围缺口，不是实现缺陷。
@@ -64,7 +64,7 @@
 
 完成度算法：`(✅ + 🟡×0.5) / (✅+🟡+⬜)`，不含 `⏳` 与 `➖`。
 
-当前：`(43 + 2×0.5) / (43+2+14) = 44 / 59 = 75%`
+当前：`(44 + 2×0.5) / (44+2+13) = 45 / 59 = 76%`
 
 > **不做的那些（➖ 共 9 项）不算进分母**——它们是 dsh 也没有的东西，
 > 拿它们充数就成了"用没做的功能凑完成度"。
@@ -163,7 +163,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 
 | # | 状态 | 项 | 实现方式 | 我们 | 验证 |
 |---|---|---|---|---|---|
-| D1 | ⬜ | 工作区浏览器 | `[自有]` | 已有 `fs/list`，补分组/扁平会话行。**rc.3 新增了可直接照抄的契约**：`workspace.picker` Factory + `workspace.picker.directoryFlow` 洞（`ui-workspace/src/client/contract/slots.ts:145,235`），两个 picker 表面（空白会话 hero / 新会话视图）共用一套 owner 取值；菜单无锚点时不显示、列表就绪但无工作区时直接开目录选择流。 | 待做 |
+| D1 | ✅ | 工作区浏览器 | `[自有]` | `Ui.Core/WorkspaceCatalog.cs` 实现会话按工作区分组/扁平投影与 dsh rc.3 `WorkspacePickerPolicy`/`WorkspacePickerOwner` 单一 owner 契约（无锚点不显示、列表就绪且 0 工作区直开 `directoryFlow`）；`Shell/WorkspacePickerFactory.cs` 统一产出 `EmptyHero` 与 `NewSession` 两个表面（Arc `Button` + `MenuFlyout` + 系统目录选择器）；`SidebarView` 支持分组/扁平实时切换与 `AppSettings` 独立落盘；`ListDirectoryCommand` 补可选 `Workspace` 根以同步切换右栏文件树与终端工作目录，并打通侧栏「新会话」按钮 | 无头检查 `workspace-picker-matches-rc3-contract` + `sidebar-switches-grouped-and-flat-sessions`（均含反证） |
 | D2 | ⬜ | `ask_user_question` 卡片 | `[自有]` | 附着式卡片 + 计时等待 + 草稿 | 待做 |
 | D3 | ⬜ | 交付物卡片 | `[Arc]` | `AiDiffText` 有词级 diff 组件，**但 SDK 的 `FileVersion` 不存原文** —— 缺口在数据侧 | 待做（依赖数据） |
 | D4 | ✅ | Trajectory 视图 | `[Arc]` | `Ui.Core/TrajectoryProjection.cs` 纯数据投影（思考 `Thinking` / 审批等待 `Waiting` / 工具执行 `Tool` / 失败诊断 / 子智能体分行与双向 `Handoff` / 运行中开放段）+ `Shell/TrajectoryPanel.cs` 封装 Arc `AgentTimeline`（全中文化 `AgentTimelineLabels`、倍速回放、悬停/钉选详情条、`SegmentedControl` 轮次切换、live 模式），接入 `RightDock`「轨迹」tab 与 `MainWindow` 实时 IPC 事件 | 无头检查 `trajectory-projection-maps-turns-and-subagents` + `trajectory-panel-uses-arc-agent-timeline`（均含反证）+ `dock-mode-builds-split-tree`（6 pane） |
@@ -217,7 +217,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | M4 | ✅ | 消息间距分层 | `[自有]` | 默认 4 / assistant 相邻 12 / turn-process 后 16（`ChatView.module.css:77-93`） | 三档照搬，`chat-gaps-are-three-tiered` 断言严格递增 |
 | M5 | ✅ | 贴底阈值 | `[自有]` | **25px**（`use-chat-reading.ts:7,277`） | 25。`chat-follow-threshold-is-25` 硬编码 dsh 的**生效值**（不是常量名上的 24） |
 | M6 | ✅ | "回到底部"按钮 | `[自有]` | 34×34 圆形，距底 16px，滚离底部才出现（`ChatView.tsx:272-283`） | 同尺寸同位置；点击恢复跟随。dump「34×34 OK」 |
-| M7 | ✅ | 空状态 Hero | `[自有]` | logo + "探索未至之境" + 预览版徽章 + 工作区 chip（`EmptyHero.tsx:132-166`） | logo + 标题 + 预览版徽章。**不做工作区 chip**（桌面端工作区由启动参数定，做了会是死按钮） |
+| M7 | ✅ | 空状态 Hero | `[自有]` | logo + "探索未至之境" + 预览版徽章 + 工作区 chip（`EmptyHero.tsx:132-166`） | logo + 标题 + 预览版徽章 + 真实工作区 chip（随 D1 接入 `WorkspacePickerFactory`，与侧栏共用 owner，点击可切换或选择目录） |
 | M8 | ✅ | 输入区渐变遮罩 | `[自有]` | 36px `linear-gradient` 贴底（`ConversationRoot.module.css:507-530`） | 36px 渐变，叠在消息流行底部（不是输入区行内，否则盖住输入框），不参与命中测试 |
 
 **P1 — 需要少量新状态**
@@ -376,6 +376,7 @@ dsh 那种"一个 `ui-*` 包就是一整块功能"的粒度我们没有——所
 | 2026-11-12 | **已完成项逐项对照新源码复核**，发现并修掉 2 处真实偏差。①**M9 运行耗时格式**：原用四舍五入（`:0`），源码是 `Math.floor` 向下取整——59.6 秒会显示成 60 秒；且缺最小 1 秒（`Math.max(1000,...)`）与小时档（`formatRunDuration` 有 3 段）。已提取 `RunStatusLine.FormatElapsed` 使其可测。②**M8 渐变遮罩透明端**：原用 `FromArgb(0,0,0,0)`（黑色全透明），源码是 **bg-base 全透明**——dsh 注释明写 "not white, which the figma export hardcodes, so both themes fade from their own base"，深色主题下黑→底的过渡会显出暗带。已改用 `DshTheme.WithAlpha`。其余项（M1 复制 1000ms / M2 气泡 0.702,82% / M4 间距 4-12-16 / M5 阈值 24+1 / M6 34×34 距底16 / M10 11px 灰底 / M12 复制1000ms+默认换行）**逐条核对无误**。新增检查 `run-duration-format-matches-dsh` 与 `composer-mask-fades-from-page-background`，均验过反证。检查 107 → **109** |
 | 2026-11-12 | **M16 策略层落地**。读通 dsh 的 `chat-settings.ts` + `presentation-policy.ts`：四个模式**不是 UI 风格，是一组能力开关**（`FoldCompletedTurns` / `StepGrouping` / `LiveProcessDetail` / `SettledReasoningPreview`）。表逐项照抄，特别注意 **verbose 的 `LiveProcessDetail` 是 false 而非 true**——它不是"看更多"，是"不看实时细节但把过程全摊开"，凭直觉写必错。同时补了 `TurnId` 的传递链路：`ItemAddedEvent` 一直带着它，此前在 `MainWindow` 里被丢掉，而 M15 的分组全靠它 |
 | 2026-11-12 | **修掉一个一直存在的渲染缺陷：设置页的下拉从未显示过**。`new ComboBox()` 在本项目里是 `200x0`——控件树里有、`IsVisible=true`、`items` 也有，就是看不见。根因：`App.axaml` 的 `Application.Styles` 是空的（注释写明不能挂 FluentTheme，会与 Arc token 互相覆盖），原生控件因此没有 ControlTheme。同位置换 `Arc.Button` 渲染正常，确认是"控件缺主题"。**权限预设那个下拉因此在 C5 完成时就是不可点的，而没人发现**。已全部换成 `Arc.SegmentedControl`，并加检查禁止设置页出现原生 `ComboBox` |
+| 2026-11-27 | **P8d `D1`（工作区浏览器）落地（P8d 14% → 29%，总体 75% → 76%）**。①在 `Ui.Core/WorkspaceCatalog.cs` 实现会话分组/扁平投影与 dsh rc.3 `WorkspacePickerPolicy` / `WorkspacePickerOwner` 单一 owner 契约（无锚点不弹菜单、列表就绪且 0 工作区直开 `directoryFlow` 洞），并在 `AppSettings` 独立持久化 `activeWorkspace` / `recentWorkspaces` / `sessionListMode`（同时修补 `AppShell.SaveRightbarWidth` 之前覆盖偏好字段的问题）；②新建 `Shell/WorkspacePickerFactory.cs`，由同一 owner 驱动空白会话 Hero chip（补齐 M7）与侧栏工具栏两个表面；③`SidebarView` 落地按工作区分组（每工作区一可折叠 `SidebarSection`，活动工作区置顶）与扁平列表（「全部会话」按最近活动倒序 + 多工作区标签前缀）切换；④`ListDirectoryCommand` 补可空 `Workspace`（零线格式破坏），`MainWindow` 接通工作区切换 → 右栏文件树/终端工作目录/新建会话全链路，并修复侧栏「新会话」按钮只打日志的问题；⑤新增 2 条无头 UI 检查与反证，总检查数 137 → **139**（架构 92 + 无头 47） |
 | 2026-11-27 | **P8d `D4`（Trajectory 视图）落地（P8d 0% → 14%，总体 73% → 75%）**。①在 `Ui.Core/TrajectoryProjection.cs` 新增纯 C# 投影与 `TrajectorySessionStore`，按真实时间戳与耗时将每轮 `ReasoningItem`、`ToolCallItem`（审批等待拆为 `Waiting` 斜纹段 + 执行为 `Tool` 实心段 + 失败诊断）、`AssistantMessageItem` 以及 `SubagentInfo`（子智能体分行 + 派发/返回双 `Handoff`）映射为时间轴模型；②新建 `Shell/TrajectoryPanel.cs` 封装 Arc `AgentTimeline`（完整中文化 `AgentTimelineLabels`、`SegmentedControl` 多轮切换、`SpanSelected` 钉选详情条、运行中自动 `IsLive=true`）；③接入 `RightDock`「轨迹」tab（共 6 tab / 6 pane）与 `MainWindow` 实时事件及 `DOUGONG_UI_TRAJECTORY=1` 开关；④新增 2 条无头 UI 检查与反证，总检查数 135 → **137**（架构 92 + 无头 45） |
 | 2026-11-27 | **P8f `F3 + F4` 落地：右栏交互式终端打通（P8f 40% → 80%，总体 69% → 73%）**。①在 `Services/PtySession.cs` 实现零 `unsafe` 的跨平台 `IPtySession` 适配层（macOS/Linux `forkpty` + `ioctl(TIOCSWINSZ)` + ARM64 变参栈对齐 + fork 前 `Marshal.PrelinkAll` + 首包输出缓冲 + `SIGHUP`/`SIGKILL` 回收；Windows 原生 `ConPTY`）；②`TerminalPanel` 完成 `IPtySession` ↔ `TerminalCore` ↔ `TerminalView` ↔ `InputEncoder` 双向接线，含 UI 线程合并消费、`WriteToPty` 查询应答、键盘/文本/IME/粘贴/滚轮/焦点/自适应 `GridSizeFor` 以及顶部工具栏（Arc `Button` Ghost/Small 清屏与重启）；③`RightDock` 注入工作区路径、切 tab 保活、`IDisposable` 接入 `MainWindow.Closed` 防孤儿进程；④更新 `dock-unimplemented-tabs-are-labeled`，新增 2 条无头 UI 检查与反证（`terminal-panel-runs-real-pty-shell` 实测 `echo` + `stty size` = `35 100`、`terminal-panel-encodes-key-input` 验 `ArrowUp`→`ESC[A` 与 DA1 应答），总检查数 133 → **135**（架构 92 + 无头 43） |
 | 2026-11-27 | **Arc 升 `1.3.2-preview.4` → `1.3.2-preview.6` + 接入 `FeedbackActions` + 清理 `SidebarView` 新 API**。①元数据比对 `1.3.2-preview.6`：`TKCode.Arc` 净增 9 类型（`SelectMenuSizing`、富文本/右键本地化资源），其余 6 包零删零增；②`FeedbackBar` 改用 Arc `FeedbackActions`（`Leading` 放 `CopyButton`、`Trailing` 放时间、中文化 `ResponseFeedbackLabels`、`PrivacyNote=null`，顺带补齐 M3 复制与时间）；③`SidebarView` 启用 `ExpandedWidth=280`、`ItemInvoked`（删掉手写 `RelayCommand`）、`MoreKey` 标 `IsAction=true`、新会话卡片改用 `Arc.Button(Secondary)`。新增 2 条无头检查与反证（无头 39 → 41，总计 133 条） |

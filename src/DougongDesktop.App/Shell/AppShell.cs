@@ -565,12 +565,42 @@ public sealed class AppShell : UserControl
                 TranscriptView = mode,
                 CollapseTiming = timing,
                 FoldedReplies = replies,
+                ActiveWorkspace = _settings.ActiveWorkspace,
+                RecentWorkspaces = _settings.RecentWorkspaces,
+                SessionListMode = _settings.SessionListMode,
             };
             _settings.Save(_store);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[shell] 保存工作详情偏好失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>保存工作区偏好（活动工作区、最近列表与侧栏分组/扁平模式，P8d D1）。</summary>
+    public void SaveWorkspacePreferences(
+        string? activeWorkspace,
+        IReadOnlyList<string> recentWorkspaces,
+        SessionListMode listMode)
+    {
+        try
+        {
+            _settings = new AppSettings
+            {
+                PaneSizes = _settings.PaneSizes,
+                RightbarWidth = _settings.RightbarWidth,
+                TranscriptView = _settings.TranscriptView,
+                CollapseTiming = _settings.CollapseTiming,
+                FoldedReplies = _settings.FoldedReplies,
+                ActiveWorkspace = activeWorkspace,
+                RecentWorkspaces = recentWorkspaces.Count > 0 ? [.. recentWorkspaces] : null,
+                SessionListMode = WorkspaceCatalog.FormatMode(listMode),
+            };
+            _settings.Save(_store);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[shell] 保存工作区偏好失败：{ex.Message}");
         }
     }
 
@@ -667,8 +697,18 @@ public sealed class AppShell : UserControl
         try
         {
             var current = AppSettings.Load(_store);
-            new AppSettings { PaneSizes = current.PaneSizes, RightbarWidth = width }
-                .Save(_store);
+            _settings = new AppSettings
+            {
+                PaneSizes = current.PaneSizes,
+                RightbarWidth = width,
+                TranscriptView = current.TranscriptView,
+                CollapseTiming = current.CollapseTiming,
+                FoldedReplies = current.FoldedReplies,
+                ActiveWorkspace = current.ActiveWorkspace,
+                RecentWorkspaces = current.RecentWorkspaces,
+                SessionListMode = current.SessionListMode,
+            };
+            _settings.Save(_store);
         }
         catch (Exception ex)
         {

@@ -67,6 +67,9 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
     /// <summary>会话轨迹聚合仓库（P8d D4），按轮次把实时事件投影给右栏 Trajectory tab。</summary>
     private readonly TrajectorySessionStore _trajectory = new();
 
+    /// <summary>工作区选择器唯一 owner（P8d D1）：空白 Hero 与侧栏共用同一份状态。</summary>
+    private readonly WorkspacePickerOwner _workspaceOwner = new();
+
     /// <summary>设置面板（P8c），惰性构建——不进设置页就不该付构造成本。</summary>
     private SettingsView? _settingsView;
 
@@ -175,6 +178,22 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         Content = shell;
         Shell = shell;
 
+        // P8d D1：工作区偏好从 AppSettings 恢复，两个 picker 表面（EmptyHero + 侧栏）共用 _workspaceOwner。
+        var initialWorkspace = shell.Settings.ActiveWorkspace
+            ?? Environment.GetEnvironmentVariable("DOUGONG_WORKSPACE")
+            ?? Environment.CurrentDirectory;
+        _workspaceOwner.Initialize(
+            activeWorkspace: initialWorkspace,
+            recentWorkspaces: shell.Settings.RecentWorkspaces,
+            listMode: WorkspaceCatalog.ParseMode(shell.Settings.SessionListMode),
+            isReady: false);
+
+        _conversation.AttachWorkspacePicker(_workspaceOwner);
+        _workspaceOwner.WorkspaceChanged += OnWorkspaceChanged;
+        _workspaceOwner.ListModeChanged += OnSessionListModeChanged;
+        _workspaceOwner.DirectoryFlowRequested += surface => _ = PickWorkspaceDirectoryAsync();
+        RefreshSidebar();
+
 
         // 标题栏左侧内容注入 ArcWindow 的 TitleBar。
         // 必须在这里做：AppShell 构造时才 BuildTitlebar() 生成内容，
@@ -197,7 +216,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         _conversation.StopRequested += () => _ = StopTurnAsync();
 
         // 右栏：点目录进入、点文件选中（选中目前只记日志，P8d 的交付物视图再用）
-        _rightDock.WorkingDirectory = Environment.CurrentDirectory;
+        _rightDock.WorkingDirectory = _workspaceOwner.ActiveWorkspace ?? Environment.CurrentDirectory;
         _rightDock.DirectoryRequested += path => _ = RequestDirectoryAsync(path);
         _rightDock.DirectoryUpRequested += path => _ = RequestDirectoryAsync(path);
         _rightDock.FileSelected += path =>
@@ -575,7 +594,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         _ when module.Id == "builtin.settings" => BuildSettingsPanel(),
 
         BuiltInModuleKind.Sidebar => SidebarView.Build(
-            _currentSessions, _connectionDetail, _selectedSessionId, OnSidebarSelect),
+            _currentSessions, _connectionDetail, _selectedSessionId, OnSidebarSelect, _workspaceOwner),
 
         BuiltInModuleKind.StatusCapsule => _capsule,
 
@@ -720,6 +739,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
             case SessionListedEvent listed:
                 Console.Error.WriteLine($"[ui] 会话列表：{listed.Sessions.Count} 条");
                 _currentSessions = listed.Sessions;
+                _workspaceOwner.SyncSessions(listed.Sessions);
                 RefreshSidebar();
                 break;
 
@@ -847,6 +867,9 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                         _conversation.Add(item, turn.Id);
                 _trajectory.LoadSnapshot(opened.Snapshot);
                 RefreshTrajectory();
+
+                if (!string.IsNullOrWhiteSpace(opened.Snapshot.Workspace))
+                    _workspaceOwner.AddWorkspace(opened.Snapshot.Workspace, select: true);
 
                 // 新会话建立：把挂起的第一条消息补发出去
                 if (_pendingFirstMessage is { Length: > 0 } first)
@@ -988,7 +1011,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 await _engine.SendAsync(new CreateSessionCommand
                 {
                     RequestId = Guid.NewGuid().ToString("N"),
-                    Workspace = Environment.CurrentDirectory,
+                    Workspace = _workspaceOwner.ActiveWorkspace ?? Environment.CurrentDirectory,
                     Title = text.Length > 24 ? text[..24] : text,
                 });
 
@@ -1164,6 +1187,7 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
             {
                 RequestId = Guid.NewGuid().ToString("N"),
                 Path = path,
+                Workspace = _workspaceOwner.ActiveWorkspace,
             });
         }
         catch (Exception ex)
@@ -1246,7 +1270,12 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
                 break;
 
             case SidebarView.NewSessionKey:
-                Console.Error.WriteLine("[ui] 新建会话（P4 接入）");
+                _conversation.Clear();
+                _trajectory.Clear();
+                RefreshTrajectory();
+                _vm.ActivePanel = ReservedSlots.Conversation;
+                _selectedSessionId = null;
+                RefreshSidebar();
                 break;
 
             case "__offline":
@@ -1277,6 +1306,49 @@ public sealed class MainWindow : TKCode.Arc.ArcWindow
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[ui] 打开会话失败：{ex.Message}");
+        }
+    }
+
+    private void OnWorkspaceChanged(string workspace)
+    {
+        _rightDock.WorkingDirectory = workspace;
+        Shell?.SaveWorkspacePreferences(
+            _workspaceOwner.ActiveWorkspace,
+            _workspaceOwner.RecentWorkspaces,
+            _workspaceOwner.ListMode);
+        RefreshSidebar();
+        _ = RequestDirectoryAsync(string.Empty);
+    }
+
+    private void OnSessionListModeChanged(SessionListMode mode)
+    {
+        Shell?.SaveWorkspacePreferences(
+            _workspaceOwner.ActiveWorkspace,
+            _workspaceOwner.RecentWorkspaces,
+            mode);
+        RefreshSidebar();
+    }
+
+    private async Task PickWorkspaceDirectoryAsync()
+    {
+        try
+        {
+            var provider = StorageProvider;
+            if (provider is null || !provider.CanPickFolder) return;
+
+            var picked = await provider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+            {
+                Title = "选择工作区目录",
+                AllowMultiple = false,
+            });
+
+            var local = picked.FirstOrDefault()?.Path.LocalPath;
+            if (!string.IsNullOrWhiteSpace(local))
+                _workspaceOwner.AddWorkspace(local, select: true);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ui] 选择工作区目录失败：{ex.Message}");
         }
     }
 

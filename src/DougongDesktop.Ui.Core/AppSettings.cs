@@ -84,6 +84,18 @@ public sealed class AppSettings
     [JsonPropertyName("foldedReplies")]
     public string? FoldedReplies { get; init; }
 
+    /// <summary>上次选中的工作区目录（P8d D1）。</summary>
+    [JsonPropertyName("activeWorkspace")]
+    public string? ActiveWorkspace { get; init; }
+
+    /// <summary>最近打开过的工作区列表（P8d D1）。</summary>
+    [JsonPropertyName("recentWorkspaces")]
+    public string[]? RecentWorkspaces { get; init; }
+
+    /// <summary>侧栏会话排列方式（<c>"grouped"</c> / <c>"flat"</c>，P8d D1）。</summary>
+    [JsonPropertyName("sessionListMode")]
+    public string? SessionListMode { get; init; }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -134,6 +146,15 @@ public sealed class AppSettings
             // 是完全合法的场景（新用户第一次改工作详情就是这样），
             // 那时两项都是 false，整份设置被扔，偏好永远存不下来。
             // 检查 `工作详情落盘往返` 抓到的。
+            var recentWorkspaces = loaded.RecentWorkspaces?
+                .Select(WorkspaceCatalog.NormalizePath)
+                .Where(p => p.Length > 0)
+                .Distinct(WorkspaceCatalog.PathComparer)
+                .Take(WorkspaceCatalog.MaxRecentWorkspaces)
+                .ToArray();
+
+            var activeWorkspace = WorkspaceCatalog.NormalizePath(loaded.ActiveWorkspace);
+
             return new AppSettings
             {
                 PaneSizes = paneSizesOk ? loaded.PaneSizes : null,
@@ -142,6 +163,9 @@ public sealed class AppSettings
                 TranscriptView = loaded.TranscriptView,
                 CollapseTiming = loaded.CollapseTiming,
                 FoldedReplies = loaded.FoldedReplies,
+                ActiveWorkspace = activeWorkspace.Length > 0 ? activeWorkspace : null,
+                RecentWorkspaces = recentWorkspaces is { Length: > 0 } ? recentWorkspaces : null,
+                SessionListMode = loaded.SessionListMode,
             };
         }
         catch
